@@ -1,0 +1,10 @@
+# Ignore Cache
+__pycache__/
+.ipynb_checkpoints/
+.vscode/
+
+# Collected data
+output/
+
+# session_file.session
+session_file.session
