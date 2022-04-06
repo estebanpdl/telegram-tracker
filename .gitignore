@@ -8,3 +8,6 @@ output/
 
 # session_file.session
 session_file.session
+
+# Config ini file
+config/config.ini
