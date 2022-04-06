@@ -234,11 +234,14 @@ def msg_attrs(msg, res):
 		'PeerUser': 'user_id'
 	}
 
-	id_key = parser[t]
-	from_id = msg['from_id'][id_key]
+	try:
+		id_key = parser[t]
+		from_id = msg['from_id'][id_key]
 
-	res['msg_from_peer'] = t
-	res['msg_from_id'] = from_id
+		res['msg_from_peer'] = t
+		res['msg_from_id'] = from_id
+	except KeyError:
+		pass
 
 	return res
 
@@ -257,7 +260,7 @@ def get_channel_name(channel_id, channels):
 	return channel_name
 
 # Get forward attrs
-def get_forward_attrs(msg, res):
+def get_forward_attrs(msg, res, channels_data):
 	'''
 	'''
 	date = msg['date']
@@ -267,7 +270,7 @@ def get_forward_attrs(msg, res):
 	from_id = msg['from_id']
 	if from_id:
 		channel_id = from_id['channel_id']
-		channel_name = get_channel_name(channel_id)
+		channel_name = get_channel_name(channel_id, channels_data)
 	else:
 		channel_id = None
 		channel_name = None

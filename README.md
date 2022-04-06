@@ -148,7 +148,6 @@ python main.py --telegram-channel channelname --min-id 12345
 - JSON file containing new messages posted after the requested ID (min ID)
 
 ---
-<<<<<<< HEAD
 
 ## build-datasets.py
 

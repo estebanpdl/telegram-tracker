@@ -13,8 +13,9 @@ from tqdm import tqdm
 # import local submodules
 from utils import (
 	msgs_dataset_columns, chats_dataset_columns, clean_msg,
-	msg_attrs, get_forward_attrs, get_url_attrs, get_document_attrs,
-	get_poll_attrs, get_contact_attrs, get_geo_attrs, timestamp_attrs
+	msg_attrs, get_forward_attrs, get_reply_attrs, get_url_attrs,
+	get_document_attrs, get_poll_attrs, get_contact_attrs,
+	get_geo_attrs, timestamp_attrs
 )
 
 # log results
@@ -67,7 +68,6 @@ for f in json_files:
 	username = f.split('.json')[0].replace('\\', '/').split('/')[-1].replace('_messages', '')
 
 	# Echo
-	print ('')
 	print (f'Reading data from channel -> {username}')
 
 	# read JSON file
@@ -136,7 +136,7 @@ for f in json_files:
 	'''
 	messages = obj['messages']
 	pbar = tqdm(total=len(messages))
-	pbar.set_description(f' Reading posts')
+	pbar.set_description(f'Reading posts')
 
 	# main object
 	response = {
@@ -179,7 +179,18 @@ for f in json_files:
 			response['from_channel_id'] = None
 			response['from_channel_name'] = None
 			if forward_attrs:
-				response = get_forward_attrs(forward_attrs, response)
+				response = get_forward_attrs(
+					forward_attrs,
+					response,
+					data
+				)
+
+			# Reply attrs
+			response = get_reply_attrs(
+				item,
+				response,
+				username
+			)
 
 			# Media
 			response['contains_media'] = 1 if item['media'] != None else 0
