@@ -1,5 +1,16 @@
 # Telegram API
 
+---
+
+[![GitHub stars](https://badgen.net/github/stars/DFRLab/digitalsherlocks)](https://GitHub.com/DFRLab/digitalsherlocks/stargazers/)
+[![GitHub watchers](https://img.shields.io/github/watchers/DFRLab/digitalsherlocks.svg?style=social&label=Watch&maxAge=2592000)](https://GitHub.com/DFRLab/digitalsherlocks/watchers/)
+[![Twitter estebanpdl](https://badgen.net/badge/icon/twitter?icon=twitter&label)](https://twitter.com/estebanpdl)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/DFRLab/digitalsherlocks/blob/main/LICENCE)
+[![Open Source](https://badges.frapsoft.com/os/v1/open-source.svg?v=103)](https://www.digitalsherlocks.org/)
+[![Made-with-python](https://img.shields.io/badge/Made%20with-Python-1f425f.svg)](https://www.python.org/)
+
+---
+
 ## Overview
 
 It connects to Telegram's API. It generates JSON files containing channel's data, including channel's information and posts. You can search for a specific channel, or a set of channels provided in a text file (one channel per line.)
