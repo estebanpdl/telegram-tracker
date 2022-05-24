@@ -139,7 +139,10 @@ def write_collected_chats(
 								ch['participants_count'] = channel_request['full_chat']['participants_count']
 							else:
 								ch_id = ch['id']
-								ch['participants_count'] = process_participants_count(client, ch_id)
+								try:
+									ch['participants_count'] = process_participants_count(client, ch_id)
+								except TypeError:
+									ch['participants_count'] = 0
 
 								# write new id
 								if ch['username'] != None:
