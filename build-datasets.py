@@ -46,17 +46,9 @@ data['replies_received'] = 0
 
 # Process posts < init empty dataset >
 dataset_columns = msgs_dataset_columns()
-df = pd.DataFrame(
-	columns=dataset_columns
-)
 
 # Save dataset
 msgs_file_path = './output/msgs_dataset.csv'
-df.to_csv(
-	msgs_file_path,
-	index=False,
-	encoding='utf-8'
-)
 
 # JSON files
 for f in json_files:
@@ -65,7 +57,9 @@ for f in json_files:
 	Iterate JSON files
 	'''
 	#  Get channel name
-	username = f.split('.json')[0].replace('\\', '/').split('/')[-1].replace('_messages', '')
+	username = f.split('.json')[0].replace('\\', '/').split('/')[-1].replace(
+		'_messages', ''
+	)
 
 	# Echo
 	print (f'Reading data from channel -> {username}')
@@ -159,7 +153,8 @@ for f in json_files:
 
 			# Signature and Message link
 			msg_id = item['id']
-			response['signature'] = f'msg_iteration.{idx}.user.{username}.post.{msg_id}'
+			response['signature'] = \
+				f'msg_iteration.{idx}.user.{username}.post.{msg_id}'
 			response['msg_link'] = f'https://t.me/{username}/{msg_id}'
 
 			# Check peer
@@ -167,7 +162,8 @@ for f in json_files:
 
 			# Reactions
 			response['views'] = item['views']
-			response['number_replies'] = item['replies']['replies'] if item['replies'] != None else 0
+			response['number_replies'] = \
+				item['replies']['replies'] if item['replies'] != None else 0
 			response['number_forwards'] = item['forwards']
 
 			# Forward attrs
@@ -194,44 +190,43 @@ for f in json_files:
 
 			# Media
 			response['contains_media'] = 1 if item['media'] != None else 0
-			response['media_type'] = None if item['media'] == None else item['media']['_']
+			response['media_type'] = None if item['media'] == None \
+				else item['media']['_']
 
 			# URLs
 			response = get_url_attrs(item['media'], response)
-			response['document_type'], response['video_duration_secs'] = get_document_attrs(item['media'], response)
+			response['document_type'], response['video_duration_secs'] = \
+				get_document_attrs(item['media'], response)
 
 			# Polls
-			response['poll_question'], response['poll_number_results'] = get_poll_attrs(item['media'], response)
+			response['poll_question'], response['poll_number_results'] = \
+				get_poll_attrs(item['media'], response)
 
 			# Contact
-			response['contact_phone_number'], response['contact_name'], response['contact_userid'] = get_contact_attrs(
-				item['media'],
-				response
-			)
+			response['contact_phone_number'], response['contact_name'], \
+				response['contact_userid'] = get_contact_attrs(
+					item['media'],
+					response
+				)
 
 			# Geo attrs
 			response = get_geo_attrs(item['media'], response)
 
+			# create dataframe
+			df = pd.json_normalize(response)
+			
+			# Update CSV file
+			df.to_csv(
+				msgs_file_path,
+				encoding='utf-8',
+				header=True if not os.path.exists(msgs_file_path) else False,
+				index=False,
+				mode='a'
+			)
 
 		except KeyError:
 			pass
-
-		tmp = df.append(response, ignore_index=True)
-
-		# Process date
-		tmp = timestamp_attrs(tmp)
-		tmp = tmp[df.columns.tolist()].copy()
-
-		# Update CSV file
-		tmp.to_csv(
-			msgs_file_path,
-			encoding='utf-8',
-			header=False,
-			index=False,
-			mode='a'
-
-		)
-
+		
 		# Update pbar
 		pbar.update(1)
 
