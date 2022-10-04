@@ -2,6 +2,7 @@
 
 # import modules
 import pandas as pd
+import argparse
 import json
 import glob
 import time
@@ -18,6 +19,32 @@ from utils import (
 	get_geo_attrs, timestamp_attrs
 )
 
+'''
+
+Arguments
+
+'''
+
+parser = argparse.ArgumentParser(description='Arguments.')
+parser.add_argument(
+	'--data-path',
+	'-d',
+	type=str,
+	required=False,
+	help='Path where data is located. Will use `./output/data` if not given.'
+)
+
+# Parse arguments
+args = vars(parser.parse_args())
+
+# get main path
+if args['data_path']:
+	main_path = args['data_path']
+	if main_path.endswith('/'):
+		main_path = main_path[:-1]
+else:
+	main_path = './output/data'
+
 # log results
 text = f'''
 Init program at {time.ctime()}
@@ -26,13 +53,13 @@ Init program at {time.ctime()}
 print (text)
 
 # Collect JSON files
-json_files_path = './output/data/*_messages.json'
+json_files_path = f'{main_path}/*_messages.json'
 json_files = glob.glob(
 	os.path.join(json_files_path)
 )
 
 # Collected channels
-chats_file_path = './output/collected_chats.csv'
+chats_file_path = f'{main_path}/collected_chats.csv'
 data = pd.read_csv(chats_file_path, encoding='utf-8')
 
 # Init values
@@ -48,7 +75,7 @@ data['replies_received'] = 0
 dataset_columns = msgs_dataset_columns()
 
 # Save dataset
-msgs_file_path = './output/msgs_dataset.csv'
+msgs_file_path = f'{main_path}/msgs_dataset.csv'
 
 # JSON files
 for f in json_files:
@@ -219,7 +246,7 @@ for f in json_files:
 			df.to_csv(
 				msgs_file_path,
 				encoding='utf-8',
-				header=True if not os.path.exists(msgs_file_path) else False,
+				header=not os.path.isfile(msgs_file_path),
 				index=False,
 				mode='a'
 			)

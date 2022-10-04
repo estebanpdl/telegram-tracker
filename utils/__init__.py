@@ -84,7 +84,8 @@ def write_collected_chats(
 		source,
 		counter,
 		req_type,
-		client
+		client,
+		output_folder
 	):
 	'''
 
@@ -94,6 +95,7 @@ def write_collected_chats(
 	counter -> dict object to count mentioned channels
 	req_type -> request type (channel request or from messages)
 	client -> Telegram API client
+	output_folder -> Folder to save collected data
 
 	'''
 	metadata = []
@@ -180,7 +182,7 @@ def write_collected_chats(
 			pass
 
 	df = pd.DataFrame(metadata)
-	csv_path = './output/collected_chats.csv'
+	csv_path = f'{output_folder}/collected_chats.csv'
 	df.to_csv(
 		csv_path,
 		encoding='utf-8',

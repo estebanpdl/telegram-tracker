@@ -3,6 +3,7 @@
 # import modules
 import ast
 import time
+import argparse
 import pandas as pd
 import networkx as nx
 
@@ -13,6 +14,34 @@ from community import community_louvain
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 
+
+'''
+
+Arguments
+
+'''
+
+parser = argparse.ArgumentParser(description='Arguments.')
+parser.add_argument(
+	'--data-path',
+	'-d',
+	type=str,
+	required=False,
+	help='Path where data is located. Will use `./output/data` if not given.'
+)
+
+# Parse arguments
+args = vars(parser.parse_args())
+
+# get main path
+if args['data_path']:
+	main_path = args['data_path']
+	if main_path.endswith('/'):
+		main_path = main_path[:-1]
+else:
+	main_path = './output/data'
+
+
 # log results
 text = f'''
 Init program at {time.ctime()}
@@ -22,7 +51,7 @@ print (text)
 
 # Read collected chats data
 print ('Creating network graph')
-chats_file_path = './output/collected_chats.csv'
+chats_file_path = f'{main_path}/collected_chats.csv'
 chats_file = pd.read_csv(
 	chats_file_path,
 	encoding='utf-8'
@@ -70,7 +99,7 @@ G = nx.from_pandas_edgelist(
 )
 
 # Save network data
-network_path = './output/Graph.gexf'
+network_path = f'{main_path}/Graph.gexf'
 nx.write_gexf(G, network_path)
 print ('Saved')
 
