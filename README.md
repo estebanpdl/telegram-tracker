@@ -1,37 +1,27 @@
 <div align="center">
 
-# Telegram API
+# **Telegram-API**: `a Python-based open-source tool for Telegram`
 
 ---
 
+[![GitHub forks](https://img.shields.io/github/forks/DFRLab/digitalsherlocks.svg?style=social&label=Fork&maxAge=2592000)](https://GitHub.com/estebanpdl/tg-api/network/)
 [![GitHub stars](https://badgen.net/github/stars/estebanpdl/tg-api)](https://GitHub.com/estebanpdl/tg-api/stargazers/)
+[![GitHub watchers](https://img.shields.io/github/watchers/DFRLab/digitalsherlocks.svg?style=social&label=Watch&maxAge=2592000)](https://GitHub.com/estebanpdl/tg-api/watchers/)
 [![GitHub watchers](https://img.shields.io/github/watchers/estebanpdl/tg-api.svg?style=social&label=Watch&maxAge=2592000)](https://GitHub.com/estebanpdl/tg-api/watchers/)
 [![Twitter estebanpdl](https://badgen.net/badge/icon/twitter?icon=twitter&label)](https://twitter.com/estebanpdl)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/estebanpdl/tg-api/blob/main/LICENCE)
 [![Open Source](https://badges.frapsoft.com/os/v1/open-source.svg?v=103)](https://www.digitalsherlocks.org/)
 [![Made-with-python](https://img.shields.io/badge/Made%20with-Python-1f425f.svg)](https://www.python.org/)
+[![Twitter estebanpdl](https://badgen.net/badge/icon/twitter?icon=twitter&label)](https://twitter.com/estebanpdl)
 
 ---
 </div>
 
 ## Overview
 
-It connects to Telegram's API. It generates JSON files containing channel's data, including channel's information and posts. You can search for a specific channel, or a set of channels provided in a text file (one channel per line.)
+This tool connects to Telegram's API. It generates JSON files containing channel's data, including channel's information and posts. You can search for a specific channel, or a set of channels provided in a text file (one channel per line.)
 
-Files are saved by default in a folder called *output/data*. These folders are created by the script.
-
-```
-├──🗂 Telegram-api
-|   └──main.py
-|   └──🗂 config
-|   	└──config.ini
-|   └──🗂 output
-|   	└──collected_chats.csv
-|   	└──🗂 data
-|   		└──file_messages.json
-|   		└──channel.json
-|   		└──etc.
-```
+Files are saved by default in a folder called *output/data*. These folders are created by the script. You can also give a specific output directory to store collected data.
 
 **Software required**
 
@@ -61,11 +51,11 @@ Installing
 git clone https://github.com/estebanpdl/telegram-api.git
 ```
 
-This will create a directory called `tg-api` which contains the Python scripts. Cloning allows you to easily upgrade and switch between available releases.
+This will create a directory called `telegram-api` which contains the Python scripts. Cloning allows you to easily upgrade and switch between available releases.
 
 - **From the github download button**
 
-Download the ZIP file from github and use your favorite zip utility to unpack the file `tg-api.zip` on your preferred location.
+Download the ZIP file from github and use your favorite zip utility to unpack the file `telegram-api.zip` on your preferred location.
 
 **After cloning or downloding the repository, install the libraries from `requirements.txt`.**
 
@@ -89,11 +79,15 @@ api_hash = api_hash
 phone = phone
 ```
 
+*Note: Your phone must be included to authenticate for the first time. Use the format +\<code>\<number> (e.g., +19876543210). Telegram API will send you a code via Telegram app that you will need to include.*
+
+<br />
+
 ---
 
 # Example usage
 
-## main.py
+## `main.py`
 
 This Python script will connect to Telegram's API and handle your API request.
 
@@ -102,12 +96,35 @@ This Python script will connect to Telegram's API and handle your API request.
 * `--telegram-channel` Specifies Telegram Channel to download data from.
 * `--batch-file` File containing Telegram Channels to download data from, one channel per line.
 * `--limit-download-to-channel-metadata` Will collect channels metadata only, not channel's messages. (default = False)
+* `--output, -o` Specifies a folder to save collected data. If not given, script will generate a default folder called `./output/data`
 * `--min-id` Specifies the offset id. This will update Telegram data with new posts.
 
+<br />
 
-**Examples**
+### Structure of output data
 
-### Basic request
+```
+├──🗂 output
+|   └──🗂 data
+|   	└──🗂 <channel_name>
+|   		└──<channel_name>.json
+|   		└──<channel_name>_messages.json
+|   	└──chats.txt // TM channels, groups, or users' IDs found in data.
+|   	└──collected_chats.csv // TM channels or groups found in data (e.g., forwards)
+|   	└──collected_chats.xlsx // TM channels or groups found in data (e.g., forwards)
+|   	└──counter.csv // TM channels, groups or users found in data (e.g., forwards)
+|   	└──user_exceptions.txt // From collected_chats, these are mostly TM users' which 
+|									metadata was not possible to retrieve via the API
+|   	└──msgs_dataset.csv // Posts and messages from the requested channels
+```
+
+<br />
+
+## **Examples**
+
+<br />
+
+### **Basic request**
 
 ```
 python main.py --telegram-channel channelname`
@@ -115,13 +132,18 @@ python main.py --telegram-channel channelname`
 
 **Expected output**
 
-- Excel file of collected channels
-- JSON file containing channel's profile metadata
-- JSON file containing posts from the requested channel
+- Files of collected channels:
+	- chats.txt
+	- collected_chats.csv
+	- user_exceptions.txt
+	- counter.csv
+- A new folder: *<channel_name>* containing
+	- A JSON file containing channel's profile metadata
+	- A JSON file containing posts from the requested channel
 
 <br />
 
-### Request using a text file containing a set of channels
+### **Request using a text file containing a set of channels**
 
 ```
 python main.py --batch-file './path/to/channels_text_file.txt'
@@ -129,13 +151,20 @@ python main.py --batch-file './path/to/channels_text_file.txt'
 
 **Expected output**
 
-- Excel file of collected channels
-- JSON files containing channels' profile metadata
-- JSON files containing posts from each requested channel
+- Files of collected channels:
+	- chats.txt
+	- collected_chats.csv
+	- user_exceptions.txt
+	- counter.csv
+- New folders - based on the number of requested channels: *<channel_name>* containing
+	- A JSON file containing channel's profile metadata
+	- A JSON file containing posts from the requested channel
 
 These examples will retrieve all posts available through the API from the requested channel. If you want to collect channel's information only, without posts, you can run:
 
-### Limit download to channel's metadata only
+<br />
+
+### **Limit download to channel's metadata only**
 
 ```
 python main.py --telegram-channel channelname --limit-download-to-channel-metadata
@@ -147,7 +176,9 @@ or, using a set of telegram channels via a text file:
 python main.py --batch-file './path/to/channels_text_file.txt' --limit-download-to-channel-metadata
 ```
 
-### Updating channel's data
+<br />
+
+### **Updating channel's data**
 
 If you want to collect new messages from one channel, you need to identify the message ID from the last post. Once you identify the id, run:
 
@@ -157,42 +188,75 @@ python main.py --telegram-channel channelname --min-id 12345
 
 **Expected output**
 
-- Excel file of collected channels - based on new messages
-- JSON file containing channel's profile metadata
-- JSON file containing new messages posted after the requested ID (min ID)
+- Files of collected channels:
+	- chats.txt
+	- collected_chats.csv
+	- user_exceptions.txt
+	- counter.csv
+- A new folder: *<channel_name>* containing
+	- A JSON file containing channel's profile metadata
+	- A JSON file containing posts from the requested channel
+
+<br />
+
+### **Specify output folder**
+
+The script allows you to specify a specific output directory to save collected data. The sxcript will create those folders in case do not exist.
+
+```
+python main.py --telegram-channel channelname --output ./path/to/chosen/directory`
+```
+
+The expected output is the same a described above but data will be save using the chosen directory.
+
+<br />
 
 ---
 
-## build-datasets.py
+## `build-datasets.py`
+
+This Python script reads the collected files and creates a new dataset containing messages from the requested channels. By default, the created dataset will be located in the `output` folder.
+
+If you provided a specific directory to save collected data, you need to provide the same path to use this script.
+
+### Options
+
+* `--data-path` Path were data is located. Will use `./output/data` if not given.
+
+If a specific directory was not provided in `main.py`, run:
 
 ```
 python build-datasets.py
 ```
 
-This Python script reads the collected files and creates a new dataset containing messages from the requested channels. By default, the created dataset in CSV format will be located in the `output` folder.
+If you provided a specific directory using the option `--output` in `main.py`, run:
 
 ```
-├──🗂 Telegram-api
-|   └──main.py
-|   └──🗂 output
-|   	└──msgs_dataset.csv
+python build-datasets.py --data-path ./path/to/chosen/directory
 ```
+
+These option will create the above-mentioned dataset: `msgs_dataset.csv`, a file containing posts and messages from the requested channels.
+
+<br />
 
 ---
 
-## channels-to-network.py
+## `channels-to-network.py`
+
+This Python script builds a network graph. By default, the file will be located in the `output` folder. The script also saves a preliminary graph: `network.png` using the modules matplotlib, networkx, and python-louvain, which implements community detection. You can import the GEFX Graph File using different softwares, including Gephi.
+
+### Options
+
+* `--data-path` Path were data is located. Will use `./output/data` if not given.
+
+If a specific directory was not provided in `main.py`, run:
 
 ```
 python channels-to-network.py
 ```
 
-This Python script builds a network graph. By default, the file will be located in the `output` folder. The script also shows a preliminary graph using the modules matplotlib, networkx, and python-louvain, which implements community detection. You can use import the graph file in different softwares, including Gephi.
+If you provided a specific directory using the option `--output` in `main.py`, run:
 
 ```
-├──🗂 Telegram-api
-|   └──main.py
-|   └──🗂 output
-|   	└──Graph.gexf
+python channels-to-network.py --data-path ./path/to/chosen/directory
 ```
-
----

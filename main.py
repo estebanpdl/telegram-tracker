@@ -12,7 +12,7 @@ import os
 # import Telegram API submodules
 from api import *
 from utils import (
-	get_config_attrs, JSONEncoder, cmd_request_type,
+	get_config_attrs, JSONEncoder, create_dirs, cmd_request_type,
 	write_collected_chats
 )
 
@@ -134,8 +134,8 @@ if args['output']:
 else:
 	output_folder = './output/data'
 
-if not os.path.exists(output_folder):
-	os.makedirs(f'{output_folder}/', exist_ok=True)
+# Create dirs
+create_dirs(output_folder)
 
 # iterate channels
 for channel in req_input:
@@ -181,7 +181,8 @@ for channel in req_input:
 
 	# save data
 	print ('> Writing channel data...')
-	file_path = f'{output_folder}/{channel}.json'
+	create_dirs(output_folder, subfolders=channel)
+	file_path = f'{output_folder}/{channel}/{channel}.json'
 	channel_obj = json.dumps(
 		full_channel_data,
 		ensure_ascii=False,
@@ -289,7 +290,7 @@ for channel in req_input:
 
 		# save data
 		print ('> Writing posts data...')
-		file_path = f'{output_folder}/{channel}_messages.json'
+		file_path = f'{output_folder}/{channel}/{channel}_messages.json'
 		obj = json.dumps(
 			data,
 			ensure_ascii=False,

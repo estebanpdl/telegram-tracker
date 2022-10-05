@@ -14,6 +14,11 @@ from community import community_louvain
 import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 
+# import local modules
+from utils import (
+	normalize_values
+)
+
 
 '''
 
@@ -66,19 +71,22 @@ source = [
 
 # Remove duplicates
 source = list(set(source))
-channels = chats_file['username'].tolist()
-for user in channels:
-	if user not in source:
-		t = chats_file[
-			chats_file['username'] == user
-		]['source'].iloc[0]
-		t = list(set(ast.literal_eval(t)))
+channels = [
+	(i, j) for i, j in zip(chats_file['username'], chats_file['counter'])
+]
 
-		for i in t:
-			if i in net.keys():
-				net[i].append(user)
+for user, counter in channels:
+	src = chats_file[
+		chats_file['username'] == user
+	]['source'].iloc[0]
+	src = list(set(ast.literal_eval(src)))
+	for i in src:
+		if user != i:
+			targets = [user] * counter
+			if i not in net.keys():
+				net[i] = targets
 			else:
-				net[i] = [user]
+				net[i].extend(targets)
 
 # Create network data
 network_data = pd.concat(
@@ -104,26 +112,41 @@ nx.write_gexf(G, network_path)
 print ('Saved')
 
 # Community louvain -> compute the best partition
-G = nx.from_pandas_edgelist(
+G_louvain = nx.from_pandas_edgelist(
 	network_data,
 	create_using=nx.Graph()
 )
-partition = community_louvain.best_partition(G)
+partition = community_louvain.best_partition(G_louvain)
 
-# Draw graph
+# Pos -> Graph
 pos = nx.spring_layout(G)
 
 # Color the nodes according to their partition
 cmap = cm.get_cmap('viridis', max(partition.values()) + 1)
+
+# plt fig size
+plt.figure(figsize=(16, 10), frameon=False)
+
+# Draw network
+nx.draw_networkx_edges(G, pos, alpha=0.3)
 nx.draw_networkx_nodes(
 	G,
 	pos,
 	partition.keys(),
-	node_size=40,
+	node_size=normalize_values(
+		list(dict(G.degree).items())
+	),
 	cmap=cmap,
-	node_color=list(partition.values())
+	node_color=list(partition.values()),
+	alpha=0.9
 )
-nx.draw_networkx_edges(G, pos, alpha=0.5)
+nx.draw_networkx_labels(
+	G,
+	pos,
+	font_size=9,
+	font_family='georgia',
+	bbox={'facecolor':'white', 'alpha':0.5, 'edgecolor':'#373737'}
+)
 
-# Show
-plt.show()
+# Save image
+plt.savefig(f'{main_path}/network.png')

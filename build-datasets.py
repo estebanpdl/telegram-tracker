@@ -53,9 +53,10 @@ Init program at {time.ctime()}
 print (text)
 
 # Collect JSON files
-json_files_path = f'{main_path}/*_messages.json'
+json_files_path = f'{main_path}/**/*_messages.json'
 json_files = glob.glob(
-	os.path.join(json_files_path)
+	os.path.join(json_files_path),
+	recursive=True
 )
 
 # Collected channels
