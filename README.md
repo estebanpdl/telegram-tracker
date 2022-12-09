@@ -48,11 +48,11 @@ Installing
 git clone https://github.com/estebanpdl/telegram-api.git
 ```
 
-This will create a directory called `telegram-api` which contains the Python scripts. Cloning allows you to easily upgrade and switch between available releases.
+This will create a directory called `telegram-tracker` which contains the Python scripts. Cloning allows you to easily upgrade and switch between available releases.
 
 - **From the github download button**
 
-Download the ZIP file from github and use your favorite zip utility to unpack the file `telegram-api.zip` on your preferred location.
+Download the ZIP file from github and use your favorite zip utility to unpack the file `telegram-tracker.zip` on your preferred location.
 
 **After cloning or downloding the repository, install the libraries from `requirements.txt`.**
 
