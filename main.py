@@ -53,6 +53,7 @@ parser.add_argument(
 	help='Folder to save collected data. Default: `./output/data`'
 )
 
+
 '''
 
 Updating data
@@ -63,7 +64,9 @@ parser.add_argument(
 	help='Specifies the offset id. This will update Telegram data with new posts.'
 )
 
-# Parse arguments
+
+
+# parse arguments
 args = vars(parser.parse_args())
 config_attrs = get_config_attrs()
 
@@ -108,7 +111,7 @@ loop = asyncio.get_event_loop()
 
 '''
 
-# Get `client` connection
+# get `client` connection
 client = loop.run_until_complete(
 	get_connection(sfile, api_id, api_hash, phone)
 )
@@ -124,7 +127,7 @@ if req_type == 'batch':
 else:
 	req_input = [req_input]
 
-# Reading | Creating an output folder
+# reading | Creating an output folder
 if args['output']:
 	output_folder = args['output']
 	if output_folder.endswith('/'):
@@ -134,8 +137,19 @@ if args['output']:
 else:
 	output_folder = './output/data'
 
-# Create dirs
+# create dirs
 create_dirs(output_folder)
+
+
+'''
+
+Methods
+
+- GetHistoryRequest
+- SearchGlobalRequest
+
+'''
+
 
 # iterate channels
 for channel in req_input:
@@ -162,152 +176,161 @@ for channel in req_input:
 		get_entity_attrs(client, channel)
 	)
 
+	if entity_attrs:
 
-	# Get Channel ID | convert output to dict
-	channel_id = entity_attrs.id
-	entity_attrs_dict = entity_attrs.to_dict()
+		# Get Channel ID | convert output to dict
+		channel_id = entity_attrs.id
+		entity_attrs_dict = entity_attrs.to_dict()
 
-	# Collect Source -> GetFullChannelRequest
-	channel_request = loop.run_until_complete(
-		full_channel_req(client, channel_id)
-	)
+		# Collect Source -> GetFullChannelRequest
+		channel_request = loop.run_until_complete(
+			full_channel_req(client, channel_id)
+		)
 
-	# save full channel request
-	full_channel_data = channel_request.to_dict()
-
-	# JsonEncoder
-	full_channel_data = JSONEncoder().encode(full_channel_data)
-	full_channel_data = json.loads(full_channel_data)
-
-	# save data
-	print ('> Writing channel data...')
-	create_dirs(output_folder, subfolders=channel)
-	file_path = f'{output_folder}/{channel}/{channel}.json'
-	channel_obj = json.dumps(
-		full_channel_data,
-		ensure_ascii=False,
-		separators=(',',':')
-	)
-	writer = open(file_path, mode='w', encoding='utf-8')
-	writer.write(channel_obj)
-	writer.close()
-	print ('> done.')
-	print ('')
-
-	# collect chats
-	chats_path = f'{output_folder}/chats.txt'
-	chats_file = open(chats_path, mode='a', encoding='utf-8')
-
-	# channel chats
-	counter = write_collected_chats(
-		full_channel_data['chats'],
-		chats_file,
-		channel,
-		counter,
-		'channel_request',
-		client,
-		output_folder
-	)
-
-	if not args['limit_download_to_channel_metadata']:
-
-		# Collect posts
-		if not args['min_id']:
-			posts = loop.run_until_complete(
-				get_posts(client, channel_id)
-			)
-		else:
-			min_id = args['min_id']
-			posts = loop.run_until_complete(
-				get_posts(client, channel_id, min_id=min_id)
-			)
-
-		data = posts.to_dict()
-
-		# Get offset ID | Get messages
-		offset_id = min([i['id'] for i in data['messages']])
-
-		while len(posts.messages) > 0:
-			
-			if args['min_id']:
-				posts = loop.run_until_complete(
-					get_posts(
-						client,
-						channel_id,
-						min_id=min_id,
-						offset_id=offset_id
-					)
-				)	
-			else:
-				posts = loop.run_until_complete(
-					get_posts(
-						client,
-						channel_id,
-						offset_id=offset_id
-					)
-				)
-
-			# Update data dict
-			if posts.messages:
-				tmp = posts.to_dict()
-				data['messages'].extend(tmp['messages'])
-
-				# Adding unique chats objects
-				all_chats = [i['id'] for i in data['chats']]
-				chats = [
-					i for i in tmp['chats']
-					if i['id'] not in all_chats
-				]
-
-				# channel chats in posts
-				counter = write_collected_chats(
-					tmp['chats'],
-					chats_file,
-					channel,
-					counter,
-					'from_messages',
-					client,
-					output_folder
-				)
-
-				# Adding unique users objects
-				all_users = [i['id'] for i in data['users']]
-				users = [
-					i for i in tmp['users']
-					if i['id'] not in all_users
-				]
-
-				# extend UNIQUE chats & users
-				data['chats'].extend(chats)
-				data['users'].extend(users)
-
-				# Get offset ID
-				offset_id = min([i['id'] for i in tmp['messages']])
+		# save full channel request
+		full_channel_data = channel_request.to_dict()
 
 		# JsonEncoder
-		data = JSONEncoder().encode(data)
-		data = json.loads(data)
+		full_channel_data = JSONEncoder().encode(full_channel_data)
+		full_channel_data = json.loads(full_channel_data)
 
 		# save data
-		print ('> Writing posts data...')
-		file_path = f'{output_folder}/{channel}/{channel}_messages.json'
-		obj = json.dumps(
-			data,
+		print ('> Writing channel data...')
+		create_dirs(output_folder, subfolders=channel)
+		file_path = f'{output_folder}/{channel}/{channel}.json'
+		channel_obj = json.dumps(
+			full_channel_data,
 			ensure_ascii=False,
 			separators=(',',':')
 		)
-		
-		# writer
 		writer = open(file_path, mode='w', encoding='utf-8')
-		writer.write(obj)
+		writer.write(channel_obj)
 		writer.close()
 		print ('> done.')
 		print ('')
 
-	# sleep program for a few seconds
-	if len(req_input) > 1:
-		time.sleep(60)
+		# collect chats
+		chats_path = f'{output_folder}/chats.txt'
+		chats_file = open(chats_path, mode='a', encoding='utf-8')
 
+		# channel chats
+		counter = write_collected_chats(
+			full_channel_data['chats'],
+			chats_file,
+			channel,
+			counter,
+			'channel_request',
+			client,
+			output_folder
+		)
+
+		if not args['limit_download_to_channel_metadata']:
+
+			# Collect posts
+			if not args['min_id']:
+				posts = loop.run_until_complete(
+					get_posts(client, channel_id)
+				)
+			else:
+				min_id = args['min_id']
+				posts = loop.run_until_complete(
+					get_posts(client, channel_id, min_id=min_id)
+				)
+
+			data = posts.to_dict()
+
+			# Get offset ID | Get messages
+			offset_id = min([i['id'] for i in data['messages']])
+
+			while len(posts.messages) > 0:
+				
+				if args['min_id']:
+					posts = loop.run_until_complete(
+						get_posts(
+							client,
+							channel_id,
+							min_id=min_id,
+							offset_id=offset_id
+						)
+					)	
+				else:
+					posts = loop.run_until_complete(
+						get_posts(
+							client,
+							channel_id,
+							offset_id=offset_id
+						)
+					)
+
+				# Update data dict
+				if posts.messages:
+					tmp = posts.to_dict()
+					data['messages'].extend(tmp['messages'])
+
+					# Adding unique chats objects
+					all_chats = [i['id'] for i in data['chats']]
+					chats = [
+						i for i in tmp['chats']
+						if i['id'] not in all_chats
+					]
+
+					# channel chats in posts
+					counter = write_collected_chats(
+						tmp['chats'],
+						chats_file,
+						channel,
+						counter,
+						'from_messages',
+						client,
+						output_folder
+					)
+
+					# Adding unique users objects
+					all_users = [i['id'] for i in data['users']]
+					users = [
+						i for i in tmp['users']
+						if i['id'] not in all_users
+					]
+
+					# extend UNIQUE chats & users
+					data['chats'].extend(chats)
+					data['users'].extend(users)
+
+					# Get offset ID
+					offset_id = min([i['id'] for i in tmp['messages']])
+
+			# JsonEncoder
+			data = JSONEncoder().encode(data)
+			data = json.loads(data)
+
+			# save data
+			print ('> Writing posts data...')
+			file_path = f'{output_folder}/{channel}/{channel}_messages.json'
+			obj = json.dumps(
+				data,
+				ensure_ascii=False,
+				separators=(',',':')
+			)
+			
+			# writer
+			writer = open(file_path, mode='w', encoding='utf-8')
+			writer.write(obj)
+			writer.close()
+			print ('> done.')
+			print ('')
+
+		# sleep program for a few seconds
+		if len(req_input) > 1:
+			time.sleep(2)
+	else:
+		'''
+
+		Channels not found
+		'''
+		exceptions_path = f'{output_folder}/_exceptions-channels-not-found.txt'
+		w = open(exceptions_path, encoding='utf-8', mode='a')
+		w.write(f'{channel}\n')
+		w.close()
 
 '''
 

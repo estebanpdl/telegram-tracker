@@ -54,7 +54,12 @@ async def get_entity_attrs(client, source):
 		Output attrs: https://core.telegram.org/constructor/channel
 
 	'''
-	return await client.get_entity(source)
+	try:
+		value = await client.get_entity(source)
+	except ValueError:
+		value = False
+	
+	return value
 
 # get channel request
 async def get_channel_req(client, source):

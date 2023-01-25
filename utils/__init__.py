@@ -99,7 +99,7 @@ def write_collected_chats(
 	):
 	'''
 
-	chats_object -> chats metadata from API requests
+	chats_object -> chats metadata from API requests: chats:Vector<Chat>
 	file -> a txt file to write chats' data (id, username)
 	source -> channel requested by the user through cmd
 	counter -> dict object to count mentioned channels
@@ -189,7 +189,8 @@ def write_collected_chats(
 						'''
 						Save exceptions to new file
 						'''
-						exceptions_path = f'{output_folder}/user_exceptions.txt'
+						_o = output_folder
+						exceptions_path = f'{_o}/_exceptions-users-not-found.txt'
 						w = open(exceptions_path, encoding='utf-8', mode='a')
 						w.write(f'ID - {id_}\n')
 						w.close()
