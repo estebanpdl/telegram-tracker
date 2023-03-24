@@ -13,10 +13,9 @@ from tqdm import tqdm
 
 # import local submodules
 from utils import (
-	msgs_dataset_columns, chats_dataset_columns, clean_msg,
-	msg_attrs, get_forward_attrs, get_reply_attrs, get_url_attrs,
-	get_document_attrs, get_poll_attrs, get_contact_attrs,
-	get_geo_attrs, timestamp_attrs
+	chats_dataset_columns, clean_msg, msg_attrs, get_forward_attrs, get_reply_attrs,
+	get_url_attrs, get_document_attrs, get_poll_attrs, get_contact_attrs,
+	get_geo_attrs, msgs_dataset_columns
 )
 
 '''
@@ -72,11 +71,9 @@ data['number_views'] = 0
 data['forwards'] = 0
 data['replies_received'] = 0
 
-# Process posts < init empty dataset >
-dataset_columns = msgs_dataset_columns()
-
 # Save dataset
 msgs_file_path = f'{main_path}/msgs_dataset.csv'
+msgs_data_columns = msgs_dataset_columns()
 
 # JSON files
 for f in json_files:
@@ -162,7 +159,7 @@ for f in json_files:
 
 	# main object
 	response = {
-		'username': username
+		'channel_name': username
 	}
 
 	for idx, item in enumerate(messages):
@@ -170,38 +167,52 @@ for f in json_files:
 
 		Iterate posts
 		'''
-		try:
+		if item['_'] == 'Message':
+			# channel id
 			response['channel_id'] = item['peer_id']['channel_id']
-			msg = clean_msg(item['message'])
-			date = item['date']
 
-			# Add attrs
-			response['message'] = msg
+			# message id
+			msg_id = item['id']
+			response['msg_id'] = msg_id
+
+			# add attrs
+			response['message'] = item['message']
+
+			# clean message
+			msg = clean_msg(item['message'])
+			response['cleaned_message'] = msg
+
+			# timestamp
+			date = item['date']
 			response['date'] = date
 
-			# Signature and Message link
-			msg_id = item['id']
+			# signature and message link
 			response['signature'] = \
 				f'msg_iteration.{idx}.user.{username}.post.{msg_id}'
 			response['msg_link'] = f'https://t.me/{username}/{msg_id}'
 
-			# Check peer
+			# check peer
+			response['msg_from_peer'] = None
+			response['msg_from_id'] = None
 			response = msg_attrs(item, response)
 
-			# Reactions
-			response['views'] = item['views']
+			# reactions
+			response['views'] = 0 if item['views'] == None else item['views']
 			response['number_replies'] = \
 				item['replies']['replies'] if item['replies'] != None else 0
-			response['number_forwards'] = item['forwards']
+			response['number_forwards'] = 0 if item['forwards'] == None \
+				else item['forwards']
 
 			# Forward attrs
 			forward_attrs = item['fwd_from']
 			response['is_forward'] = 1 if forward_attrs != None else 0
+
+			response['forward_msg_from_peer_type'] = None
+			response['forward_msg_from_peer_id'] = None
+			response['forward_msg_from_peer_name'] = None
 			response['forward_msg_date'] = None
 			response['forward_msg_date_string'] = None
 			response['forward_msg_link'] = None
-			response['from_channel_id'] = None
-			response['from_channel_name'] = None
 			if forward_attrs:
 				response = get_forward_attrs(
 					forward_attrs,
@@ -210,6 +221,9 @@ for f in json_files:
 				)
 
 			# Reply attrs
+			response['is_reply'] = 0
+			response['reply_to_msg_id'] = None
+			response['reply_msg_link'] = None
 			response = get_reply_attrs(
 				item,
 				response,
@@ -218,32 +232,91 @@ for f in json_files:
 
 			# Media
 			response['contains_media'] = 1 if item['media'] != None else 0
-			response['media_type'] = None if item['media'] == None \
-				else item['media']['_']
+			if 'media' in item.keys():
+				response['media_type'] = None if item['media'] == None \
+					else item['media']['_']
 
-			# URLs
+			# URLs -> Constructor MessageMediaWebPage
+			'''
+			Type WebPage
+
+			Source: https://core.telegram.org/constructor/messageMediaWebPage
+			Telethon: https://tl.telethon.dev/constructors/web_page.html
+			'''
 			response = get_url_attrs(item['media'], response)
-			response['document_type'], response['video_duration_secs'] = \
-				get_document_attrs(item['media'], response)
 
-			# Polls
-			response['poll_question'], response['poll_number_results'] = \
-				get_poll_attrs(item['media'], response)
+			# Media Document -> Constructor MessageMediaDocument
+			'''
+			Type Document
 
-			# Contact
-			response['contact_phone_number'], response['contact_name'], \
-				response['contact_userid'] = get_contact_attrs(
-					item['media'],
-					response
-				)
+			Source: https://core.telegram.org/constructor/messageMediaDocument
+			Telethon: https://tl.telethon.dev/constructors/document.html
+			'''
+			response['document_type'] = None
+			response['document_id'] = None
+			response['document_video_duration'] = None
+			response['document_filename'] = None
+
+			response = get_document_attrs(item['media'], response)
+			
+
+			# Polls attrs
+			'''
+
+			Type Poll
+
+			Source: https://core.telegram.org/constructor/messageMediaPoll
+			Telethon: https://tl.telethon.dev/constructors/poll.html
+
+			'''
+			response['poll_id'] = None
+			response['poll_question'] = None
+			response['poll_total_voters'] = None
+			response['poll_results'] = None
+			response = get_poll_attrs(item['media'], response)
+
+			# Contact attrs
+			'''
+
+			Type Contact
+
+			Source: https://core.telegram.org/constructor/messageMediaContact
+			Telethon: https://tl.telethon.dev/constructors/message_media_contact.html
+			'''
+			response['contact_phone_number'] = None
+			response['contact_name'] = None
+			response['contact_userid'] = None
+			response = get_contact_attrs(item['media'], response)
 
 			# Geo attrs
+			'''
+
+			Type GeoPoint
+
+			Source: https://core.telegram.org/constructor/messageMediaGeo
+			Telethon:
+			>	https://tl.telethon.dev/constructors/geo_point.html
+			>	https://tl.telethon.dev/constructors/message_media_venue.html
+			
+			'''
+			response['geo_type'] = None
+			response['lat'] = None
+			response['lng'] = None
+			response['venue_id'] = None
+			response['venue_type'] = None
+			response['venue_title'] = None
+			response['venue_address'] = None
+			response['venue_provider'] = None
 			response = get_geo_attrs(item['media'], response)
 
 			# create dataframe
-			df = pd.json_normalize(response)
+			res = [response]
+			df = pd.DataFrame.from_dict(res)
+
+			# order df msgs data columns
+			df = df[msgs_data_columns].copy()
 			
-			# Update CSV file
+			# update CSV file
 			df.to_csv(
 				msgs_file_path,
 				encoding='utf-8',
@@ -251,9 +324,6 @@ for f in json_files:
 				index=False,
 				mode='a'
 			)
-
-		except KeyError:
-			pass
 		
 		# Update pbar
 		pbar.update(1)
@@ -272,3 +342,5 @@ data.to_excel(
 	chats_file_path.replace('.csv', '.xlsx'),
 	index=False
 )
+
+	

@@ -5,3 +5,4 @@ tqdm==4.64.1
 networkx==3.0
 matplotlib==3.6.3
 python-louvain==0.16
+openai==0.27.2

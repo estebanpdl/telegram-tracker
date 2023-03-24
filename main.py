@@ -54,6 +54,8 @@ parser.add_argument(
 )
 
 
+
+
 '''
 
 Updating data
@@ -100,10 +102,12 @@ sfile = 'session_file'
 api_id = args['api_id']
 api_hash = args['api_hash']
 phone = args['phone']
-counter = {}
 
 # event loop
 loop = asyncio.get_event_loop()
+
+# data collection
+counter = {}
 
 '''
 
@@ -231,6 +235,7 @@ for channel in req_input:
 				posts = loop.run_until_complete(
 					get_posts(client, channel_id)
 				)
+
 			else:
 				min_id = args['min_id']
 				posts = loop.run_until_complete(

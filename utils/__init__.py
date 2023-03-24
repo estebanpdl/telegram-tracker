@@ -246,24 +246,23 @@ def msg_attrs(msg, res):
 	'''
 	'''
 	t = msg['from_id']
-	from_id = None
-	if t != None:
-		t = t['_']
+	if t:
+		# main peer attr
+		attr = t['_']
 
-	# parser
-	parser = {
-		'PeerChannel': 'channel_id',
-		'PeerUser': 'user_id'
-	}
+		# parser
+		parser = {
+			'PeerUser': 'user_id',
+			'PeerChat': 'chat_id',
+			'PeerChannel': 'channel_id'
+		}
 
-	try:
-		id_key = parser[t]
-		from_id = msg['from_id'][id_key]
+		# get attr id
+		attr_id = parser[attr]
 
-		res['msg_from_peer'] = t
-		res['msg_from_id'] = from_id
-	except KeyError:
-		pass
+		# assign attr
+		res['msg_from_peer'] = attr
+		res['msg_from_id'] = t[attr_id]
 
 	return res
 
@@ -291,10 +290,22 @@ def get_forward_attrs(msg, res, channels_data):
 	# get from id value
 	from_id = msg['from_id']
 	if from_id:
-		channel_id = from_id['channel_id']
-		channel_name = get_channel_name(channel_id, channels_data)
+
+		# parser
+		parser = {
+			'PeerUser': 'user_id',
+			'PeerChat': 'chat_id',
+			'PeerChannel': 'channel_id'
+		}
+
+		attr = from_id['_']
+		attr_id = parser[attr]
+		attr_id_value = from_id[attr_id]
+
+		channel_name = get_channel_name(attr_id_value, channels_data)
 	else:
-		channel_id = None
+		attr = None
+		attr_id_value = None
 		channel_name = None
 
 	# process dates
@@ -307,12 +318,13 @@ def get_forward_attrs(msg, res, channels_data):
 	date = t.strftime('%Y-%m-%d %H:%M:%S')
 	date_string = t.strftime('%Y-%m-%d')
 
+	res['forward_msg_from_peer_type'] = attr
+	res['forward_msg_from_peer_id'] = attr_id_value
+	res['forward_msg_from_peer_name'] = channel_name
 	res['forward_msg_date'] = date
 	res['forward_msg_date_string'] = date_string
-	res['from_channel_id'] = channel_id
-	res['from_channel_name'] = channel_name
 
-	if channel_name:
+	if channel_name != None and msg_id != None:
 		n = channel_name
 		res['forward_msg_link'] = f'https://t.me/{n}/{msg_id}'
 
@@ -323,17 +335,11 @@ def get_reply_attrs(msg, res, username):
 	'''
 	'''
 	reply = msg['reply_to']
-	reply_to_msg_id = None
-	reply_msg_link = None
-	is_reply = 0
 	if reply:
-		is_reply = 1
-		reply_to_msg_id = msg['reply_to_msg_id']
-		reply_msg_link = f'https://t.me/{username}/{reply_to_msg_id}'
-
-	res['is_reply'] = is_reply
-	res['reply_to_msg_id'] = reply_to_msg_id
-	res['reply_msg_link'] = reply_msg_link
+		reply_to_msg_id = msg['reply_to']['reply_to_msg_id']
+		res['is_reply'] = 1
+		res['reply_to_msg_id'] = reply_to_msg_id
+		res['reply_msg_link'] = f'https://t.me/{username}/{reply_to_msg_id}'
 
 	return res
 
@@ -347,6 +353,11 @@ def get_netloc(value):
 # Get URL attrs
 def get_url_attrs(media, res):
 	'''
+	Type WebPage
+
+	Source: https://core.telegram.org/constructor/messageMediaWebPage
+	Telethon: https://tl.telethon.dev/constructors/web_page.html
+	
 	'''
 	has_url = 0
 	url = None
@@ -354,16 +365,18 @@ def get_url_attrs(media, res):
 	url_title = None
 	url_description = None
 	if res['media_type'] == 'MessageMediaWebPage':
-		url = media['webpage']['url']
-		if url:
-			has_url = 1
+		_type = media['webpage']['_']
+		if _type == 'WebPage':
+			url = media['webpage']['url']
+			if url:
+				has_url = 1
 
-			# get domain
-			domain = get_netloc(url)
+				# get domain
+				domain = get_netloc(url)
 
-			# title
-			url_title = media['webpage']['title']
-			url_description = media['webpage']['description']
+				# title
+				url_title = media['webpage']['title']
+				url_description = media['webpage']['description']
 
 	res['has_url'] = has_url
 	res['url'] = url
@@ -376,67 +389,85 @@ def get_url_attrs(media, res):
 # Get document attrs
 def get_document_attrs(media, res):
 	'''
+	Type Document
+	
+	Source: https://core.telegram.org/constructor/messageMediaDocument
+	Telethon: https://tl.telethon.dev/constructors/document.html
+	
 	'''
-	document_type = None
-	video_duration = None
 	if res['media_type'] == 'MessageMediaDocument':
-		document_type = media['document']['mime_type']
+		res['document_id'] = media['document']['id']
+		res['document_type'] = media['document']['mime_type']
 
 		# get duration
 		attrs = media['document']['attributes']
 		for i in attrs:
 			if i['_'] == 'DocumentAttributeVideo':
-				video_duration = i['duration']
-				break
+				res['document_video_duration'] = i['duration']
+			
+			if i['_'] == 'DocumentAttributeFilename':
+				res['document_filename'] = i['file_name']
 
-	return document_type, video_duration
+	return res
 
 # Get poll attrs
 def get_poll_attrs(media, res):
 	'''
-	'''
-	poll_question = None
-	poll_number_results = None
-	if res['media_type'] == 'MessageMediaPoll':
-		poll_question = media['poll']['question']
-		poll_number_results = len(media['results'])
 
-	return poll_question, poll_number_results
+	Type Poll
+	
+	Source: https://core.telegram.org/constructor/messageMediaPoll
+	Telethon: https://tl.telethon.dev/constructors/poll.html
+	
+	'''
+	if res['media_type'] == 'MessageMediaPoll':
+		res['poll_id'] = media['poll']['id']
+		res['poll_question'] = media['poll']['question']
+		res['poll_total_voters'] = media['results']['total_voters']
+		res['poll_results'] = media['results']['results']
+
+	return res
 
 # Get contact attrs
 def get_contact_attrs(media, res):
 	'''
-	'''
-	contact_phone_number = None
-	contact_name = None
-	contact_userid = None
-	if res['media_type'] == 'MessageMediaContact':
-		contact_phone_number = media['phone_number']
-		contact_name = media['first_name'] + ' ' + media['last_name']
-		contact_userid = media['user_id']
+	Type Contact
 
-	return contact_phone_number, contact_name, contact_userid
+	Source: https://core.telegram.org/constructor/messageMediaContact
+	Telethon: https://tl.telethon.dev/constructors/message_media_contact.html
+
+	'''
+	if res['media_type'] == 'MessageMediaContact':
+		res['contact_phone_number'] = media['phone_number']
+		res['contact_name'] = media['first_name'] + ' ' + media['last_name']
+		res['contact_userid'] = media['user_id']
+
+	return res
 
 # Get geo attrs
 def get_geo_attrs(media, res):
 	'''
+
+	Type GeoPoint
+
+	Source: https://core.telegram.org/constructor/messageMediaGeo
+	Telethon:
+	>	https://tl.telethon.dev/constructors/geo_point.html
+	>	https://tl.telethon.dev/constructors/message_media_venue.html
+
 	'''
-	lat = None
-	lng = None
-	title = None
-	address = None
-	if res['media_type'] in ['MessageMediaGeo', 'MessageMediaVenue']:
-		lat = media['geo']['lat']
-		lng = media['geo']['lng']
-
-		if 'title' in media.keys():
-			title = media['title']
-			address = media['address']
-
-	res['geo_shared_lat'] = lat
-	res['geo_shared_lng'] = lng
-	res['geo_shared_title'] = title
-	res['geo_shared_address'] = address
+	if media != None:
+		if 'geo' in media.keys():
+			res['geo_type'] = media['_']
+			res['lat'] = media['geo']['lat']
+			res['lng'] = media['geo']['long']
+		
+		if 'venue_id' in media.keys():
+			res['venue_id'] = media['venue_id']
+			res['venue_type'] = media['venue_type']
+			res['venue_title'] = media['title']
+			res['venue_address'] = media['address']
+			res['venue_provider'] = media['provider']
 
 	return res
 
@@ -486,18 +517,11 @@ def msgs_dataset_columns():
 	return [
 		'signature',
 		'channel_id',
-		'username',
+		'channel_name',
+		'msg_id',
 		'message',
+		'cleaned_message',
 		'date',
-		'date_string',
-		'date_year',
-		'date_month_name',
-		'date_day',
-		'date_day_name',
-		'date_time_hour',
-		'date_quarter',
-		'date_dayofyear',
-		'date_weekofyear',
 		'msg_link',
 		'msg_from_peer',
 		'msg_from_id',
@@ -505,10 +529,11 @@ def msgs_dataset_columns():
 		'number_replies',
 		'number_forwards',
 		'is_forward',
+		'forward_msg_from_peer_type',
+		'forward_msg_from_peer_id',
+		'forward_msg_from_peer_name',
 		'forward_msg_date',
 		'forward_msg_date_string',
-		'from_channel_id',
-		'from_channel_name',
 		'forward_msg_link',
 		'is_reply',
 		'reply_to_msg_id',
@@ -521,16 +546,24 @@ def msgs_dataset_columns():
 		'url_title',
 		'url_description',
 		'document_type',
-		'video_duration_secs',
+		'document_id',
+		'document_video_duration',
+		'document_filename',
+		'poll_id',
 		'poll_question',
-		'poll_number_results',
+		'poll_total_voters',
+		'poll_results',
 		'contact_phone_number',
 		'contact_name',
 		'contact_userid',
-		'geo_shared_lat',
-		'geo_shared_lng',
-		'geo_shared_title',
-		'geo_shared_address'
+		'geo_type',
+		'lat',
+		'lng',
+		'venue_id',
+		'venue_type',
+		'venue_title',
+		'venue_address',
+		'venue_provider'
 	]
 
 

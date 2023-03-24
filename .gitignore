@@ -6,9 +6,13 @@ __pycache__/
 # Collected data
 output/
 
+# nbs
+nb/*
+
 # session_file.session
 session_file.session
 session_file.session-journal
 
 # files
 test.py
+chatgpt.py
