@@ -4,8 +4,8 @@
 
 ---
 
-[![GitHub forks](https://img.shields.io/github/forks/estebanpdl/telegram-api.svg?style=social&label=Fork&maxAge=2592000)](https://GitHub.com/estebanpdl/telegram-api/network/)
-[![GitHub stars](https://badgen.net/github/stars/estebanpdl/tg-api)](https://GitHub.com/estebanpdl/telegram-api/stargazers/)
+[![GitHub forks](https://img.shields.io/github/forks/estebanpdl/telegram-tracker.svg?style=social&label=Fork&maxAge=2592000)](https://GitHub.com/estebanpdl/telegram-tracker/network/)
+[![GitHub stars](https://badgen.net/github/stars/estebanpdl/telegram-tracker)](https://GitHub.com/estebanpdl/telegram-tracker/stargazers/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/estebanpdl/tg-api/blob/main/LICENCE)
 [![Open Source](https://badges.frapsoft.com/os/v1/open-source.svg?v=103)](https://twitter.com/estebanpdl)
 [![Made-with-python](https://img.shields.io/badge/Made%20with-Python-1f425f.svg)](https://www.python.org/)
