@@ -9,6 +9,8 @@ from telethon.tl.functions.messages import GetHistoryRequest, \
 from telethon.tl.functions.users import GetFullUserRequest
 from telethon.tl.functions.photos import GetUserPhotosRequest
 from telethon.tl.functions.stats import GetBroadcastStatsRequest
+from telethon.errors.rpcerrorlist import SessionPasswordNeededError
+from getpass import getpass
 
 
 '''
@@ -29,10 +31,13 @@ async def get_connection(session_file, api_id, api_hash, phone):
 	else:
 		print ('> Not Authorized! Sending code request...')
 		await client.send_code_request(phone)
-		await client.sign_in(
-			phone,
-			input('Enter the code: ')
-		)
+		try:
+			await client.sign_in(
+				phone,
+				input('Enter the code: ')
+			)
+		except SessionPasswordNeededError:
+			await client.sign_in(password=getpass("Enter password: "))
 
 	return client
 
