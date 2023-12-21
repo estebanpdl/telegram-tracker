@@ -5,10 +5,16 @@ from telethon import TelegramClient, types
 from telethon.tl.functions.channels import GetChannelsRequest, \
 	GetFullChannelRequest, GetParticipantsRequest
 from telethon.tl.functions.messages import GetHistoryRequest, \
-	GetDiscussionMessageRequest, GetWebPageRequest
+	GetDiscussionMessageRequest, GetWebPageRequest, SearchGlobalRequest
 from telethon.tl.functions.users import GetFullUserRequest
 from telethon.tl.functions.photos import GetUserPhotosRequest
 from telethon.tl.functions.stats import GetBroadcastStatsRequest
+
+
+
+from telethon import functions
+
+
 
 
 '''
@@ -236,3 +242,44 @@ async def broadcast_stats_req(client, source):
 			channel=source
 		)
 	)
+
+'''
+
+Global search within your chats
+
+'''
+async def global_search(client, query, offset_rate=0, offset_id=0):
+	'''
+	'''
+	import datetime
+	return await client(
+		SearchGlobalRequest(
+			q=query,
+			filter=types.InputMessagesFilterEmpty(),
+			min_date=datetime.datetime(2023, 5, 14),
+			max_date=datetime.datetime(2023, 7, 15),
+			offset_rate=offset_rate,
+			offset_id=offset_id,
+			offset_peer=types.InputPeerEmpty(),
+			limit=100,
+			folder_id=None
+		)
+	)
+
+
+'''
+
+Global search. Returns channel names.
+
+'''
+
+# async def global_search(client, query):
+# 	'''
+# 	'''
+# 	return await client(
+# 		functions.contacts.SearchRequest(
+# 			q=query,
+# 			limit=10
+# 		)
+# 	)
+

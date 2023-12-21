@@ -13,6 +13,7 @@ nb/*
 session_file.session
 session_file.session-journal
 
-# files
+# test files
+resources.md
 test.py
 chatgpt.py

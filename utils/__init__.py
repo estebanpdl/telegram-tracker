@@ -62,16 +62,22 @@ def create_dirs(root, subfolders=None):
 	return
 
 # Get user-console request
-def cmd_request_type(args):
+def determine_request_type(args):
 	'''
+	Determines the type of request based on command-line arguments.
+
+	Parameters:
+	args (Namespace): Parsed command-line arguments.
+
+	Returns:
+	tuple: A tuple containing the request type
+		('channel', 'multi_channel', or 'search') and the corresponding input value.
 	'''
-	tm_channel = args['telegram_channel']
-	batch_file = args['batch_file']
-
-	req_type = 'channel' if tm_channel != None else 'batch'
-	req_input = tm_channel if tm_channel != None else batch_file
-
-	return req_type, req_input
+	if args['search'] is not None:
+		return 'search', args['search']
+	return ('channel', args['telegram_channel']) \
+		if args['telegram_channel'] is not None \
+		else ('multi_channel', args['multi_channel_file'])
 
 # Process collected chats
 def process_participants_count(client, channel_id):
