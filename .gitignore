@@ -15,4 +15,8 @@ session_file.session-journal
 
 # files
 test.py
-chatgpt.py
+chatgpt.pyi
+
+# local build
+build/
+*.egg-info/
