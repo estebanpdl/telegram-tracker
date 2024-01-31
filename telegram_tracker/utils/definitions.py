@@ -12,27 +12,33 @@ from urllib.parse import urlparse
 from datetime import datetime
 
 # Import Telegram API submodules
-from api import full_channel_req
+from ..api import full_channel_req
 
 
 '''
 Creating functions
 '''
 
-# Get config attrs
-def get_config_attrs():
-	'''
-	'''
-	path = './config/config.ini'
-	
-	# config parser
-	config = ConfigParser()
-	config.read(path)
+def get_config_attrs(args): 
+    '''
+    Your function description here.
+    '''
+    
+    # default config path in ~/.config/telegram-tracker/config.ini
+    if getattr(args, 'config', None) is None:
+        path = '~/.config/telegram-tracker/config/config.ini'
+        path = os.path.expanduser(path)
+        print(path)
+        print("Using default configuration at " + path + "\n")
 
-	# Telegram API credentials
-	attrs = config['Telegram API credentials']
-	return dict(attrs)
+    # config parser
+    config = ConfigParser()
+    config.read(path)
 
+    print(config)
+    # Telegram API credentials
+    attrs = config['Telegram API credentials']
+    return dict(attrs)
 
 # event loop
 loop = asyncio.get_event_loop()
@@ -311,7 +317,6 @@ def get_forward_attrs(msg, res, channels_data):
 	# process dates
 	t = pd.to_datetime(
 		date,
-		infer_datetime_format=True,
 		yearfirst=True
 	)
 

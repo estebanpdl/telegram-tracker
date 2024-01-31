@@ -15,7 +15,7 @@ import matplotlib.cm as cm
 import matplotlib.pyplot as plt
 
 # import local modules
-from utils.definitions import (
+from .utils.definitions import (
     normalize_values
 )
 
