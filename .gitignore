@@ -5,6 +5,7 @@ __pycache__/
 
 # Collected data
 output/
+telegram-tracker/output/
 
 # nbs
 nb/*
