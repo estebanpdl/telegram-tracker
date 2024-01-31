@@ -9,7 +9,7 @@ import time
 import sys
 import os
 
-# import Telegram API submodules
+# telegram-tracker submodules 
 from .api.api import *
 from .utils.definitions import (
     get_config_attrs, JSONEncoder, create_dirs, cmd_request_type,
@@ -45,6 +45,19 @@ def main():
 
     '''
 
+    Configuration location
+    
+    '''
+    
+    parser.add_argument(
+        '--config',
+        type=str,
+        help='Configuration file location'
+    )
+
+    
+    '''
+
     Output
     '''
     parser.add_argument(
@@ -67,7 +80,7 @@ def main():
 
     # parse arguments
     args = vars(parser.parse_args())
-    config_attrs = get_config_attrs()
+    config_attrs = get_config_attrs(args)
 
     args = {**args, **config_attrs}
 

@@ -10,7 +10,7 @@ setup(
     install_requires=requirements,
     entry_points={
         'console_scripts': [
-            'build-dataset=telegram_tracker.build_datasets:main',
+            'build-datasets=telegram_tracker.build_datasets:main',
             'channels-to-network=telegram_tracker.channels_to_network:main',
             'telegram-tracker=telegram_tracker.telegram_tracker:main',
         ],

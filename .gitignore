@@ -13,6 +13,8 @@ nb/*
 # session_file.session
 session_file.session
 session_file.session-journal
+telegram_tracker/session_file.session
+telegram_tracker/session-journal
 
 # files
 test.py
