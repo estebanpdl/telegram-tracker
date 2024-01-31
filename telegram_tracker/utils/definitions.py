@@ -28,14 +28,12 @@ def get_config_attrs(args):
     if getattr(args, 'config', None) is None:
         path = '~/.config/telegram-tracker/config/config.ini'
         path = os.path.expanduser(path)
-        print(path)
         print("Using default configuration at " + path + "\n")
 
     # config parser
     config = ConfigParser()
     config.read(path)
 
-    print(config)
     # Telegram API credentials
     attrs = config['Telegram API credentials']
     return dict(attrs)
