@@ -5,14 +5,24 @@ __pycache__/
 
 # Collected data
 output/
+telegram-tracker/output/
 
 # nbs
 nb/*
 
+# venv
+venv/
+
 # session_file.session
 session_file.session
 session_file.session-journal
+telegram_tracker/session_file.session
+telegram_tracker/session-journal
 
 # files
 test.py
-chatgpt.py
+chatgpt.pyi
+
+# local build
+build/
+*.egg-info/
