@@ -10,6 +10,9 @@ telegram-tracker/output/
 # nbs
 nb/*
 
+# venv
+venv/
+
 # session_file.session
 session_file.session
 session_file.session-journal

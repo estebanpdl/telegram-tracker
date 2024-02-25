@@ -5,3 +5,4 @@ tqdm
 networkx
 matplotlib
 python-louvain
+msgspec

@@ -3,6 +3,12 @@
 # import modules
 import pandas as pd
 import argparse
+import msgspec
+import json
+import glob
+import time
+import csv
+import sys
 import json
 import glob
 import time
@@ -12,7 +18,10 @@ import os
 from tqdm import tqdm
 
 
-# import local submodules
+# local submodules
+from .constructors.constructors import TGMessages, TGResponse
+
+# local definitions
 from .utils.definitions import (
     chats_dataset_columns, clean_msg, msg_attrs, get_forward_attrs, get_reply_attrs,
     get_url_attrs, get_document_attrs, get_poll_attrs, get_contact_attrs,
@@ -166,12 +175,30 @@ def main():
             'channel_name': username
         }
 
+        # main objects (only finals and testing is really important here)
+        finals = {}
+
+        testing = { 'msg': [] }
+
+        pre_sort = {} 
+        post_sort = {}
+
         for idx, item in enumerate(messages):
             '''
 
             Iterate posts
             '''
             if item['_'] == 'Message':
+
+                # ----- START ------ #
+                #  Memory Profiling  #
+                # ################## #
+                # 
+                # Reason: dictionary creation from enumerate (json)
+
+                # MEM START
+                mem1_art = time.time()
+
                 # channel id
                 response['channel_id'] = item['peer_id']['channel_id']
 
@@ -312,27 +339,73 @@ def main():
                 response['venue_provider'] = None
                 response = get_geo_attrs(item['media'], response)
 
+                # ------- END ------ #
+                #  Memory Profiling  #
+                # ################## #
+
+                # MEM STOP
+
+                mem1_op = time.time()
+                mem1_time = mem1_op - mem1_art
+
+                # debug statements:
+
+                # ----- START ------ #
+                #  Memory Profiling  #
+                # ################## #
+                # 
+                # Reason: json deserialization from response objects
+
+                # MEM START
+                
+                mem2_art = time.time()
+
+                # build appropriate response:
+                # note: this acts as a filter AND an entry to json deserialization
+                finals = TGResponse(response)
+                
+                # encode it:
+                finals = msgspec.json.encode(finals)
+                
+                # decode it back:
+                finals = msgspec.json.decode(finals)
+                
+                # Might need to bring this back later?
+                #####
+                #finals = msgspec.json.encode(finals)
+                
+                testing['msg'].append(finals)
+                # MEM STOP
+                mem2_op = time.time()
+                mem2_time = mem2_op-mem2_art
+
+                # ------- END ------ #
+                #  Memory Profiling  #
+                # ################## #
+
                 # create dataframe
-                res = [response]
-                df = pd.DataFrame.from_dict(res)
-
-                # order df msgs data columns
-                df = df[msgs_data_columns].copy()
-
-                # update CSV file
-                df.to_csv(
-                    msgs_file_path,
-                    encoding='utf-8',
-                    header=not os.path.isfile(msgs_file_path),
-                    index=False,
-                    mode='a'
-                )
 
             # Update pbar
             pbar.update(1)
 
         # Close pbar connection
         pbar.close()
+
+        print('Writing .csv...')
+        print('\n')
+
+        with open(msgs_file_path, mode='w', newline='') as file:
+            
+            h2 = testing['msg'][0]
+            h1 = h2['channel_name']
+            h0 = h1.keys()
+
+            writer = csv.DictWriter(file, fieldnames=h0)
+            writer.writeheader()
+
+            for one in testing['msg']:
+                fin = one['channel_name']
+                writer.writerow(fin)
 
         print('-- END --')
         print('')
