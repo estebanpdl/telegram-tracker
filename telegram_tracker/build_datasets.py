@@ -9,15 +9,19 @@ import glob
 import time
 import csv
 import sys
+import json
+import glob
+import time
 import os
 
 # import submodules
 from tqdm import tqdm
 
 
-# import local submodules
+# local submodules
 from .constructors.constructors import TGMessages, TGResponse
 
+# local definitions
 from .utils.definitions import (
     chats_dataset_columns, clean_msg, msg_attrs, get_forward_attrs, get_reply_attrs,
     get_url_attrs, get_document_attrs, get_poll_attrs, get_contact_attrs,
@@ -171,12 +175,14 @@ def main():
             'channel_name': username
         }
 
+        # main objects (only finals and testing is really important here)
         finals = {}
 
         testing = { 'msg': [] }
 
         pre_sort = {} 
         post_sort = {}
+
         for idx, item in enumerate(messages):
             '''
 
