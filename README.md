@@ -124,7 +124,7 @@ This Python script will connect to Telegram's API and handle your API request.
 ### **Basic request**
 
 ```
-python main.py --telegram-channel channelname`
+python main.py --telegram-channel channel_name`
 ```
 
 **Expected output**
