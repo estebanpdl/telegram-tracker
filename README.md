@@ -66,7 +66,7 @@ or
 pip3 install -r requirements.txt
 ```
 
-**Once you obtain an API ID and API hash on my.telegram.org, populate the `config/config.ini` file with the described values.**
+**Once you obtain an API ID and API hash on my.telegram.org, copy `config/config-sample.ini` to `config/config.ini` and fill in the described values.**
 
 ```ini
 
@@ -143,7 +143,7 @@ python main.py --telegram-channel channel_name`
 ### **Request using a text file containing a set of channels**
 
 ```
-python main.py --batch-file './path/to/channels_text_file.txt'
+python main.py --batch-file './path/to/channels_text_file.tsv'
 ```
 
 **Expected output**
@@ -157,11 +157,17 @@ python main.py --batch-file './path/to/channels_text_file.txt'
 	- A JSON file containing channel's profile metadata
 	- A JSON file containing posts from the requested channel
 
-These examples will retrieve all posts available through the API from the requested channel. If you want to collect channel's information only, without posts, you can run:
+You can optionally add the minimum id for each channel from which to start downloading. The batch file should be tab separated (without a header). The first column is the channel name, the second column the id (int) from which to start.
+
+If you previously used this script, you can use the included script `add-startids-to-channellist.py` to add the minimum id for each channel to your batch file:
+```
+python add-startids-to-channellist.py --batch-file './path/to/channels_text_file.tsv'
+```
 
 <br />
 
 ### **Limit download to channel's metadata only**
+These examples will retrieve all posts available through the API from the requested channel. If you want to collect channel's information only, without posts, you can run:
 
 ```
 python main.py --telegram-channel channelname --limit-download-to-channel-metadata

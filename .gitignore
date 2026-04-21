@@ -16,3 +16,9 @@ session_file.session-journal
 # files
 test.py
 chatgpt.py
+
+# virtual environment
+venv/*
+
+# API key
+config/config.ini
