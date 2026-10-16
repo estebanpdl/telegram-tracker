@@ -1,7 +1,13 @@
 # -*- coding: utf-8 -*-
+'''
+Narrow adapter around Telethon. Request helpers are coroutines that take a
+client; nothing here connects, reads config, or creates an event loop at
+import. The collector owns the client lifecycle (see collector.py) and the
+interactive login lives in api/auth.py.
+'''
 
 # import Telethon API modules
-from telethon import TelegramClient, types
+from telethon import TelegramClient, errors, types
 from telethon.tl.functions.channels import GetChannelsRequest, \
 	GetFullChannelRequest, GetParticipantsRequest
 from telethon.tl.functions.messages import GetHistoryRequest, \
@@ -10,6 +16,19 @@ from telethon.tl.functions.users import GetFullUserRequest
 from telethon.tl.functions.photos import GetUserPhotosRequest
 from telethon.tl.functions.stats import GetBroadcastStatsRequest
 
+# import local submodules
+from api.auth import ensure_authorized
+
+
+# Entity lookup errors that make a single target uncollectable
+CHANNEL_ACCESS_ERRORS = (
+	ValueError,
+	errors.ChannelInvalidError,
+	errors.ChannelPrivateError,
+	errors.UsernameInvalidError,
+	errors.UsernameNotOccupiedError
+)
+
 
 '''
 
@@ -17,22 +36,25 @@ Client-side
 
 '''
 
+# create client
+def create_client(session_file, api_id, api_hash):
+	'''
+	Create an unconnected client. Call inside the running event loop that
+	will connect, use, and disconnect it: Telethon binds a client to that
+	loop.
+	'''
+	return TelegramClient(session_file, api_id, api_hash)
+
 # get connection
 async def get_connection(session_file, api_id, api_hash, phone):
 	'''
-	Connects to Telegram API
+	Connects to Telegram API and logs in interactively when needed.
+	Kept for callers outside the collector, which uses create_client and
+	ensure_authorized directly.
 	'''
-	client = TelegramClient(session_file, api_id, api_hash)
+	client = create_client(session_file, api_id, api_hash)
 	await client.connect()
-	if await client.is_user_authorized():
-		print ('> Authorized!')
-	else:
-		print ('> Not Authorized! Sending code request...')
-		await client.send_code_request(phone)
-		await client.sign_in(
-			phone,
-			input('Enter the code: ')
-		)
+	await ensure_authorized(client, phone)
 
 	return client
 
@@ -53,10 +75,11 @@ async def get_entity_attrs(client, source):
 		Telethon: https://docs.telethon.dev/en/latest/modules/client.html#telethon.client.users.UserMethods.get_entity
 		Output attrs: https://core.telegram.org/constructor/channel
 
+	Returns False when the target does not exist or is not accessible.
 	'''
 	try:
 		value = await client.get_entity(source)
-	except ValueError:
+	except CHANNEL_ACCESS_ERRORS:
 		value = False
 	
 	return value

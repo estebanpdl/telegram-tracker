@@ -1,12 +1,13 @@
 # -*- coding: utf-8 -*-
-
-# warnings
-import warnings
-warnings.filterwarnings('ignore')
+'''
+Pure helpers shared by the collector and the offline builders: config
+loading, JSON encoding, directories, message/chat transforms, dataset
+columns, and graph sizing. Importing this module has no side effects and
+does not load Telethon; network enrichment lives in collector.py.
+'''
 
 # Import modules
 import pandas as pd
-import asyncio
 import json
 import os
 
@@ -14,9 +15,6 @@ import os
 from configparser import ConfigParser
 from urllib.parse import urlparse
 from datetime import datetime
-
-# Import Telegram API submodules
-from api import full_channel_req
 
 
 '''
@@ -37,9 +35,6 @@ def get_config_attrs():
 	attrs = config['Telegram API credentials']
 	return dict(attrs)
 
-
-# event loop
-loop = asyncio.get_event_loop()
 
 '''
 
@@ -76,143 +71,6 @@ def cmd_request_type(args):
 	req_input = tm_channel if tm_channel != None else batch_file
 
 	return req_type, req_input
-
-# Process collected chats
-def process_participants_count(client, channel_id):
-	'''
-
-	Returns:
-		Participants count
-	'''
-	channel_request = loop.run_until_complete(
-		full_channel_req(client, channel_id)
-	)
-
-	return channel_request.full_chat.participants_count
-
-
-# Write collected chats
-def write_collected_chats(
-		chats_object,
-		file,
-		source,
-		counter,
-		req_type,
-		client,
-		output_folder
-	):
-	'''
-
-	chats_object -> chats metadata from API requests: chats:Vector<Chat>
-	file -> a txt file to write chats' data (id, username)
-	source -> channel requested by the user through cmd
-	counter -> dict object to count mentioned channels
-	req_type -> request type (channel request or from messages)
-	client -> Telegram API client
-	output_folder -> Folder to save collected data
-
-	'''
-	metadata = []
-	for c in chats_object:
-		try:
-			id_ = c['id']
-			username = c['username']
-			if username != None:
-				file.write(f'{id_}\n')
-
-				# collect metadata
-				if id_ in counter.keys():
-					counter[id_]['counter'] += 1
-					counter[id_][req_type] += 1
-					src = counter[id_]['source']
-					if source not in src:
-						counter[id_]['source'].append(source)
-				else:
-					counter[id_] = {
-						'username': username,
-						'counter': 1,
-						'from_messages': 1 \
-							if req_type == 'from_messages' else 0,
-						'channel_request': 1 \
-							if req_type == 'channel_request' else 0,
-						'channel_req_targeted_by': {
-							'channels': ['self']
-						},
-						'source': [source]
-					}
-
-					# Telegram API -> full channel request
-					try:
-						channel_request = loop.run_until_complete(
-							full_channel_req(client, id_)
-						)
-
-						channel_request = channel_request.to_dict()
-						collected_chats = channel_request['chats']
-					
-						for ch in collected_chats:
-							if ch['id'] == channel_request['full_chat']['id']:
-								ch['participants_count'] = \
-									channel_request['full_chat']['participants_count']
-							else:
-								ch_id = ch['id']
-								try:
-									ch['participants_count'] = \
-										process_participants_count(client, ch_id)
-								except TypeError:
-									ch['participants_count'] = 0
-
-								# write new id
-								if ch['username'] != None:
-									file.write(f'{ch_id}\n')
-
-									# process in counter
-									if ch_id in counter.keys():
-										counter[ch_id]['counter'] += 1
-										counter[ch_id]['channel_request'] += 1
-										counter[ch_id]['channel_request_targeted_by']['channels'].append(username)
-									else:
-										counter[ch_id] = {
-											'username': ch['username'],
-											'counter': 1,
-											'from_messages': 0,
-											'channel_request': 1,
-											'channel_req_targeted_by': {
-												'channels': [username]
-											},
-											'source': [source]
-										}
-
-						metadata.extend(
-							[
-								i for i in collected_chats
-								if i['username'] != None 
-							]
-						)
-					except ValueError:
-						'''
-						Save exceptions to new file
-						'''
-						_o = output_folder
-						exceptions_path = f'{_o}/_exceptions-users-not-found.txt'
-						w = open(exceptions_path, encoding='utf-8', mode='a')
-						w.write(f'ID - {id_}\n')
-						w.close()
-
-		except KeyError:
-			pass
-
-	df = pd.DataFrame(metadata)
-	csv_path = f'{output_folder}/collected_chats.csv'
-	df.to_csv(
-		csv_path,
-		encoding='utf-8',
-		mode='a',
-		index=False,
-		header=not os.path.isfile(csv_path)
-	)
-
-	return counter
 
 # Time - date attributes
 def timestamp_attrs(data, col='date'):

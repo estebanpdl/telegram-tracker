@@ -1,5 +1,9 @@
 # -*- coding: utf-8 -*-
 
+# warnings
+import warnings
+warnings.filterwarnings('ignore')
+
 # import modules
 import ast
 import time

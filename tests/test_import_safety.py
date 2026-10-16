@@ -2,8 +2,8 @@
 '''
 Importing project modules must be inert: no event loop, argv parsing,
 config reads, connections, or writes. Each check runs in a fresh
-interpreter (-I) with the offline guard installed first, from an empty
-working directory that has no config or session files.
+interpreter (-I) with the offline guard installed first, invalid argv, and
+an empty working directory that has no config or session files.
 '''
 
 # import modules
@@ -21,23 +21,30 @@ import offline_guard
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TESTS = os.path.join(ROOT, 'tests')
 
+COLLECTION_MODULES = ['utils', 'api', 'api.auth', 'collector', 'main']
+
 PROBE = '''
 import asyncio, json, sys
 sys.path[:0] = [{tests!r}, {root!r}]
 sys.argv = ['main.py', '--not-a-real-flag']
 import offline_guard
-report = {{'imported': [], 'error': None}}
+report = {{'imported': [], 'error': None, 'loops': []}}
 try:
 	for name in {modules!r}:
 		__import__(name)
 		report['imported'].append(name)
 except BaseException as exc:
 	report['error'] = f'{{type(exc).__name__}}: {{exc}}'
+for name in report['imported']:
+	module = sys.modules[name]
+	for attr, value in vars(module).items():
+		if isinstance(value, asyncio.AbstractEventLoop):
+			report['loops'].append(f'{{name}}.{{attr}}')
 try:
 	asyncio.get_event_loop()
-	report['loop'] = 'present'
+	report['current_loop'] = 'present'
 except RuntimeError:
-	report['loop'] = 'absent'
+	report['current_loop'] = 'absent'
 report['violations'] = offline_guard.VIOLATIONS
 print('REPORT ' + json.dumps(report))
 '''
@@ -46,7 +53,7 @@ print('REPORT ' + json.dumps(report))
 def import_in_fresh_process(modules):
 	'''
 	Import `modules` in a fresh interpreter from an empty temporary
-	directory; return (report, stdout_without_report, cwd_listing).
+	directory; return (report, other_stdout_lines, stderr, cwd_listing).
 	'''
 	with tempfile.TemporaryDirectory() as cwd:
 		code = PROBE.format(tests=TESTS, root=ROOT, modules=list(modules))
@@ -65,28 +72,34 @@ def import_in_fresh_process(modules):
 	if not report_lines:
 		raise AssertionError(f'probe failed: {completed.stderr[-2000:]}')
 	other = [l for l in lines if not l.startswith('REPORT ')]
-	return json.loads(report_lines[-1][len('REPORT '):]), other, listing
+	return json.loads(report_lines[-1][len('REPORT '):]), other, completed.stderr, listing
 
 
-class BaselineImportTests(offline_guard.OfflineTestCase):
-	'''
-	Baseline (Phase 1): utils creates a global loop at import, which
-	Python 3.14 rejects. Phase 2 makes this import inert.
-	'''
+class ImportSafetyTests(offline_guard.OfflineTestCase):
 
-	@unittest.expectedFailure
-	def test_utils_import_is_inert(self):
-		report, output, listing = import_in_fresh_process(['utils'])
+	def test_collection_modules_import_inertly(self):
+		report, output, stderr, listing = import_in_fresh_process(COLLECTION_MODULES)
 		self.assertIsNone(report['error'])
-		self.assertEqual(report['loop'], 'absent')
-		self.assertEqual((output, listing, report['violations']), ([], [], []))
-
-	def test_baseline_failure_is_the_event_loop_error(self):
-		report, _, listing = import_in_fresh_process(['utils'])
-		self.assertIn('RuntimeError', report['error'] or '')
-		self.assertIn('no current event loop', report['error'])
-		self.assertEqual(listing, [])
+		self.assertEqual(report['imported'], COLLECTION_MODULES)
+		self.assertEqual(report['loops'], [])
+		self.assertEqual(report['current_loop'], 'absent')
 		self.assertEqual(report['violations'], [])
+		self.assertEqual(output, [])
+		self.assertEqual(stderr, '')
+		self.assertEqual(listing, [])
+
+	def test_utils_no_longer_loads_telethon(self):
+		code = textwrap.dedent(f'''
+			import sys
+			sys.path[:0] = [{TESTS!r}, {ROOT!r}]
+			import utils
+			print('telethon' in sys.modules, hasattr(utils, 'loop'))
+		''')
+		completed = subprocess.run(
+			[sys.executable, '-I', '-c', code],
+			capture_output=True, text=True, timeout=120
+		)
+		self.assertEqual(completed.stdout.strip(), 'False False', completed.stderr)
 
 
 if __name__ == '__main__':
