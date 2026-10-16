@@ -164,18 +164,31 @@ class FixtureWorld:
 			'users': [],
 		})
 
-	def page(self, channel_id, *, offset_id=0, min_id=0, page_size=2):
+	def page(
+			self,
+			channel_id,
+			*,
+			offset_id=0,
+			min_id=0,
+			max_id=0,
+			offset_date=None,
+			limit=0,
+			page_size=2
+		):
 		'''
 		Return one messages.ChannelMessages page: ids below `offset_id`
-		(when set) and above `min_id`, newest first, at most `page_size`.
-		`chats` holds the channel plus forwarded-from chats in message
-		order; `users` holds message authors.
+		(when set), above `min_id`, and below `max_id` (when set), dated
+		before `offset_date` (when set), newest first, at most
+		min(`page_size`, `limit`) messages. `chats` holds the channel plus
+		forwarded-from chats in message order; `users` holds message authors.
 		'''
 		history = self.histories.get(channel_id, [])
 		selected = [
 			m for m in history
 			if (not offset_id or m['id'] < offset_id) and m['id'] > (min_id or 0)
-		][:page_size]
+			and (not max_id or m['id'] < max_id)
+			and (not offset_date or m['date'] < offset_date)
+		][:min(page_size, limit) if limit else page_size]
 
 		chat_ids, user_ids = [], []
 		if selected:
@@ -211,6 +224,8 @@ class FakeTelegramClient:
 	- `authorized`: initial authorization state.
 	- `password`: when set, the account has two-step verification and a
 	  correct code raises SessionPasswordNeededError.
+	- `honor_bounds`: when False, history requests ignore min_id, max_id,
+	  and offset_date (a server that disregards a bound).
 	- `script(kind, *outcomes)`: per-call outcomes for `kind` (a method
 	  name or a request type name such as 'GetHistoryRequest'). An outcome
 	  is None (normal), an exception (raised), or an async callable
@@ -223,11 +238,13 @@ class FakeTelegramClient:
 			authorized=True,
 			password=None,
 			code=FIXTURE_CODE,
-			page_size=2
+			page_size=2,
+			honor_bounds=True
 		):
 		self.world = world or FixtureWorld()
 		self.authorized = authorized
 		self.page_size = page_size
+		self.honor_bounds = honor_bounds
 		self.flood_sleep_threshold = 60
 		self._password = password
 		self._code = code
@@ -359,10 +376,20 @@ class FakeTelegramClient:
 
 		if kind == 'GetFullChannelRequest':
 			return self.world.full_channel(request.channel)
+		if not self.honor_bounds:
+			return self.world.page(
+				request.peer,
+				offset_id=request.offset_id,
+				limit=request.limit,
+				page_size=self.page_size
+			)
 		return self.world.page(
 			request.peer,
 			offset_id=request.offset_id,
 			min_id=request.min_id,
+			max_id=request.max_id,
+			offset_date=request.offset_date or None,
+			limit=request.limit,
 			page_size=self.page_size
 		)
 

@@ -136,10 +136,22 @@ Messages
 '''
 
 # get posts
-async def get_posts(client, source, min_id=0, offset_id=0):
+async def get_posts(
+		client,
+		source,
+		min_id=0,
+		offset_id=0,
+		*,
+		max_id=0,
+		offset_date=0,
+		limit=100
+	):
 	'''
 	Source: entity (str | int | Peer | InputPeer)
 		More on InputPeer: https://tl.telethon.dev/types/input_peer.html
+	min_id / max_id: exclusive message-id bounds (0 = none)
+	offset_date: datetime; only messages sent before it (0 = none)
+	limit: page size, at most 100
 
 	Reference:
 		Telethon: https://tl.telethon.dev/methods/messages/get_history.html
@@ -150,12 +162,12 @@ async def get_posts(client, source, min_id=0, offset_id=0):
 		GetHistoryRequest(
 			peer=source,
 			hash=0,
-			limit=100,
-			max_id=0,
+			limit=limit,
+			max_id=max_id,
 			min_id=min_id,
 			offset_id=offset_id,
 			add_offset=0,
-			offset_date=0,
+			offset_date=offset_date,
 		)
 	)
 
