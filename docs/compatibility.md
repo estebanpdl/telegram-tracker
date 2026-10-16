@@ -52,6 +52,28 @@ Invocations and outputs are unchanged from commit `9b0ec71`. The canonical
 | Empty history, empty batch, all targets failed | Crash | Empty `<channel>_messages.json`; header-correct `counter.csv` / `collected_chats.csv` |
 | Batch pause | `time.sleep(2)` blocking the loop | `await asyncio.sleep(2)` between resolved channels (removed in Phase 6) |
 
+### Phase 3 changes to the builders
+
+`build-datasets.py` and `channels-to-network.py` are thin wrappers around `datasets.build_dataset`
+and `network.build_network`. Outputs, columns, and graph meaning are unchanged: `msgs_dataset.csv`
+is still appended to, so a rerun duplicates rows; `collected_chats.xlsx` is replaced; `Graph.gexf`
+is a directed, unweighted graph whose repeated observations collapse into one edge.
+
+| Behavior | Baseline | Now |
+|---|---|---|
+| Python 3.14 / pandas 3 / matplotlib 3.11 | Crash (import-time loop, `infer_datetime_format`, `cm.get_cmap`) | Runs; `colormaps['viridis'].resampled(n)` replaces `get_cmap` |
+| Imports | `utils` pulled in Telethon and a loop | No Telethon, config, or session access; plotting loads only when the image is drawn |
+| Missing or malformed input (CSV, JSON, `source` literal, `counter`, missing columns or message fields) | Traceback, sometimes after a partial write | Exit 1 with `> build-dataset: ...` / `> build-network: ...` before anything is written |
+| Partial writes | Rows appended one by one into `msgs_dataset.csv` | Rows are appended to a copy that replaces the file (`os.replace`), and so are the XLSX, GEXF, and PNG |
+| No message files | No `msgs_dataset.csv` | Header-only `msgs_dataset.csv` |
+| No edges | Crash in `pd.concat([])` | Empty `Graph.gexf` and a blank `network.png` |
+| Equal node degrees | Division by zero | Every node is drawn at size 275 (the middle of 50–500) |
+| Messages file order | Filesystem glob order | Sorted paths |
+| Source order within a chat | `set` order (varies per process) | First occurrence; the edge set is unchanged |
+
+A row whose `counter` is empty (for example a chat appended by an earlier run that this run's
+counter did not cover) is rejected with its line number. The rerun merge itself is fixed in Phase 5.
+
 ### Login
 
 An authorized session (`./session_file.session`) skips every prompt. Otherwise the
@@ -81,11 +103,11 @@ client, which creates the session.
 | Event loop | `main.py` and `utils/__init__.py` call `asyncio.get_event_loop()` at import. Python 3.14 raises `RuntimeError: There is no current event loop`, so the collector and both builders (which import `utils`) fail before doing any work. | Resolved in Phase 2: one `asyncio.run` per collection; no import-time loop |
 | Event loop | Telethon 1.45 binds a client to the loop that connects it and refuses use from another loop; creating a client outside a running loop makes Telethon create and set a global loop. | Resolved in Phase 2: the client is created, connected, and disconnected inside one running loop |
 | Import side effects | `main.py` parses argv, reads `config/config.ini`, and connects at import. | Resolved in Phase 2: `main()` entry guard; `utils` no longer imports Telethon |
-| pandas 3 | `pd.to_datetime(..., infer_datetime_format=True)` raises `TypeError`. Used by `utils.get_forward_attrs` (dataset builder) and `utils.timestamp_attrs`. The flag has been a no-op since pandas 2.0, so dropping it preserves behavior. | Phase 3 |
-| matplotlib 3.11 | `matplotlib.cm.get_cmap` no longer exists; `channels-to-network.py` uses it. `matplotlib.colormaps[name].resampled(n)` is the replacement. | Phase 3 |
-| Graph edge cases | No-edge input fails in `pd.concat([])`; equal node degrees divide by zero in `normalize_values`. | Phase 3 |
+| pandas 3 | `pd.to_datetime(..., infer_datetime_format=True)` raises `TypeError`. Used by `utils.get_forward_attrs` (dataset builder) and `utils.timestamp_attrs`. The flag has been a no-op since pandas 2.0, so dropping it preserves behavior. | Resolved in Phase 3 |
+| matplotlib 3.11 | `matplotlib.cm.get_cmap` no longer exists; `channels-to-network.py` uses it. `matplotlib.colormaps[name].resampled(n)` is the replacement. | Resolved in Phase 3 |
+| Graph edge cases | No-edge input fails in `pd.concat([])`; equal node degrees divide by zero in `normalize_values`. | Resolved in Phase 3 |
 
-The test suite pins the pandas and matplotlib removals in
+The test suite pins the pandas and matplotlib removals and checks that project code no longer calls them in
 `tests/test_environment.py::KnownLibraryRemovalTests`, so a dependency change is visible.
 
 ## Offline test harness
@@ -107,7 +129,11 @@ The test suite pins the pandas and matplotlib removals in
   `api/__init__.py` (Telethon request helpers and client factory), `api/auth.py`
   (login), `utils/__init__.py` (pure helpers). Fakes replace the client and the
   prompts; no test constructs a real client.
+- Builder modules: `datasets.py` and `network.py`. `tests/builder_data.py` collects the
+  batch scenario once with the fake client and copies it into each test's temporary
+  directory, and runs the wrapper scripts in a fresh guarded interpreter that reports
+  whether Telethon, the collector, or matplotlib were loaded.
 - `tests/fixtures/expected/` records expectations from static inspection of the
   baseline code: `collection.json` (request sequence, files, counter, chats, JSON
   fields, and the intended-fix ledger F1–F6), `dataset.json`, and `network.json`
-  (for Phase 3). Preserved behavior and intended fixes are listed separately there.
+  (checked by the Phase 3 builder tests). Preserved behavior and intended fixes are listed separately there.
