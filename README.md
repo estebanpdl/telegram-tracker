@@ -22,7 +22,7 @@ Files are saved by default in a folder called *output/data*. These folders are c
 
 **Software required**
 
-* [Python 3.x](https://www.python.org/)
+* [Python 3.14](https://www.python.org/) (tested with 3.14.7; pinned library versions and known limitations are in [docs/compatibility.md](docs/compatibility.md))
 * [Telegram API credentials](https://my.telegram.org/auth?to=apps)
 	+ Telegram account
 	+ App `api_id`
