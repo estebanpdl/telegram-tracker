@@ -31,7 +31,7 @@ python-dateutil 2.9.0.post0, rsa 4.9.1, six 1.17.0, tzdata 2026.5.
 
 ## Current CLI contract
 
-Baseline behavior at commit `9b0ec71`, before the CLI phases. The canonical
+Invocations and outputs are unchanged from commit `9b0ec71`. The canonical
 `python main.py <subcommand>` forms are planned in Phase 4 and do not exist yet.
 
 | Invocation | Inputs | Outputs | Planned canonical form |
@@ -41,17 +41,46 @@ Baseline behavior at commit `9b0ec71`, before the CLI phases. The canonical
 | `python build-datasets.py [--data-path/-d DIR]` | `<DIR>/**/*_messages.json`, `<DIR>/collected_chats.csv` | `msgs_dataset.csv` (append), `collected_chats.xlsx` (replace) | `python main.py build-dataset --data-path DIR` |
 | `python channels-to-network.py [--data-path/-d DIR]` | `<DIR>/collected_chats.csv` (`username`, `counter`, `source`) | `Graph.gexf`, `network.png` | `python main.py build-network --data-path DIR` |
 
-Authentication: a session without authorization requests a login code, prompts for it,
-and signs in. Phase 2 adds the Telegram cloud-password (two-step verification) step to
-the same flow.
+### Phase 2 changes to the collection command
+
+| Behavior | Baseline | Now |
+|---|---|---|
+| Target selectors | `required=` computed from `sys.argv`; the "both given" check never fired | Required mutually exclusive group: exactly one of `--telegram-channel` / `--batch-file`; `--flag=value` works |
+| Unreadable `--batch-file` | Traceback after connecting | Exit 2 before credentials are read |
+| Missing/private/invalid target | Missing: logged; private: crash | Both logged to `_exceptions-channels-not-found.txt`; the run continues |
+| Exit code | 0 unless a traceback | 0 all targets collected; 1 any target failed or login failed; 130 interrupted; 2 argument errors |
+| Empty history, empty batch, all targets failed | Crash | Empty `<channel>_messages.json`; header-correct `counter.csv` / `collected_chats.csv` |
+| Batch pause | `time.sleep(2)` blocking the loop | `await asyncio.sleep(2)` between resolved channels (removed in Phase 6) |
+
+### Login
+
+An authorized session (`./session_file.session`) skips every prompt. Otherwise the
+collector requests a login code, prompts `Enter the code: `, and signs in. When the
+account has two-step verification, Telegram answers with `SessionPasswordNeededError`
+and the collector prompts `Enter your two-step verification password: ` without echo
+(`getpass`; it refuses to fall back to an echoing prompt), then signs in on the same
+client, which creates the session.
+
+- At most 3 attempts each for the code and the password; an expired code stops at once.
+- A rate limit (`FloodWaitError`) during the code request or sign-in stops the run. The
+  login temporarily sets Telethon's `flood_sleep_threshold` to 0 so nothing retries
+  silently, then restores it for collection.
+- Unavailable input (EOF) and Telegram refusals exit 1 with a message that names the
+  failing step only. Ctrl+C at a prompt exits 130. The client disconnects once in every
+  case.
+- The password is never a CLI argument and is never written, logged, or kept beyond
+  the `sign_in` call.
+- Prompts need a real terminal: run `python main.py ...` inside an activated
+  `telegram-tracker` environment. `conda run` does not attach the terminal's input by
+  default.
 
 ## Known limitations at baseline
 
 | Area | Limitation | Resolution |
 |---|---|---|
-| Event loop | `main.py` and `utils/__init__.py` call `asyncio.get_event_loop()` at import. Python 3.14 raises `RuntimeError: There is no current event loop`, so the collector and both builders (which import `utils`) fail before doing any work. | Phase 2 (one `asyncio.run` per collection, no import-time loop) |
-| Event loop | Telethon 1.45 binds a client to the loop that connects it and refuses use from another loop; creating a client outside a running loop makes Telethon create and set a global loop. | Phase 2 (create, connect, and disconnect inside one running loop) |
-| Import side effects | `main.py` parses argv, reads `config/config.ini`, and connects at import. | Phase 2 (entry guard; services importable) |
+| Event loop | `main.py` and `utils/__init__.py` call `asyncio.get_event_loop()` at import. Python 3.14 raises `RuntimeError: There is no current event loop`, so the collector and both builders (which import `utils`) fail before doing any work. | Resolved in Phase 2: one `asyncio.run` per collection; no import-time loop |
+| Event loop | Telethon 1.45 binds a client to the loop that connects it and refuses use from another loop; creating a client outside a running loop makes Telethon create and set a global loop. | Resolved in Phase 2: the client is created, connected, and disconnected inside one running loop |
+| Import side effects | `main.py` parses argv, reads `config/config.ini`, and connects at import. | Resolved in Phase 2: `main()` entry guard; `utils` no longer imports Telethon |
 | pandas 3 | `pd.to_datetime(..., infer_datetime_format=True)` raises `TypeError`. Used by `utils.get_forward_attrs` (dataset builder) and `utils.timestamp_attrs`. The flag has been a no-op since pandas 2.0, so dropping it preserves behavior. | Phase 3 |
 | matplotlib 3.11 | `matplotlib.cm.get_cmap` no longer exists; `channels-to-network.py` uses it. `matplotlib.colormaps[name].resampled(n)` is the replacement. | Phase 3 |
 | Graph edge cases | No-edge input fails in `pd.concat([])`; equal node degrees divide by zero in `normalize_values`. | Phase 3 |
@@ -74,6 +103,10 @@ The test suite pins the pandas and matplotlib removals in
   channels sharing a discovered chat, an empty channel, missing and private targets,
   Unicode text, forwards, replies, service messages, and web page, document, poll,
   geo, contact, and venue media.
+- Collection modules: `collector.py` (async run, pagination, counting, aggregate files),
+  `api/__init__.py` (Telethon request helpers and client factory), `api/auth.py`
+  (login), `utils/__init__.py` (pure helpers). Fakes replace the client and the
+  prompts; no test constructs a real client.
 - `tests/fixtures/expected/` records expectations from static inspection of the
   baseline code: `collection.json` (request sequence, files, counter, chats, JSON
   fields, and the intended-fix ledger F1–F6), `dataset.json`, and `network.json`
