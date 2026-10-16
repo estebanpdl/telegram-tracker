@@ -16,3 +16,6 @@ session_file.session-journal
 # files
 test.py
 chatgpt.py
+
+# development plan
+plan/*
