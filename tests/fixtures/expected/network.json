@@ -1,0 +1,33 @@
+{
+  "_about": "Network expectations from static inspection of baseline channels-to-network.py. Input is a collected_chats.csv; only username, counter, and source are read. Edges point from each source channel to the chat it mentions; the graph is a directed, unweighted nx.DiGraph, so repeated observations and duplicate rows collapse into one edge. Phase 3 consumes these.",
+  "collection_batch": {
+    "input": "collected_chats.csv produced by the collection 'batch' scenario (tests/fixtures/expected/collection.json)",
+    "nodes": ["alpha_fx", "alpha_chat_fx", "empty_fx", "shared_fx", "beta_fx", "shared_chat_fx"],
+    "edges": [
+      ["alpha_fx", "alpha_chat_fx"],
+      ["empty_fx", "alpha_chat_fx"],
+      ["alpha_fx", "shared_fx"],
+      ["beta_fx", "shared_fx"],
+      ["alpha_fx", "shared_chat_fx"]
+    ],
+    "self_sources_excluded": ["alpha_fx", "beta_fx", "empty_fx"],
+    "outputs": ["Graph.gexf", "network.png"]
+  },
+  "no_edges": {
+    "input": "tests/fixtures/network/no_edges.csv",
+    "nodes": [],
+    "edges": [],
+    "legacy": "crash: pd.concat([]) raises ValueError('No objects to concatenate')",
+    "intended_fix": "Phase 3: write an empty Graph.gexf and an empty network.png"
+  },
+  "equal_degree": {
+    "input": "tests/fixtures/network/equal_degree.csv",
+    "nodes": ["hub_fx", "leaf_fx"],
+    "edges": [["hub_fx", "leaf_fx"]],
+    "legacy": "crash: normalize_values divides by zero when every node has the same degree",
+    "intended_fix": "Phase 3: use one finite constant node size"
+  },
+  "compatibility": [
+    "matplotlib 3.11 removed matplotlib.cm.get_cmap; Phase 3 must switch to matplotlib.colormaps[...] (behavior-preserving)."
+  ]
+}

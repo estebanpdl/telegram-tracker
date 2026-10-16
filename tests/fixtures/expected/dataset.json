@@ -1,0 +1,29 @@
+{
+  "_about": "Dataset expectations from static inspection of baseline build-datasets.py over the collection 'batch' scenario output. Phase 3 consumes these. Rows exist only for '_' == 'Message'; MessageService items count toward other_actions but not rows. Row order follows glob order of <data>/**/*_messages.json, then stored message order.",
+  "msgs_dataset_rows": 11,
+  "msgs_dataset_rows_after_second_run": 22,
+  "append_behavior": "msgs_dataset.csv is opened in append mode with the header written only when the file is missing, so a second run duplicates every row. collected_chats.xlsx is overwritten.",
+  "chat_stats": {
+    "alpha_fx": {"collected_actions": 7, "collected_posts": 5, "replies": 1, "other_actions": 1, "number_views": 360, "forwards": 8, "replies_received": 3},
+    "beta_fx": {"collected_actions": 5, "collected_posts": 4, "replies": 1, "other_actions": 0, "number_views": 58, "forwards": 1, "replies_received": 4},
+    "empty_fx": {"collected_actions": 0, "collected_posts": 0, "replies": 0, "other_actions": 0, "number_views": 0, "forwards": 0, "replies_received": 0},
+    "alpha_chat_fx": {"collected_actions": 0, "collected_posts": 0, "replies": 0, "other_actions": 0, "number_views": 0, "forwards": 0, "replies_received": 0}
+  },
+  "xlsx_rows": 7,
+  "rows": {
+    "msg_iteration.0.user.alpha_fx.post.10": {"channel_id": 101, "msg_link": "https://t.me/alpha_fx/10", "cleaned_message": "Synthetic update — тест 🚀", "views": 100, "number_replies": 2, "number_forwards": 5, "is_forward": 0, "is_reply": 0, "contains_media": 0, "has_url": 0},
+    "msg_iteration.1.user.alpha_fx.post.9": {"is_forward": 1, "forward_msg_from_peer_type": "PeerChannel", "forward_msg_from_peer_id": 201, "forward_msg_from_peer_name": "shared_fx", "forward_msg_link": "https://t.me/shared_fx/55", "forward_msg_date": "2026-01-08 08:00:00", "forward_msg_date_string": "2026-01-08"},
+    "msg_iteration.2.user.alpha_fx.post.8": {"media_type": "MessageMediaWebPage", "has_url": 1, "url": "https://www.example.org/a", "domain": "example.org", "url_title": "Example A", "url_description": "Synthetic page"},
+    "msg_iteration.3.user.alpha_fx.post.7": {"is_reply": 1, "reply_to_msg_id": 8, "reply_msg_link": "https://t.me/alpha_fx/8", "media_type": "MessageMediaDocument", "document_type": "video/mp4", "document_id": 7001, "document_video_duration": 12.5, "document_filename": "clip_fx.mp4"},
+    "msg_iteration.4.user.alpha_fx.post.6": {"is_forward": 1, "forward_msg_from_peer_name": "shared_fx", "forward_msg_link": "https://t.me/shared_fx/54"},
+    "msg_iteration.6.user.alpha_fx.post.4": {"media_type": "MessageMediaPoll", "poll_id": 7701, "poll_question": "Synthetic question?", "poll_total_voters": 12, "is_forward": 1, "forward_msg_from_peer_type": "PeerChat", "forward_msg_from_peer_id": 204, "forward_msg_from_peer_name": null, "forward_msg_link": null},
+    "msg_iteration.0.user.beta_fx.post.5": {"cleaned_message": "Привет, мир 🌍", "media_type": "MessageMediaGeo", "geo_type": "MessageMediaGeo", "lat": 40.0, "lng": -74.0},
+    "msg_iteration.1.user.beta_fx.post.4": {"cleaned_message": "مرحبا بالعالم", "number_replies": 4, "number_forwards": 1},
+    "msg_iteration.2.user.beta_fx.post.3": {"msg_from_peer": "PeerUser", "msg_from_id": 9001, "media_type": "MessageMediaContact", "contact_phone_number": "+0000000000", "contact_name": "Test Contact", "contact_userid": 9002, "forward_msg_from_peer_id": 205, "forward_msg_from_peer_name": null, "forward_msg_link": null},
+    "msg_iteration.3.user.beta_fx.post.2": {"is_reply": 1, "reply_to_msg_id": 5, "reply_msg_link": "https://t.me/beta_fx/5", "media_type": "MessageMediaVenue", "geo_type": "MessageMediaVenue", "lat": 51.5, "lng": -0.12, "venue_id": "fx-venue-1", "venue_type": "cafe", "venue_title": "Synthetic Venue", "venue_address": "1 Example Street", "venue_provider": "foursquare", "forward_msg_link": "https://t.me/shared_fx/60"},
+    "msg_iteration.4.user.beta_fx.post.1": {"forward_msg_from_peer_id": 203, "forward_msg_from_peer_name": null, "forward_msg_link": null}
+  },
+  "compatibility": [
+    "pandas 3 removed to_datetime(infer_datetime_format=...); utils.get_forward_attrs and utils.timestamp_attrs raise TypeError. Phase 3 must drop the argument (a no-op since pandas 2.0, so behavior-preserving)."
+  ]
+}
