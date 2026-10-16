@@ -21,8 +21,8 @@ import offline_guard
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TESTS = os.path.join(ROOT, 'tests')
 
-COLLECTION_MODULES = ['utils', 'api', 'api.auth', 'collector', 'main']
-BUILDER_MODULES = ['utils', 'datasets', 'network']
+COLLECTION_MODULES = ['utils', 'api', 'api.auth', 'collector', 'cli', 'main']
+BUILDER_MODULES = ['utils', 'cli', 'datasets', 'network']
 
 PROBE = '''
 import asyncio, json, sys

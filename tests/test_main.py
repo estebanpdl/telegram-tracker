@@ -20,6 +20,7 @@ import offline_guard
 from api.auth import ensure_authorized
 from fakes import FIXTURE_CODE, FIXTURE_PHONE, FakeTelegramClient, ScriptedPrompt
 
+import cli
 import collector
 import main
 
@@ -89,10 +90,13 @@ class ArgumentTests(MainTestCase):
 		self.assertIn('cannot read --batch-file', err)
 
 	def test_no_password_argument_exists(self):
-		parser = main.build_parser()
-		self.assertFalse([a for a in parser._actions if 'pass' in (a.dest or '')])
-		code, _, _ = self.run_main(['--telegram-channel', 'alpha_fx', '--password', PASSWORD], client_factory=None)
-		self.assertEqual(code, 2)
+		top, subparsers = cli.build_parsers()
+		for parser in (top, cli.build_legacy_parser(), *subparsers.values()):
+			self.assertFalse([a for a in parser._actions if 'pass' in (a.dest or '')])
+		for argv in (['--telegram-channel', 'alpha_fx', '--password', PASSWORD],
+				['collect', '--telegram-channel', 'alpha_fx', '--password', PASSWORD]):
+			code, _, _ = self.run_main(argv, client_factory=None)
+			self.assertEqual(code, 2)
 
 
 class CollectionTests(MainTestCase):
