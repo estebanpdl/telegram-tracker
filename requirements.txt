@@ -1,7 +1,9 @@
-telethon
-pandas
-openpyxl
-tqdm
-networkx
-matplotlib
-python-louvain
+# Tested with Python 3.14.7 (conda env `telegram-tracker`) on 2026-10-16.
+# Telethon must stay on 1.x; a 2.x migration needs a separate decision.
+telethon==1.45.0
+pandas==3.0.6
+openpyxl==3.1.5
+tqdm==4.70.1
+networkx==3.7
+matplotlib==3.11.2
+python-louvain==0.16
