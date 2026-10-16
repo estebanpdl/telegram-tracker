@@ -22,6 +22,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TESTS = os.path.join(ROOT, 'tests')
 
 COLLECTION_MODULES = ['utils', 'api', 'api.auth', 'collector', 'main']
+BUILDER_MODULES = ['utils', 'datasets', 'network']
 
 PROBE = '''
 import asyncio, json, sys
@@ -87,6 +88,27 @@ class ImportSafetyTests(offline_guard.OfflineTestCase):
 		self.assertEqual(output, [])
 		self.assertEqual(stderr, '')
 		self.assertEqual(listing, [])
+
+	def test_builder_modules_import_inertly(self):
+		report, output, stderr, listing = import_in_fresh_process(BUILDER_MODULES)
+		self.assertIsNone(report['error'])
+		self.assertEqual(report['imported'], BUILDER_MODULES)
+		self.assertEqual(report['loops'], [])
+		self.assertEqual(report['violations'], [])
+		self.assertEqual((output, stderr, listing), ([], '', []))
+
+	def test_builders_load_no_telethon_or_heavy_libraries_at_import(self):
+		code = textwrap.dedent(f'''
+			import sys
+			sys.path[:0] = [{TESTS!r}, {ROOT!r}]
+			import datasets, network
+			print(sorted(m for m in ('telethon', 'api', 'collector', 'matplotlib', 'community', 'pandas', 'networkx') if m in sys.modules))
+		''')
+		completed = subprocess.run(
+			[sys.executable, '-I', '-c', code],
+			capture_output=True, text=True, timeout=120
+		)
+		self.assertEqual(completed.stdout.strip(), '[]', completed.stderr)
 
 	def test_utils_no_longer_loads_telethon(self):
 		code = textwrap.dedent(f'''
