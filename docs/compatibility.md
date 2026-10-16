@@ -31,15 +31,50 @@ python-dateutil 2.9.0.post0, rsa 4.9.1, six 1.17.0, tzdata 2026.5.
 
 ## Current CLI contract
 
-Invocations and outputs are unchanged from commit `9b0ec71`. The canonical
-`python main.py <subcommand>` forms are planned in Phase 4 and do not exist yet.
+Since Phase 4, `python main.py <command>` (`cli.py`) is the canonical interface, and the
+legacy forms below reach the same handlers. Outputs are unchanged from commit `9b0ec71`
+except for the corrections listed per phase. The README has the migration table.
 
-| Invocation | Inputs | Outputs | Planned canonical form |
+| Legacy invocation | Inputs | Outputs | Canonical form |
 |---|---|---|---|
 | `python main.py --telegram-channel NAME` | one channel; `--limit-download-to-channel-metadata`, `--output/-o DIR` (default `./output/data`), `--min-id N` | `<DIR>/<NAME>/<NAME>.json`, `<NAME>_messages.json`, `chats.txt`, `collected_chats.csv`, `counter.csv`, `_exceptions-channels-not-found.txt`, `_exceptions-users-not-found.txt` | `python main.py collect --telegram-channel NAME` |
 | `python main.py --batch-file FILE` | one target per line; same options | same, one folder per channel | `python main.py collect --batch-file FILE` |
 | `python build-datasets.py [--data-path/-d DIR]` | `<DIR>/**/*_messages.json`, `<DIR>/collected_chats.csv` | `msgs_dataset.csv` (append), `collected_chats.xlsx` (replace) | `python main.py build-dataset --data-path DIR` |
 | `python channels-to-network.py [--data-path/-d DIR]` | `<DIR>/collected_chats.csv` (`username`, `counter`, `source`) | `Graph.gexf`, `network.png` | `python main.py build-network --data-path DIR` |
+
+### Phase 4: unified CLI
+
+- **Dispatch.** A first token that is an option other than `-h`/`--help` selects the
+  legacy collection parser. That parser is frozen to the baseline flags: the selectors,
+  `--limit-download-to-channel-metadata`, `--output/-o`, and `--min-id`. Anything else
+  goes to the canonical parser.
+- **Help.** `python main.py` with no arguments prints the overview to stderr and exits 2.
+  `--help` exits 0.
+- **Builder wrappers.** Each keeps its own `--data-path/-d` parser (`cli.builder_main`).
+- **Validation before credentials or service imports** (exit 2):
+  - selectors and the batch file;
+  - control bounds (`--concurrency` 1–10, `--request-interval` finite 0.1–60,
+    `--max-flood-wait` 0–3600, `--max-retries` 0–10);
+  - window values (dates parse, `--since` < `--until`, `--max-id` > `--min-id` + 1,
+    `--min-id` ≥ 0, `--max-messages` ≥ 1);
+  - window options with `--limit-download-to-channel-metadata` (rejected in `collect`;
+    the legacy form keeps accepting `--min-id` with it, as before);
+  - flags given to the wrong command.
+- **Request controls** are parsed and validated but **inert** until Phase 6. Their group
+  help says so, and they are not passed to the collector.
+- **History window** (`collector.HistoryWindow`, `collect` only):
+  - The server receives `min_id`/`max_id` on every page and `--until` as `offset_date`
+    on the first page.
+  - Every bound is also applied client-side.
+  - `--max-messages` shrinks the page `limit` and sends no request once reached.
+  - Paging stops at the first page reaching below `--since` or `--min-id`.
+  - Unfiltered and legacy `--min-id` requests are identical to Phase 2.
+- **Replace warning.** A filtered run warns on stderr, before credentials, when a target
+  already has `<channel>_messages.json` in the output folder (count plus the first 10
+  names). The run header prints the active window.
+- **Missing service dependencies** give exit 1 with `missing dependency '<name>'`.
+  Help works without Telethon, pandas, NetworkX, matplotlib, python-louvain, tqdm,
+  or openpyxl.
 
 ### Phase 2 changes to the collection command
 
