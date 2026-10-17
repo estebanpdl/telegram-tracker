@@ -337,5 +337,3 @@ def is_legacy_collection(argv):
 	Legacy collection: the first token is an option other than help.
 	'''
 	return bool(argv) and argv[0].startswith('-') and argv[0] not in ('-h', '--help')
-
-
