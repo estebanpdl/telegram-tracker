@@ -40,10 +40,11 @@ from telethon import errors
 
 from api import CHANNEL_ACCESS_ERRORS, full_channel_req, get_entity_attrs, get_posts
 from request_policy import AccountStopped, RequestFailed, RequestPolicy
-from storage import OutputLock, OutputWriter, StatusFile
+from storage import OutputLock, OutputWriter
 from storage.files import history_path, merge_histories, newest_id, read_history
 from storage.records import COMPLETE, INTERRUPTED, PARTIAL, ChannelResult, \
 	EnrichOutcome, HistoryUnreadable, StorageError
+from storage.status import StatusFile
 from utils import JSONEncoder, create_dirs
 
 

@@ -37,6 +37,7 @@ import storage
 import storage.aggregates
 import storage.files
 import storage.records
+import storage.status
 
 from collector import HistoryWindow, MetadataCache, Requests
 from utils import DataInputError
@@ -493,7 +494,7 @@ class BuilderGateTests(StorageTestCase):
 		with open(os.path.join(self.out, storage.records.STATUS_FILE), 'w', encoding='utf-8') as fh:
 			fh.write('{"state": ')
 		with self.assertRaisesRegex(DataInputError, 'cannot be read'):
-			storage.check_collection_status(self.out)
+			storage.status.check_collection_status(self.out)
 
 	def test_notes(self):
 		self.write_status(
@@ -501,18 +502,18 @@ class BuilderGateTests(StorageTestCase):
 			targets=[{'input': 'a_fx', 'status': 'succeeded'}, {'input': 'b_fx', 'status': 'failed'}],
 			parameters={'mode': 'window', 'window_description': 'id > 6'}
 		)
-		notes = storage.check_collection_status(self.out)
+		notes = storage.status.check_collection_status(self.out)
 		self.assertEqual(len(notes), 2)
 		self.assertIn('1 failed target(s), excluded from its output: b_fx', notes[0])
 		self.assertIn('history window (id > 6)', notes[1])
-		self.assertEqual(len(storage.check_collection_status(self.out, messages=False)), 1)
+		self.assertEqual(len(storage.status.check_collection_status(self.out, messages=False)), 1)
 
 		self.write_status(parameters={'mode': 'update'})
-		self.assertIn('duplicating earlier rows', storage.check_collection_status(self.out)[0])
+		self.assertIn('duplicating earlier rows', storage.status.check_collection_status(self.out)[0])
 
 	def test_folder_without_sidecar_is_accepted(self):
 		os.makedirs(self.out)
-		self.assertEqual(storage.check_collection_status(self.out), [])
+		self.assertEqual(storage.status.check_collection_status(self.out), [])
 
 	async def test_builders_print_notes_for_a_partial_collection(self):
 		await self.collect(BATCH)
