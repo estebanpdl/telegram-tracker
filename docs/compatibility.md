@@ -71,13 +71,13 @@ Updates do not refresh earlier edited or deleted Telegram posts.
 
 One event loop owns one client/session, including creation, connection, login,
 and disconnect. Imports do not parse arguments, read credentials, connect, or
-create a loop. `collect_channel` returns a `storage.ChannelResult` without writing.
+create a loop. `collect_channel` returns a `storage.records.ChannelResult` without writing.
 A shared `MetadataCache` coalesces full-channel requests. Successes and permanent
 access errors are cached per run; other failures are not. An inaccessible linked
 chat ends its parent's enrichment as not found, retaining preceding linked-chat
 observations and logging the parent ID.
 
-`storage.OutputWriter` writes completed results and replays their chat observations
+`storage.writer.OutputWriter` writes completed results and replays their chat observations
 in input order for deterministic aggregates:
 
 - Channel JSON/history are written after collection completes. Request failures

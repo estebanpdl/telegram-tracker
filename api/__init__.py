@@ -2,7 +2,7 @@
 '''
 Narrow adapter around Telethon. Request helpers are coroutines that take a
 client; nothing here connects, reads config, or creates an event loop at
-import. The collector owns the client lifecycle (see collector.py) and the
+import. The collector owns the client lifecycle (see collector/run.py) and the
 interactive login lives in api/auth.py.
 '''
 
