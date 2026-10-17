@@ -42,6 +42,7 @@ from api import CHANNEL_ACCESS_ERRORS, full_channel_req, get_entity_attrs, get_p
 from request_policy import AccountStopped, RequestFailed, RequestPolicy
 from storage import OutputLock, OutputWriter, StatusFile, observe_chat, \
 	observe_linked_chat, new_counter_entry
+from storage.files import history_path, merge_histories, newest_id, read_history
 from storage.records import COMPLETE, INTERRUPTED, PARTIAL, ChannelResult, \
 	EnrichOutcome, HistoryUnreadable, StorageError
 from utils import JSONEncoder, create_dirs
@@ -506,12 +507,12 @@ async def collect_channel(
 	window = window or HistoryWindow()
 	result = ChannelResult(index=index, target=target)
 
-	path = storage.history_path(output_folder, target)
+	path = history_path(output_folder, target)
 	has_history = False
 	if update and not metadata_only:
 		if os.path.exists(path):
 			has_history = True
-			window = HistoryWindow(min_id=storage.newest_id(storage.read_history(path)))
+			window = HistoryWindow(min_id=newest_id(read_history(path)))
 		result.min_id = window.min_id
 
 	print('')
@@ -564,8 +565,8 @@ async def collect_channel(
 	elif not has_history:
 		result.history, result.history_mode = data, 'created'
 	else:
-		earlier = storage.read_history(path)
-		result.history = storage.merge_histories(earlier, data)
+		earlier = read_history(path)
+		result.history = merge_histories(earlier, data)
 		result.history_mode = 'unchanged' if result.history is None else 'merged'
 
 	result.messages = len((result.history or earlier)['messages'])
@@ -774,7 +775,7 @@ async def _collect_locked(client, summary, policy, parameters, *, metadata_only,
 			if payload.min_id is not None:
 				entry['min_id'] = payload.min_id
 			if payload.history_mode == 'not_collected' and os.path.isfile(
-					storage.history_path(summary.output_folder, target)):
+					history_path(summary.output_folder, target)):
 				entry['stale_history'] = True
 		elif kind == 'duplicate':
 			entry.update(status='duplicate', alias_of=payload)

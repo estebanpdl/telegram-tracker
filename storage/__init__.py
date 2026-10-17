@@ -35,9 +35,9 @@ from datetime import datetime, timezone
 # import local submodules
 from storage.records import CHANNELS_NOT_FOUND, COUNTER_COLUMNS, \
 	DATASET_STAT_COLUMNS, INTERRUPTED, LOCK_FILE, RUNNING, STATUS_FILE, \
-	STATUS_FORMAT, USERS_NOT_FOUND, HistoryUnreadable, OutputLocked, StorageError
-from storage.files import append_lines, replace_file, write_json, \
-	write_json_pretty, write_text
+	STATUS_FORMAT, USERS_NOT_FOUND, OutputLocked, StorageError
+from storage.files import append_lines, history_path, replace_file, \
+	write_json, write_json_pretty, write_text
 from utils import DataInputError, chats_dataset_columns, create_dirs, discard
 
 
@@ -251,76 +251,6 @@ def write_aggregates(output_folder, agg):
 	append_lines(f'{output_folder}/{USERS_NOT_FOUND}', agg.users_not_found)
 
 
-'''
-
-Message histories (--update)
-
-'''
-
-def history_path(output_folder, target):
-	return f'{output_folder}/{target}/{target}_messages.json'
-
-
-def read_history(path):
-	'''
-	Load an existing messages file for --update. Raises HistoryUnreadable
-	when it cannot be read or does not have the collector's shape
-	(messages with integer ids; chats/users lists of objects with ids).
-	'''
-	try:
-		with open(path, encoding='utf-8') as reader:
-			data = json.load(reader)
-	except (OSError, UnicodeDecodeError, ValueError) as exc:
-		raise HistoryUnreadable(f'{path} cannot be read: {exc}') from None
-
-	def ids_ok(items):
-		return isinstance(items, list) and all(
-			isinstance(i, dict) and isinstance(i.get('id'), int)
-			and not isinstance(i.get('id'), bool)
-			for i in items
-		)
-
-	if not isinstance(data, dict) or not ids_ok(data.get('messages')):
-		raise HistoryUnreadable(f'{path} has no list of messages with integer ids')
-	for key in ('chats', 'users'):
-		if key in data and not ids_ok(data[key]):
-			raise HistoryUnreadable(f'{path} has a malformed "{key}" list')
-
-	return data
-
-
-def newest_id(history):
-	'''
-	Highest message id in a loaded history; 0 when it holds none.
-	'''
-	return max((m['id'] for m in history['messages']), default=0)
-
-
-def merge_histories(earlier, fetched):
-	'''
-	Merge a fetched payload into an earlier history. Returns None when
-	nothing new was fetched (the file stays as it is).
-
-	Messages: union by id, fetched copies win, newest (highest id) first.
-	chats / users: union by id, fetched copies first and winning.
-	Every other field (count, pts, ...) comes from the fetched response.
-	'''
-	if not fetched['messages']:
-		return None
-
-	by_id = {m['id']: m for m in earlier['messages']}
-	by_id.update({m['id']: m for m in fetched['messages']})
-
-	def union(key):
-		fresh = list(fetched.get(key, []))
-		seen = {i['id'] for i in fresh}
-		return fresh + [i for i in earlier.get(key, []) if i['id'] not in seen]
-
-	merged = dict(fetched)
-	merged['messages'] = sorted(by_id.values(), key=lambda m: m['id'], reverse=True)
-	merged['chats'] = union('chats')
-	merged['users'] = union('users')
-	return merged
 
 
 '''

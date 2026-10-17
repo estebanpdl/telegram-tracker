@@ -35,6 +35,7 @@ import cli
 import cli.collect
 import collector
 import storage
+import storage.files
 import storage.records
 
 
@@ -217,7 +218,7 @@ class FloodTests(SchedulerTestCase):
 		done = [t['input'] for t in status['targets'] if t['status'] == 'succeeded']
 		self.assertTrue(done)
 		for target in done:
-			read_json(storage.history_path(self.out, target))
+			read_json(storage.files.history_path(self.out, target))
 		self.assertTrue([t for t in status['targets'] if t['status'] == 'cancelled'])
 		self.assertEqual((client.disconnect_count, client.active_at_disconnect), (1, 0))
 		self.assertFalse(os.path.exists(storage.lock_path(self.out)))
@@ -251,7 +252,7 @@ class CancellationTests(SchedulerTestCase):
 		for entry in status['targets']:
 			folder = os.path.join(self.out, entry['input'])
 			if entry['status'] == 'succeeded':
-				read_json(storage.history_path(self.out, entry['input']))
+				read_json(storage.files.history_path(self.out, entry['input']))
 			else:
 				self.assertFalse(os.path.exists(folder), entry)
 		self.assertEqual((client.disconnect_count, client.active_at_disconnect), (1, 0))

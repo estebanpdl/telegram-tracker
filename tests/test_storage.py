@@ -528,7 +528,7 @@ class UpdateTests(StorageTestCase):
 	'''
 
 	def messages_path(self, target='alpha_fx'):
-		return storage.history_path(self.out, target)
+		return storage.files.history_path(self.out, target)
 
 	def history_requests(self):
 		return [r for r in self.client.requests if r['type'] == 'GetHistoryRequest']
@@ -634,12 +634,12 @@ class UpdateTests(StorageTestCase):
 			'chats': [{'id': 2, 'v': 'new'}, {'id': 3, 'v': 'new'}],
 			'users': []
 		}
-		merged = storage.merge_histories(earlier, fetched)
+		merged = storage.files.merge_histories(earlier, fetched)
 		self.assertEqual([(m['id'], m['v']) for m in merged['messages']], [(12, 'new'), (9, 'new'), (5, 'old')])
 		self.assertEqual([(c['id'], c['v']) for c in merged['chats']], [(2, 'new'), (3, 'new'), (1, 'old')])
 		self.assertEqual(merged['users'], [{'id': 7, 'v': 'old'}])
 		self.assertEqual(merged['count'], 5)
-		self.assertIsNone(storage.merge_histories(earlier, dict(fetched, messages=[])))
+		self.assertIsNone(storage.files.merge_histories(earlier, dict(fetched, messages=[])))
 
 
 class UpdateCliTests(offline_guard.OfflineTestCase):
