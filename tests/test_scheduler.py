@@ -34,6 +34,7 @@ import api
 import cli
 import cli.collect
 import collector
+import collector.outcomes
 import storage.files
 import storage.records
 import storage.writer
@@ -297,7 +298,7 @@ class TargetTests(offline_guard.OfflineTestCase):
 
 		async def fake_run_collection(targets, output_folder, **kwargs):
 			self.calls.append({'targets': targets, **kwargs})
-			return collector.CollectionSummary(
+			return collector.outcomes.CollectionSummary(
 				requested=targets, output_folder=output_folder, succeeded=list(targets)
 			)
 
