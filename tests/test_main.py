@@ -22,6 +22,7 @@ from api.auth import ensure_authorized
 from fakes import FIXTURE_CODE, FIXTURE_PHONE, FakeTelegramClient, ScriptedPrompt
 
 import cli
+import cli.parsers
 import collector
 import main
 
@@ -91,8 +92,8 @@ class ArgumentTests(MainTestCase):
 		self.assertIn('cannot read --batch-file', err)
 
 	def test_no_password_argument_exists(self):
-		top, subparsers = cli.build_parsers()
-		for parser in (top, cli.build_legacy_parser(), *subparsers.values()):
+		top, subparsers = cli.parsers.build_parsers()
+		for parser in (top, cli.parsers.build_legacy_parser(), *subparsers.values()):
 			self.assertFalse([a for a in parser._actions if 'pass' in (a.dest or '')])
 		for argv in (['--telegram-channel', 'alpha_fx', '--password', PASSWORD],
 				['collect', '--telegram-channel', 'alpha_fx', '--password', PASSWORD]):

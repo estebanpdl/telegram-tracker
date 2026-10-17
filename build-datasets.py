@@ -9,7 +9,8 @@ codes (cli.py). Reads only local files.
 '''
 
 # import local submodules
-from cli import BUILD_DATASET, builder_main
+from cli import builder_main
+from cli.parsers import BUILD_DATASET
 
 
 if __name__ == '__main__':
