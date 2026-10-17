@@ -23,6 +23,10 @@ TESTS = os.path.join(ROOT, 'tests')
 
 COLLECTION_MODULES = ['utils', 'api', 'api.auth', 'collector', 'cli', 'main']
 BUILDER_MODULES = ['utils', 'cli', 'datasets', 'network']
+STORAGE_MODULES = [
+	'storage', 'storage.records', 'storage.files', 'storage.aggregates',
+	'storage.status', 'storage.writer'
+]
 
 PROBE = '''
 import asyncio, json, sys
@@ -103,6 +107,29 @@ class ImportSafetyTests(offline_guard.OfflineTestCase):
 			sys.path[:0] = [{TESTS!r}, {ROOT!r}]
 			import datasets, network
 			print(sorted(m for m in ('telethon', 'api', 'collector', 'matplotlib', 'community', 'pandas', 'networkx') if m in sys.modules))
+		''')
+		completed = subprocess.run(
+			[sys.executable, '-I', '-c', code],
+			capture_output=True, text=True, timeout=120
+		)
+		self.assertEqual(completed.stdout.strip(), '[]', completed.stderr)
+
+	def test_storage_modules_import_inertly_and_load_no_services(self):
+		# the builders import storage: no module of it may reach Telethon,
+		# the collector, or an event loop
+		report, output, stderr, listing = import_in_fresh_process(STORAGE_MODULES)
+		self.assertIsNone(report['error'])
+		self.assertEqual(report['imported'], STORAGE_MODULES)
+		self.assertEqual(report['loops'], [])
+		self.assertEqual(report['violations'], [])
+		self.assertEqual((output, stderr, listing), ([], '', []))
+
+		modules = ', '.join(STORAGE_MODULES)
+		code = textwrap.dedent(f'''
+			import sys
+			sys.path[:0] = [{TESTS!r}, {ROOT!r}]
+			import {modules}
+			print(sorted(m for m in ('telethon', 'api', 'collector', 'request_policy', 'asyncio', 'pandas') if m in sys.modules))
 		''')
 		completed = subprocess.run(
 			[sys.executable, '-I', '-c', code],
