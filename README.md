@@ -84,6 +84,95 @@ phone = phone
 
 # Example usage
 
+## Commands
+
+`main.py` is the single entry point, with one subcommand per step. Builders run offline and only read local files.
+
+```
+python main.py collect --telegram-channel NAME [options]
+python main.py collect --batch-file FILE [options]
+python main.py build-dataset [--data-path DIR]
+python main.py build-network [--data-path DIR]
+```
+
+Run `python main.py --help` or `python main.py <command> --help` for the options. Help never needs credentials or a session.
+
+### Migrating from the earlier commands
+
+The earlier commands still work and reach the same code. They are supported through the first release, with no removal date.
+
+| Earlier command | Canonical command | Notes |
+|---|---|---|
+| `python main.py --telegram-channel NAME` | `python main.py collect --telegram-channel NAME` | |
+| `python main.py --batch-file FILE` | `python main.py collect --batch-file FILE` | |
+| `... --limit-download-to-channel-metadata` | `python main.py collect ... --limit-download-to-channel-metadata` | |
+| `... --output DIR` / `-o DIR` | `python main.py collect ... --output DIR` | Default `./output/data`, relative to the working directory |
+| `... --min-id N` | `python main.py collect ... --min-id N` | Same meaning: only messages with an id above N |
+| (none) | `python main.py collect ... --since/--until/--max-id/--max-messages` | History window: **`collect` only**. The earlier form accepts only `--min-id` |
+| (none) | `python main.py collect ... --concurrency/--request-interval/--max-flood-wait/--max-retries` | Request controls: `collect` only. Validated but not applied yet |
+| `python build-datasets.py [--data-path DIR]` | `python main.py build-dataset [--data-path DIR]` | `-d` also works |
+| `python channels-to-network.py [--data-path DIR]` | `python main.py build-network [--data-path DIR]` | `-d` also works |
+
+Exit codes for every form: `0` success; `1` a target, the login, or the input data failed (or a dependency is missing); `2` invalid arguments, reported before any credentials are read; `130` interrupted.
+
+### `collect --help` (excerpt)
+
+```
+history window:
+  Select which messages to collect; bounds combine (AND). A filtered run
+  replaces each channel's saved messages with the selection, so write it to
+  a fresh --output to keep earlier histories. Not allowed with --limit-
+  download-to-channel-metadata.
+
+  --since DATE          Only messages dated at or after DATE (UTC unless an
+                        offset is given; a date alone means midnight).
+                        Example: --since 2026-09-01
+  --until DATE          Only messages dated before DATE (exclusive). Example:
+                        --until 2026-10-01 excludes 1 October (UTC).
+  --max-id N            Only messages with an id below N (exclusive).
+  --max-messages N      At most N messages per channel, newest first.
+
+request controls:
+  Validated now; not applied yet. This version collects channels one at a
+  time.
+
+  --concurrency N       Channels collected at once, 1-10 (default: 3 for
+                        --batch-file, 1 for --telegram-channel).
+  --request-interval SECONDS
+                        Minimum gap between Telegram requests, 0.1-60
+                        (default: 0.25).
+  --max-flood-wait SECONDS
+                        Longest server flood wait to sit out, 0-3600; 0 stops
+                        on any flood wait (default: 60).
+  --max-retries N       Additional attempts per request, 0-10 (default: 3).
+```
+
+### Collecting part of a history
+
+`--min-id`, `--max-id`, `--since`, `--until`, and `--max-messages` combine as AND.
+
+- ID bounds are exclusive.
+- `--since` is inclusive and `--until` is exclusive.
+- Dates are ISO 8601 (`2026-10-01`, `2026-10-01T12:00`, `2026-10-01T12:00:00Z`, `2026-10-01T14:00+02:00`). A value without an offset is UTC.
+
+```
+# September 2026 only, into a fresh folder
+python main.py collect --telegram-channel channelname --since 2026-09-01 --until 2026-10-01 -o ./output/sep-2026
+
+# the newest 500 messages of each channel in a batch
+python main.py collect --batch-file ./channels.txt --max-messages 500 -o ./output/sample
+
+# messages after id 12345 (the earlier "update" use of --min-id)
+python main.py collect --telegram-channel channelname --min-id 12345 -o ./output/new-posts
+```
+
+**A filtered run replaces `<channel>_messages.json` with the selected messages only.** It does not merge them into the saved history. Before connecting, the command warns on stderr when a channel already has a saved history in the output folder. Write filtered runs to a fresh `--output` to keep earlier histories. The run header prints the active window.
+
+Known limits:
+- Pages are counted whole, so the chats and users of the page that crosses a bound may include some referenced only by excluded messages.
+- `--since` stops paging at the first page older than the date. This assumes message dates follow id order, which imported or forwarded-in-bulk histories can break.
+- `count` in the saved JSON (`collected_actions` in the dataset) is Telegram's total for the channel, not the number of messages saved.
+
 ## `main.py`
 
 This Python script will connect to Telegram's API and handle your API request.
@@ -94,7 +183,7 @@ This Python script will connect to Telegram's API and handle your API request.
 * `--batch-file` File containing Telegram Channels to download data from, one channel per line.
 * `--limit-download-to-channel-metadata` Will collect channels metadata only, not channel's messages. (default = False)
 * `--output, -o` Specifies a folder to save collected data. If not given, script will generate a default folder called `./output/data`
-* `--min-id` Specifies the offset id. This will update Telegram data with new posts.
+* `--min-id` Collect only messages with an id above the given id (exclusive). The saved messages file is replaced with those messages; see below.
 
 <br />
 
@@ -177,11 +266,13 @@ python main.py --batch-file './path/to/channels_text_file.txt' --limit-download-
 
 ### **Updating channel's data**
 
-If you want to collect new messages from one channel, you need to identify the message ID from the last post. Once you identify the id, run:
+To collect only messages newer than one you already have, pass its id to `--min-id` (exclusive):
 
 ```
-python main.py --telegram-channel channelname --min-id 12345
+python main.py --telegram-channel channelname --min-id 12345 --output ./path/to/new/directory
 ```
+
+The saved `<channel_name>_messages.json` then holds **only** the messages after that id. Rerunning into the folder of an earlier collection replaces its saved history (a warning names the affected channels), so use a fresh `--output`. See [Collecting part of a history](#collecting-part-of-a-history).
 
 **Expected output**
 

@@ -100,9 +100,25 @@ class TelethonInterfaceTests(offline_guard.OfflineTestCase):
 
 class KnownLibraryRemovalTests(offline_guard.OfflineTestCase):
 	'''
-	Characterize API removals that break the offline builders today.
-	Phase 3 fixes the callers; these tests flag a dependency change.
+	Characterize API removals the offline builders used to depend on.
+	Phase 3 fixed the callers; these tests flag a dependency change, and
+	the source check keeps the removed calls from coming back.
 	'''
+
+	def test_project_code_avoids_the_removed_calls(self):
+		import glob
+
+		sources = [
+			p for p in glob.glob(os.path.join(ROOT, '**', '*.py'), recursive=True)
+			if os.sep + 'tests' + os.sep not in p
+		]
+		self.assertTrue(sources)
+		for path in sources:
+			with open(path, encoding='utf-8') as fh:
+				text = fh.read()
+			with self.subTest(path=os.path.relpath(path, ROOT)):
+				self.assertNotIn('infer_datetime_format', text)
+				self.assertNotIn('get_cmap', text)
 
 	def test_pandas_3_rejects_infer_datetime_format(self):
 		import pandas as pd

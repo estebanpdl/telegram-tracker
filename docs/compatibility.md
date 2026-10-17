@@ -31,15 +31,50 @@ python-dateutil 2.9.0.post0, rsa 4.9.1, six 1.17.0, tzdata 2026.5.
 
 ## Current CLI contract
 
-Invocations and outputs are unchanged from commit `9b0ec71`. The canonical
-`python main.py <subcommand>` forms are planned in Phase 4 and do not exist yet.
+Since Phase 4, `python main.py <command>` (`cli.py`) is the canonical interface, and the
+legacy forms below reach the same handlers. Outputs are unchanged from commit `9b0ec71`
+except for the corrections listed per phase. The README has the migration table.
 
-| Invocation | Inputs | Outputs | Planned canonical form |
+| Legacy invocation | Inputs | Outputs | Canonical form |
 |---|---|---|---|
 | `python main.py --telegram-channel NAME` | one channel; `--limit-download-to-channel-metadata`, `--output/-o DIR` (default `./output/data`), `--min-id N` | `<DIR>/<NAME>/<NAME>.json`, `<NAME>_messages.json`, `chats.txt`, `collected_chats.csv`, `counter.csv`, `_exceptions-channels-not-found.txt`, `_exceptions-users-not-found.txt` | `python main.py collect --telegram-channel NAME` |
 | `python main.py --batch-file FILE` | one target per line; same options | same, one folder per channel | `python main.py collect --batch-file FILE` |
 | `python build-datasets.py [--data-path/-d DIR]` | `<DIR>/**/*_messages.json`, `<DIR>/collected_chats.csv` | `msgs_dataset.csv` (append), `collected_chats.xlsx` (replace) | `python main.py build-dataset --data-path DIR` |
 | `python channels-to-network.py [--data-path/-d DIR]` | `<DIR>/collected_chats.csv` (`username`, `counter`, `source`) | `Graph.gexf`, `network.png` | `python main.py build-network --data-path DIR` |
+
+### Phase 4: unified CLI
+
+- **Dispatch.** A first token that is an option other than `-h`/`--help` selects the
+  legacy collection parser. That parser is frozen to the baseline flags: the selectors,
+  `--limit-download-to-channel-metadata`, `--output/-o`, and `--min-id`. Anything else
+  goes to the canonical parser.
+- **Help.** `python main.py` with no arguments prints the overview to stderr and exits 2.
+  `--help` exits 0.
+- **Builder wrappers.** Each keeps its own `--data-path/-d` parser (`cli.builder_main`).
+- **Validation before credentials or service imports** (exit 2):
+  - selectors and the batch file;
+  - control bounds (`--concurrency` 1–10, `--request-interval` finite 0.1–60,
+    `--max-flood-wait` 0–3600, `--max-retries` 0–10);
+  - window values (dates parse, `--since` < `--until`, `--max-id` > `--min-id` + 1,
+    `--min-id` ≥ 0, `--max-messages` ≥ 1);
+  - window options with `--limit-download-to-channel-metadata` (rejected in `collect`;
+    the legacy form keeps accepting `--min-id` with it, as before);
+  - flags given to the wrong command.
+- **Request controls** are parsed and validated but **inert** until Phase 6. Their group
+  help says so, and they are not passed to the collector.
+- **History window** (`collector.HistoryWindow`, `collect` only):
+  - The server receives `min_id`/`max_id` on every page and `--until` as `offset_date`
+    on the first page.
+  - Every bound is also applied client-side.
+  - `--max-messages` shrinks the page `limit` and sends no request once reached.
+  - Paging stops at the first page reaching below `--since` or `--min-id`.
+  - Unfiltered and legacy `--min-id` requests are identical to Phase 2.
+- **Replace warning.** A filtered run warns on stderr, before credentials, when a target
+  already has `<channel>_messages.json` in the output folder (count plus the first 10
+  names). The run header prints the active window.
+- **Missing service dependencies** give exit 1 with `missing dependency '<name>'`.
+  Help works without Telethon, pandas, NetworkX, matplotlib, python-louvain, tqdm,
+  or openpyxl.
 
 ### Phase 2 changes to the collection command
 
@@ -51,6 +86,28 @@ Invocations and outputs are unchanged from commit `9b0ec71`. The canonical
 | Exit code | 0 unless a traceback | 0 all targets collected; 1 any target failed or login failed; 130 interrupted; 2 argument errors |
 | Empty history, empty batch, all targets failed | Crash | Empty `<channel>_messages.json`; header-correct `counter.csv` / `collected_chats.csv` |
 | Batch pause | `time.sleep(2)` blocking the loop | `await asyncio.sleep(2)` between resolved channels (removed in Phase 6) |
+
+### Phase 3 changes to the builders
+
+`build-datasets.py` and `channels-to-network.py` are thin wrappers around `datasets.build_dataset`
+and `network.build_network`. Outputs, columns, and graph meaning are unchanged: `msgs_dataset.csv`
+is still appended to, so a rerun duplicates rows; `collected_chats.xlsx` is replaced; `Graph.gexf`
+is a directed, unweighted graph whose repeated observations collapse into one edge.
+
+| Behavior | Baseline | Now |
+|---|---|---|
+| Python 3.14 / pandas 3 / matplotlib 3.11 | Crash (import-time loop, `infer_datetime_format`, `cm.get_cmap`) | Runs; `colormaps['viridis'].resampled(n)` replaces `get_cmap` |
+| Imports | `utils` pulled in Telethon and a loop | No Telethon, config, or session access; plotting loads only when the image is drawn |
+| Missing or malformed input (CSV, JSON, `source` literal, `counter`, missing columns or message fields) | Traceback, sometimes after a partial write | Exit 1 with `> build-dataset: ...` / `> build-network: ...` before anything is written |
+| Partial writes | Rows appended one by one into `msgs_dataset.csv` | Rows are appended to a copy that replaces the file (`os.replace`), and so are the XLSX, GEXF, and PNG |
+| No message files | No `msgs_dataset.csv` | Header-only `msgs_dataset.csv` |
+| No edges | Crash in `pd.concat([])` | Empty `Graph.gexf` and a blank `network.png` |
+| Equal node degrees | Division by zero | Every node is drawn at size 275 (the middle of 50–500) |
+| Messages file order | Filesystem glob order | Sorted paths |
+| Source order within a chat | `set` order (varies per process) | First occurrence; the edge set is unchanged |
+
+A row whose `counter` is empty (for example a chat appended by an earlier run that this run's
+counter did not cover) is rejected with its line number. The rerun merge itself is fixed in Phase 5.
 
 ### Login
 
@@ -81,11 +138,11 @@ client, which creates the session.
 | Event loop | `main.py` and `utils/__init__.py` call `asyncio.get_event_loop()` at import. Python 3.14 raises `RuntimeError: There is no current event loop`, so the collector and both builders (which import `utils`) fail before doing any work. | Resolved in Phase 2: one `asyncio.run` per collection; no import-time loop |
 | Event loop | Telethon 1.45 binds a client to the loop that connects it and refuses use from another loop; creating a client outside a running loop makes Telethon create and set a global loop. | Resolved in Phase 2: the client is created, connected, and disconnected inside one running loop |
 | Import side effects | `main.py` parses argv, reads `config/config.ini`, and connects at import. | Resolved in Phase 2: `main()` entry guard; `utils` no longer imports Telethon |
-| pandas 3 | `pd.to_datetime(..., infer_datetime_format=True)` raises `TypeError`. Used by `utils.get_forward_attrs` (dataset builder) and `utils.timestamp_attrs`. The flag has been a no-op since pandas 2.0, so dropping it preserves behavior. | Phase 3 |
-| matplotlib 3.11 | `matplotlib.cm.get_cmap` no longer exists; `channels-to-network.py` uses it. `matplotlib.colormaps[name].resampled(n)` is the replacement. | Phase 3 |
-| Graph edge cases | No-edge input fails in `pd.concat([])`; equal node degrees divide by zero in `normalize_values`. | Phase 3 |
+| pandas 3 | `pd.to_datetime(..., infer_datetime_format=True)` raises `TypeError`. Used by `utils.get_forward_attrs` (dataset builder) and `utils.timestamp_attrs`. The flag has been a no-op since pandas 2.0, so dropping it preserves behavior. | Resolved in Phase 3 |
+| matplotlib 3.11 | `matplotlib.cm.get_cmap` no longer exists; `channels-to-network.py` uses it. `matplotlib.colormaps[name].resampled(n)` is the replacement. | Resolved in Phase 3 |
+| Graph edge cases | No-edge input fails in `pd.concat([])`; equal node degrees divide by zero in `normalize_values`. | Resolved in Phase 3 |
 
-The test suite pins the pandas and matplotlib removals in
+The test suite pins the pandas and matplotlib removals and checks that project code no longer calls them in
 `tests/test_environment.py::KnownLibraryRemovalTests`, so a dependency change is visible.
 
 ## Offline test harness
@@ -107,7 +164,11 @@ The test suite pins the pandas and matplotlib removals in
   `api/__init__.py` (Telethon request helpers and client factory), `api/auth.py`
   (login), `utils/__init__.py` (pure helpers). Fakes replace the client and the
   prompts; no test constructs a real client.
+- Builder modules: `datasets.py` and `network.py`. `tests/builder_data.py` collects the
+  batch scenario once with the fake client and copies it into each test's temporary
+  directory, and runs the wrapper scripts in a fresh guarded interpreter that reports
+  whether Telethon, the collector, or matplotlib were loaded.
 - `tests/fixtures/expected/` records expectations from static inspection of the
   baseline code: `collection.json` (request sequence, files, counter, chats, JSON
   fields, and the intended-fix ledger F1–F6), `dataset.json`, and `network.json`
-  (for Phase 3). Preserved behavior and intended fixes are listed separately there.
+  (checked by the Phase 3 builder tests). Preserved behavior and intended fixes are listed separately there.

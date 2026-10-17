@@ -6,8 +6,7 @@ columns, and graph sizing. Importing this module has no side effects and
 does not load Telethon; network enrichment lives in collector.py.
 '''
 
-# Import modules
-import pandas as pd
+# Import modules (pandas loads lazily, in the date helpers)
 import json
 import os
 
@@ -15,6 +14,42 @@ import os
 from configparser import ConfigParser
 from urllib.parse import urlparse
 from datetime import datetime
+
+
+class DataInputError(Exception):
+	'''
+	A builder's input files are missing or malformed. Raised before any
+	output is written.
+	'''
+
+
+def data_folder_from(path, default='./output/data'):
+	'''
+	Data folder without a trailing slash; `default` when not given.
+	'''
+	if not path:
+		return default
+
+	return path[:-1] if path.endswith('/') else path
+
+
+def temp_path_for(path):
+	'''
+	Sibling temporary path that keeps the extension (writers pick their
+	format from it), for writing a file before os.replace.
+	'''
+	base, ext = os.path.splitext(path)
+	return f'{base}.{os.getpid()}.tmp{ext}'
+
+
+def discard(path):
+	'''
+	Remove a file if it exists.
+	'''
+	try:
+		os.remove(path)
+	except FileNotFoundError:
+		pass
 
 
 '''
@@ -76,10 +111,11 @@ def cmd_request_type(args):
 def timestamp_attrs(data, col='date'):
 	'''
 	'''
-	# process dates
+	import pandas as pd
+
+	# process dates (format inference is the pandas default since 2.0)
 	t = pd.to_datetime(
 		data[col],
-		infer_datetime_format=True,
 		yearfirst=True
 	)
 
@@ -170,10 +206,11 @@ def get_forward_attrs(msg, res, channels_data):
 		attr_id_value = None
 		channel_name = None
 
+	import pandas as pd
+
 	# process dates
 	t = pd.to_datetime(
 		date,
-		infer_datetime_format=True,
 		yearfirst=True
 	)
 
@@ -433,13 +470,23 @@ def msgs_dataset_columns():
 
 Network
 '''
+EQUAL_DEGREE_NODE_SIZE = 275
+
 def normalize_values(data):
 	'''
+	Node sizes from 50 to 500, scaled by degree.
 
 	data: a list of tuples -> based on G.degree
+	When every node has the same degree (or there are no nodes), each node
+	gets EQUAL_DEGREE_NODE_SIZE, the middle of the range.
 	'''
+	if not data:
+		return []
+
 	max_v = max([v for i, v in data])
 	min_v = min([v for i, v in data])
+	if max_v == min_v:
+		return [EQUAL_DEGREE_NODE_SIZE] * len(data)
 
 	return [
 		int((i - (min_v)) / (max_v - min_v) * 450) + 50
