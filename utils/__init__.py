@@ -3,7 +3,7 @@
 Pure helpers shared by the collector and the offline builders: config
 loading, JSON encoding, directories, message/chat transforms, dataset
 columns, and graph sizing. Importing this module has no side effects and
-does not load Telethon; network enrichment lives in collector.py.
+does not load Telethon; network enrichment lives in collector/rpc.py.
 '''
 
 # Import modules (pandas loads lazily, in the date helpers)

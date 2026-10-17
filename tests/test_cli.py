@@ -33,6 +33,8 @@ import cli.collect
 import cli.builders
 import cli.parsers
 import collector
+import collector.history
+import collector.outcomes
 import datasets
 import network
 
@@ -232,7 +234,7 @@ class DispatchEquivalenceTests(CliTestCase):
 			calls.append({'targets': targets, 'output': output_folder, **{
 				k: kwargs[k] for k in ('metadata_only', 'window')
 			}})
-			return collector.CollectionSummary(requested=targets, output_folder=output_folder, succeeded=list(targets))
+			return collector.outcomes.CollectionSummary(requested=targets, output_folder=output_folder, succeeded=list(targets))
 
 		patcher = mock.patch.object(collector, 'run_collection', fake_run_collection)
 		patcher.start()
@@ -267,7 +269,7 @@ class DispatchEquivalenceTests(CliTestCase):
 
 		self.assertEqual(calls[0]['targets'], ['alpha_fx', 'beta_fx'])
 		self.assertEqual(calls[0]['output'], 'out_dir')
-		self.assertEqual(calls[0]['window'], collector.HistoryWindow(min_id=7))
+		self.assertEqual(calls[0]['window'], collector.history.HistoryWindow(min_id=7))
 
 	def test_default_output_folder(self):
 		calls = self.record_collection()
@@ -491,7 +493,7 @@ class ReplaceWarningTests(CliTestCase):
 
 		async def fake_run_collection(targets, output_folder, **kwargs):
 			self.collected.append(targets)
-			return collector.CollectionSummary(requested=targets, output_folder=output_folder, succeeded=list(targets))
+			return collector.outcomes.CollectionSummary(requested=targets, output_folder=output_folder, succeeded=list(targets))
 
 		patcher = mock.patch.object(collector, 'run_collection', fake_run_collection)
 		patcher.start()

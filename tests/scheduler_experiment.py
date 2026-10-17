@@ -102,7 +102,7 @@ def collect(concurrency, out, *, raw=None, latency=LATENCY, targets=None, client
 	'''
 	from api.auth import ensure_authorized
 
-	import collector
+	import collector.run
 
 	client = client or FakeTelegramClient(
 		FixtureWorld(raw=raw or scheduler_world()), page_size=PAGE_SIZE, latency=latency
@@ -116,7 +116,7 @@ def collect(concurrency, out, *, raw=None, latency=LATENCY, targets=None, client
 		loop = asyncio.get_running_loop()
 		start = loop.time()
 		try:
-			return await collector.run_collection(
+			return await collector.run.run_collection(
 				targets if targets is not None else batch_targets(),
 				out,
 				client_factory=lambda: client,

@@ -34,7 +34,11 @@ import api
 import cli
 import cli.collect
 import collector
-import storage
+import collector.outcomes
+import collector.run
+import storage.files
+import storage.records
+import storage.writer
 
 
 def read_json(path):
@@ -61,7 +65,7 @@ class SchedulerTestCase(offline_guard.OfflineTestCase):
 		return experiment.collect(concurrency, self.out, **kwargs)
 
 	def status(self):
-		return read_json(os.path.join(self.out, storage.STATUS_FILE))
+		return read_json(os.path.join(self.out, storage.records.STATUS_FILE))
 
 
 class ConcurrencyTests(SchedulerTestCase):
@@ -85,7 +89,7 @@ class ConcurrencyTests(SchedulerTestCase):
 		times = [t for t, _, _ in client.dispatches]
 		self.assertEqual(times, [i * experiment.INTERVAL for i in range(len(times))])
 		self.assertEqual(elapsed, (len(times) - 1) * experiment.INTERVAL)
-		self.assertNotIn('pause', inspect.signature(collector.run_collection).parameters)
+		self.assertNotIn('pause', inspect.signature(collector.run.run_collection).parameters)
 		self.assertFalse(hasattr(collector, 'BATCH_PAUSE_SECONDS'))
 
 	def test_in_flight_bound_includes_enrichment(self):
@@ -133,13 +137,13 @@ class OutcomeTests(SchedulerTestCase):
 	def test_alias_private_discovered_chat_and_partial_state(self):
 		summary, _, _ = self.collect(3)
 		status = self.status()
-		self.assertEqual(status['state'], storage.PARTIAL)
+		self.assertEqual(status['state'], storage.records.PARTIAL)
 		alias = next(t for t in status['targets'] if t['input'] == experiment.ALIAS)
 		self.assertEqual((alias['status'], alias['alias_of']), ('duplicate', 'gen01_fx'))
 		self.assertFalse(os.path.exists(os.path.join(self.out, experiment.ALIAS)))
 		self.assertEqual(summary.duplicates, [(experiment.ALIAS, 'gen01_fx')])
 		# A private discovered chat is logged without stopping the run
-		with open(os.path.join(self.out, storage.USERS_NOT_FOUND), encoding='utf-8') as fh:
+		with open(os.path.join(self.out, storage.records.USERS_NOT_FOUND), encoding='utf-8') as fh:
 			self.assertIn(f'ID - {experiment.PRIVATE_CHAT}', fh.read().splitlines())
 		self.assertEqual(len(summary.succeeded), 10)
 		self.assertEqual([t for t, _ in summary.failed], ['missing_fx', 'private_fx'])
@@ -152,7 +156,7 @@ class OutcomeTests(SchedulerTestCase):
 		summary, _, _ = self.collect(3, raw=raw, targets=targets)
 		self.assertEqual(summary.succeeded, targets)
 		self.assertIsNone(summary.stop_reason)
-		with open(os.path.join(self.out, storage.USERS_NOT_FOUND), encoding='utf-8') as fh:
+		with open(os.path.join(self.out, storage.records.USERS_NOT_FOUND), encoding='utf-8') as fh:
 			self.assertEqual(fh.read().splitlines(), ['ID - 401', 'ID - 203'])
 
 	def test_transient_failures_fail_only_that_channel(self):
@@ -164,7 +168,7 @@ class OutcomeTests(SchedulerTestCase):
 		self.assertIn('history request failed after 4 attempt(s)', summary.failed[0][1])
 		self.assertEqual(len(summary.succeeded), 9)
 		self.assertEqual(summary.requests['history']['retries'], 3)
-		self.assertEqual(self.status()['state'], storage.PARTIAL)
+		self.assertEqual(self.status()['state'], storage.records.PARTIAL)
 
 	def test_rejected_session_stops_the_run(self):
 		client = self.client()
@@ -172,7 +176,7 @@ class OutcomeTests(SchedulerTestCase):
 		summary, _, _ = self.collect(3, client=client)
 		self.assertIn('session rejected', summary.stop_reason)
 		self.assertIn('AuthKeyUnregisteredError', summary.stop_reason)
-		self.assertEqual(self.status()['state'], storage.INTERRUPTED)
+		self.assertEqual(self.status()['state'], storage.records.INTERRUPTED)
 		self.assertEqual(client.disconnect_count, 1)
 
 
@@ -212,14 +216,14 @@ class FloodTests(SchedulerTestCase):
 		# requests already in flight may finish; none is admitted afterwards
 		self.assertFalse([d for d, _, _ in client.dispatches if d > answered[0]])
 		status = self.status()
-		self.assertEqual(status['state'], storage.INTERRUPTED)
+		self.assertEqual(status['state'], storage.records.INTERRUPTED)
 		done = [t['input'] for t in status['targets'] if t['status'] == 'succeeded']
 		self.assertTrue(done)
 		for target in done:
-			read_json(storage.history_path(self.out, target))
+			read_json(storage.files.history_path(self.out, target))
 		self.assertTrue([t for t in status['targets'] if t['status'] == 'cancelled'])
 		self.assertEqual((client.disconnect_count, client.active_at_disconnect), (1, 0))
-		self.assertFalse(os.path.exists(storage.lock_path(self.out)))
+		self.assertFalse(os.path.exists(storage.writer.lock_path(self.out)))
 
 
 class CancellationTests(SchedulerTestCase):
@@ -228,7 +232,7 @@ class CancellationTests(SchedulerTestCase):
 		client = self.client()
 
 		async def main():
-			task = asyncio.create_task(collector.run_collection(
+			task = asyncio.create_task(collector.run.run_collection(
 				experiment.batch_targets(),
 				self.out,
 				client_factory=lambda: client,
@@ -244,17 +248,17 @@ class CancellationTests(SchedulerTestCase):
 			virtual_time.run(main())
 
 		status = self.status()
-		self.assertEqual((status['state'], status['stop_reason']), (storage.INTERRUPTED, 'cancelled'))
+		self.assertEqual((status['state'], status['stop_reason']), (storage.records.INTERRUPTED, 'cancelled'))
 		states = {t['status'] for t in status['targets']}
 		self.assertTrue({'succeeded', 'cancelled'} <= states)
 		for entry in status['targets']:
 			folder = os.path.join(self.out, entry['input'])
 			if entry['status'] == 'succeeded':
-				read_json(storage.history_path(self.out, entry['input']))
+				read_json(storage.files.history_path(self.out, entry['input']))
 			else:
 				self.assertFalse(os.path.exists(folder), entry)
 		self.assertEqual((client.disconnect_count, client.active_at_disconnect), (1, 0))
-		self.assertFalse(os.path.exists(storage.lock_path(self.out)))
+		self.assertFalse(os.path.exists(storage.writer.lock_path(self.out)))
 		self.assertEqual([f for f in os.listdir(self.out) if '.tmp' in f], [])
 
 
@@ -275,7 +279,10 @@ class WriteHandleTests(SchedulerTestCase):
 				violations.append((kind, key))
 			return 1.0
 
-		with mock.patch('storage.open', tracking_open, create=True):
+		with mock.patch('storage.aggregates.open', tracking_open, create=True), \
+				mock.patch('storage.files.open', tracking_open, create=True), \
+				mock.patch('storage.status.open', tracking_open, create=True), \
+				mock.patch('storage.writer.open', tracking_open, create=True):
 			self.collect(3, latency=latency)
 		self.assertTrue(open_files)
 		self.assertEqual(violations, [])
@@ -292,7 +299,7 @@ class TargetTests(offline_guard.OfflineTestCase):
 
 		async def fake_run_collection(targets, output_folder, **kwargs):
 			self.calls.append({'targets': targets, **kwargs})
-			return collector.CollectionSummary(
+			return collector.outcomes.CollectionSummary(
 				requested=targets, output_folder=output_folder, succeeded=list(targets)
 			)
 
@@ -397,7 +404,7 @@ class CliRunTests(SchedulerTestCase):
 			'1 same channel as an earlier target, 0 cancelled. Concurrency 3.', out)
 		self.assertIn('>   gen01_old_fx: same channel as gen01_fx, skipped', out)
 		self.assertIn('> Requests by method class (sent / retries / flood waits / flood wait seconds):', out)
-		status = read_json(os.path.join(self.out, storage.STATUS_FILE))
+		status = read_json(os.path.join(self.out, storage.records.STATUS_FILE))
 		for name, stats in status['requests'].items():
 			self.assertIn(
 				f'>   {name:<11} {stats["requests"]} / {stats["retries"]} / '

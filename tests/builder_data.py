@@ -27,13 +27,13 @@ def _collect(targets, out):
 	'''
 	from api.auth import ensure_authorized
 
-	import collector
+	import collector.run
 
 	expected = load_expected('collection.json')
 	client = FakeTelegramClient(page_size=expected['page_size'])
 	with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
 		asyncio.run(
-			collector.run_collection(
+			collector.run.run_collection(
 				targets,
 				out,
 				client_factory=lambda: client,

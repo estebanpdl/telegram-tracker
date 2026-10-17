@@ -30,19 +30,25 @@ from api.auth import ensure_authorized
 from fakes import FakeTelegramClient, FixtureWorld, load_expected
 
 import cli
-import collector
+import collector.channel
+import collector.run
 import datasets
 import network
-import storage
+import storage.aggregates
+import storage.files
+import storage.records
+import storage.status
+import storage.writer
 
-from collector import HistoryWindow, MetadataCache, Requests
+from collector.history import HistoryWindow
+from collector.rpc import MetadataCache, Requests
 from utils import DataInputError
 
 
 EXPECTED = load_expected('collection.json')
 SCENARIOS = EXPECTED['scenarios']
 BATCH = SCENARIOS['batch']['targets']
-ALPHA, BETA = 101, 102
+ALPHA = 101
 
 
 def read_bytes(path):
@@ -71,7 +77,7 @@ def snapshot(root):
 		for name in names:
 			path = os.path.join(d, name)
 			rel = os.path.relpath(path, root).replace('\\', '/')
-			if rel != storage.STATUS_FILE:
+			if rel != storage.records.STATUS_FILE:
 				files[rel] = read_bytes(path)
 	return files
 
@@ -118,7 +124,7 @@ class StorageTestCase(offline_guard.OfflineAsyncTestCase):
 			return self.client
 
 		with contextlib.redirect_stdout(self.stdout), contextlib.redirect_stderr(self.stderr):
-			return await collector.run_collection(
+			return await collector.run.run_collection(
 				targets,
 				out or self.out,
 				client_factory=factory,
@@ -127,7 +133,7 @@ class StorageTestCase(offline_guard.OfflineAsyncTestCase):
 			)
 
 	def status(self, out=None):
-		return read_json(os.path.join(out or self.out, storage.STATUS_FILE))
+		return read_json(os.path.join(out or self.out, storage.records.STATUS_FILE))
 
 	def full_channel_requests(self, client=None):
 		return [
@@ -147,7 +153,7 @@ class ReducerTests(StorageTestCase):
 		results = []
 		with contextlib.redirect_stdout(io.StringIO()):
 			for index, target in enumerate(['alpha_fx', 'beta_fx', 'empty_fx']):
-				results.append(await collector.collect_channel(
+				results.append(await collector.channel.collect_channel(
 					cache.requests, cache, index, target, output_folder=self.out
 				))
 		await cache.close()
@@ -159,7 +165,7 @@ class ReducerTests(StorageTestCase):
 		for order in (results, list(reversed(results))):
 			out = os.path.join(self.tmp, f'out{len(folders)}')
 			os.makedirs(out)
-			writer = storage.OutputWriter(out)
+			writer = storage.writer.OutputWriter(out)
 			for result in order:
 				writer.commit(result)
 			writer.finalize(cache.outcomes)
@@ -186,13 +192,13 @@ class ReducerTests(StorageTestCase):
 		)
 
 	def test_reducer_counts_match_the_sequential_contract(self):
-		outcome_101 = storage.EnrichOutcome(linked=[(106, 'alpha_chat_fx')], rows=[{'id': 101}, {'id': 106}])
-		outcome_106 = storage.EnrichOutcome(linked=[(101, 'alpha_fx')], rows=[{'id': 106}, {'id': 101}])
-		result = storage.ChannelResult(index=0, target='alpha_fx', observations=[
+		outcome_101 = storage.records.EnrichOutcome(linked=[(106, 'alpha_chat_fx')], rows=[{'id': 101}, {'id': 106}])
+		outcome_106 = storage.records.EnrichOutcome(linked=[(101, 'alpha_fx')], rows=[{'id': 106}, {'id': 101}])
+		result = storage.records.ChannelResult(index=0, target='alpha_fx', observations=[
 			('channel_request', [(101, 'alpha_fx'), (106, 'alpha_chat_fx')]),
 			('from_messages', [(101, 'alpha_fx')])
 		])
-		agg = storage.reduce_results([result], {101: outcome_101, 106: outcome_106})
+		agg = storage.aggregates.reduce_results([result], {101: outcome_101, 106: outcome_106})
 		self.assertEqual(agg.chat_ids, [101, 106, 106, 101])
 		self.assertEqual(agg.counter[101]['counter'], 2)
 		self.assertEqual(agg.counter[106]['counter'], 2)
@@ -272,7 +278,7 @@ class FileTests(StorageTestCase):
 		self.assertEqual(rows, first_rows + first_rows)
 		self.assertEqual(read_bytes(os.path.join(self.out, 'chats.txt')), first_chats)
 		self.assertEqual(read_bytes(os.path.join(self.out, 'counter.csv')), first_counter)
-		with open(os.path.join(self.out, storage.CHANNELS_NOT_FOUND), encoding='utf-8') as fh:
+		with open(os.path.join(self.out, storage.records.CHANNELS_NOT_FOUND), encoding='utf-8') as fh:
 			self.assertEqual(fh.read().splitlines(), ['missing_fx', 'private_fx'] * 2)
 
 	async def test_rerun_with_other_channels_keeps_earlier_counts_and_builds(self):
@@ -311,20 +317,20 @@ class FileTests(StorageTestCase):
 				raise OSError(28, 'No space left on device')
 			return real_replace(src, dst)
 
-		with mock.patch.object(storage.os, 'replace', failing_replace):
-			with self.assertRaises(storage.StorageError):
+		with mock.patch.object(storage.files.os, 'replace', failing_replace):
+			with self.assertRaises(storage.records.StorageError):
 				await self.collect(['alpha_fx', 'beta_fx', 'empty_fx'])
 
 		self.assertEqual(read_bytes(beta_messages), before)
 		status = self.status()
-		self.assertEqual(status['state'], storage.INTERRUPTED)
+		self.assertEqual(status['state'], storage.records.INTERRUPTED)
 		self.assertIn('storage error', status['stop_reason'])
 		self.assertEqual(
 			[t['status'] for t in status['targets']],
 			['succeeded', 'failed', 'cancelled']
 		)
 		self.assertEqual(self.client.disconnect_count, 1)
-		self.assertFalse(os.path.exists(storage.lock_path(self.out)))
+		self.assertFalse(os.path.exists(storage.writer.lock_path(self.out)))
 		self.assertEqual([f for f in snapshot(self.out) if '.tmp' in f], [])
 
 	async def test_failed_channel_keeps_its_earlier_files(self):
@@ -347,34 +353,34 @@ class LockTests(StorageTestCase):
 
 	async def test_locked_folder_is_refused_before_connecting(self):
 		os.makedirs(self.out)
-		with open(storage.lock_path(self.out), 'w', encoding='utf-8') as fh:
+		with open(storage.writer.lock_path(self.out), 'w', encoding='utf-8') as fh:
 			json.dump({'pid': 4242, 'started_at': '2026-10-17T00:00:00+00:00'}, fh)
-		with self.assertRaises(storage.OutputLocked) as caught:
+		with self.assertRaises(storage.records.OutputLocked) as caught:
 			await self.collect(['alpha_fx'])
 		self.assertEqual(self.factory_calls, 0)
 		self.assertIn('pid 4242', str(caught.exception))
 		self.assertIn('fresh --output', str(caught.exception))
-		self.assertTrue(os.path.exists(storage.lock_path(self.out)), 'stale lock was removed')
+		self.assertTrue(os.path.exists(storage.writer.lock_path(self.out)), 'stale lock was removed')
 
 	async def test_lock_is_held_during_the_run_and_released(self):
 		held = []
 		client = FakeTelegramClient()
 
 		async def look():
-			held.append(os.path.exists(storage.lock_path(self.out)))
+			held.append(os.path.exists(storage.writer.lock_path(self.out)))
 
 		client.script('GetHistoryRequest', look)
 		await self.collect(['alpha_fx'], client=client)
 		self.assertEqual(held, [True])
-		self.assertFalse(os.path.exists(storage.lock_path(self.out)))
+		self.assertFalse(os.path.exists(storage.writer.lock_path(self.out)))
 
 	async def test_second_lock_on_the_same_folder_fails(self):
 		os.makedirs(self.out)
-		with storage.OutputLock(self.out):
-			with self.assertRaises(storage.OutputLocked):
-				with storage.OutputLock(self.out):
+		with storage.writer.OutputLock(self.out):
+			with self.assertRaises(storage.records.OutputLocked):
+				with storage.writer.OutputLock(self.out):
 					pass
-		self.assertFalse(os.path.exists(storage.lock_path(self.out)))
+		self.assertFalse(os.path.exists(storage.writer.lock_path(self.out)))
 
 
 class StatusTests(StorageTestCase):
@@ -385,7 +391,7 @@ class StatusTests(StorageTestCase):
 	async def test_partial_batch(self):
 		await self.collect(BATCH)
 		status = self.status()
-		self.assertEqual(status['state'], storage.PARTIAL)
+		self.assertEqual(status['state'], storage.records.PARTIAL)
 		self.assertEqual(status['summary'], {'given': 5, 'requested': 5, 'succeeded': 3, 'failed': 2, 'duplicates': 0, 'cancelled': 0})
 		self.assertEqual(status['parameters']['mode'], 'full')
 		by_input = {t['input']: t for t in status['targets']}
@@ -407,8 +413,8 @@ class StatusTests(StorageTestCase):
 
 		client.script('GetHistoryRequest', look)
 		await self.collect(['alpha_fx'], client=client)
-		self.assertEqual(seen, [storage.RUNNING])
-		self.assertEqual(self.status()['state'], storage.COMPLETE)
+		self.assertEqual(seen, [storage.records.RUNNING])
+		self.assertEqual(self.status()['state'], storage.records.COMPLETE)
 
 	async def test_window_and_metadata_parameters(self):
 		window = HistoryWindow(min_id=6, max_messages=2)
@@ -442,7 +448,7 @@ class StatusTests(StorageTestCase):
 			await task
 
 		status = self.status()
-		self.assertEqual(status['state'], storage.INTERRUPTED)
+		self.assertEqual(status['state'], storage.records.INTERRUPTED)
 		self.assertEqual(status['stop_reason'], 'cancelled')
 		self.assertEqual([t['status'] for t in status['targets']], ['succeeded', 'cancelled', 'cancelled'])
 		self.assertTrue(os.path.isfile(os.path.join(self.out, 'alpha_fx', 'alpha_fx_messages.json')))
@@ -450,7 +456,7 @@ class StatusTests(StorageTestCase):
 		_, rows = read_csv_rows(os.path.join(self.out, 'counter.csv'))
 		self.assertEqual({r['source'] for r in rows}, {"['alpha_fx']"})
 		self.assertEqual(self.client.disconnect_count, 1)
-		self.assertFalse(os.path.exists(storage.lock_path(self.out)))
+		self.assertFalse(os.path.exists(storage.writer.lock_path(self.out)))
 
 	async def test_unexpected_error_interrupts_and_finalizes(self):
 		client = FakeTelegramClient()
@@ -458,7 +464,7 @@ class StatusTests(StorageTestCase):
 		with self.assertRaisesRegex(RuntimeError, 'boom'):
 			await self.collect(['alpha_fx', 'beta_fx'], client=client)
 		status = self.status()
-		self.assertEqual(status['state'], storage.INTERRUPTED)
+		self.assertEqual(status['state'], storage.records.INTERRUPTED)
 		self.assertIn('RuntimeError: boom', status['stop_reason'])
 		self.assertTrue(os.path.isfile(os.path.join(self.out, 'counter.csv')))
 
@@ -471,45 +477,45 @@ class BuilderGateTests(StorageTestCase):
 
 	def write_status(self, **fields):
 		os.makedirs(self.out, exist_ok=True)
-		data = {'format': 1, 'state': storage.COMPLETE, 'targets': [], 'parameters': {'mode': 'full'}}
+		data = {'format': 1, 'state': storage.records.COMPLETE, 'targets': [], 'parameters': {'mode': 'full'}}
 		data.update(fields)
-		with open(os.path.join(self.out, storage.STATUS_FILE), 'w', encoding='utf-8') as fh:
+		with open(os.path.join(self.out, storage.records.STATUS_FILE), 'w', encoding='utf-8') as fh:
 			json.dump(data, fh)
 
 	def test_running_and_interrupted_are_rejected(self):
-		for state, text in ((storage.RUNNING, 'still running'), (storage.INTERRUPTED, 'interrupted')):
+		for state, text in ((storage.records.RUNNING, 'still running'), (storage.records.INTERRUPTED, 'interrupted')):
 			with self.subTest(state=state):
 				self.write_status(state=state, stop_reason='cancelled')
 				for build in (datasets.build_dataset, network.build_network):
 					with self.assertRaisesRegex(DataInputError, text):
 						build(self.out)
-				self.assertEqual(sorted(os.listdir(self.out)), [storage.STATUS_FILE])
+				self.assertEqual(sorted(os.listdir(self.out)), [storage.records.STATUS_FILE])
 
 	def test_unreadable_sidecar_is_rejected(self):
 		os.makedirs(self.out)
-		with open(os.path.join(self.out, storage.STATUS_FILE), 'w', encoding='utf-8') as fh:
+		with open(os.path.join(self.out, storage.records.STATUS_FILE), 'w', encoding='utf-8') as fh:
 			fh.write('{"state": ')
 		with self.assertRaisesRegex(DataInputError, 'cannot be read'):
-			storage.check_collection_status(self.out)
+			storage.status.check_collection_status(self.out)
 
 	def test_notes(self):
 		self.write_status(
-			state=storage.PARTIAL,
+			state=storage.records.PARTIAL,
 			targets=[{'input': 'a_fx', 'status': 'succeeded'}, {'input': 'b_fx', 'status': 'failed'}],
 			parameters={'mode': 'window', 'window_description': 'id > 6'}
 		)
-		notes = storage.check_collection_status(self.out)
+		notes = storage.status.check_collection_status(self.out)
 		self.assertEqual(len(notes), 2)
 		self.assertIn('1 failed target(s), excluded from its output: b_fx', notes[0])
 		self.assertIn('history window (id > 6)', notes[1])
-		self.assertEqual(len(storage.check_collection_status(self.out, messages=False)), 1)
+		self.assertEqual(len(storage.status.check_collection_status(self.out, messages=False)), 1)
 
 		self.write_status(parameters={'mode': 'update'})
-		self.assertIn('duplicating earlier rows', storage.check_collection_status(self.out)[0])
+		self.assertIn('duplicating earlier rows', storage.status.check_collection_status(self.out)[0])
 
 	def test_folder_without_sidecar_is_accepted(self):
 		os.makedirs(self.out)
-		self.assertEqual(storage.check_collection_status(self.out), [])
+		self.assertEqual(storage.status.check_collection_status(self.out), [])
 
 	async def test_builders_print_notes_for_a_partial_collection(self):
 		await self.collect(BATCH)
@@ -526,7 +532,7 @@ class UpdateTests(StorageTestCase):
 	'''
 
 	def messages_path(self, target='alpha_fx'):
-		return storage.history_path(self.out, target)
+		return storage.files.history_path(self.out, target)
 
 	def history_requests(self):
 		return [r for r in self.client.requests if r['type'] == 'GetHistoryRequest']
@@ -632,12 +638,12 @@ class UpdateTests(StorageTestCase):
 			'chats': [{'id': 2, 'v': 'new'}, {'id': 3, 'v': 'new'}],
 			'users': []
 		}
-		merged = storage.merge_histories(earlier, fetched)
+		merged = storage.files.merge_histories(earlier, fetched)
 		self.assertEqual([(m['id'], m['v']) for m in merged['messages']], [(12, 'new'), (9, 'new'), (5, 'old')])
 		self.assertEqual([(c['id'], c['v']) for c in merged['chats']], [(2, 'new'), (3, 'new'), (1, 'old')])
 		self.assertEqual(merged['users'], [{'id': 7, 'v': 'old'}])
 		self.assertEqual(merged['count'], 5)
-		self.assertIsNone(storage.merge_histories(earlier, dict(fetched, messages=[])))
+		self.assertIsNone(storage.files.merge_histories(earlier, dict(fetched, messages=[])))
 
 
 class UpdateCliTests(offline_guard.OfflineTestCase):
@@ -686,7 +692,7 @@ class CliStorageErrorTests(offline_guard.OfflineTestCase):
 		with tempfile.TemporaryDirectory() as tmp:
 			out = os.path.join(tmp, 'data')
 			os.makedirs(out)
-			open(storage.lock_path(out), 'w').close()
+			open(storage.writer.lock_path(out), 'w').close()
 			stderr = io.StringIO()
 			with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
 				code = cli.main(

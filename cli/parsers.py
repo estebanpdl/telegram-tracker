@@ -17,10 +17,6 @@ DEFAULT_OUTPUT = './output/data'
 COLLECT = 'collect'
 BUILD_DATASET = 'build-dataset'
 BUILD_NETWORK = 'build-network'
-COMMANDS = (COLLECT, BUILD_DATASET, BUILD_NETWORK)
-
-# collect-only history window flags (argparse dests)
-WINDOW_FLAGS = ('since', 'until', 'max_id', 'max_messages')
 
 LEGACY_FORMS = '''\
 legacy forms (still supported):

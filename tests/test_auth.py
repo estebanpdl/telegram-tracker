@@ -26,7 +26,7 @@ from api import auth
 from api.auth import AuthenticationError, ensure_authorized
 from fakes import FIXTURE_CODE, FIXTURE_PHONE, FakeTelegramClient, ScriptedPrompt
 
-import collector
+import collector.run
 
 
 PASSWORD = 'S3NTINEL-cloud-password'
@@ -310,7 +310,7 @@ class LoginInCollectionTests(offline_guard.OfflineAsyncTestCase):
 		with tempfile.TemporaryDirectory() as tmp:
 			out = os.path.join(tmp, 'data')
 			with contextlib.redirect_stdout(captured), contextlib.redirect_stderr(captured):
-				summary = await collector.run_collection(
+				summary = await collector.run.run_collection(
 					['alpha_fx'], out,
 					client_factory=lambda: client,
 					authorize=lambda c: ensure_authorized(

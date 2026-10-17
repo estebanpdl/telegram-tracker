@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 '''
-History windows (collector.HistoryWindow) against the fake client.
+History windows (collector.history.HistoryWindow) against the fake client.
 
 Fixture channel alpha_fx (101) holds ids 10..4, newest first, one per day
 from 2026-01-10 down to 2026-01-04; the fake serves 2 messages per page.
@@ -21,9 +21,9 @@ import offline_guard
 from api.auth import ensure_authorized
 from fakes import FakeTelegramClient, load_expected
 
-import collector
+import collector.run
 
-from collector import HistoryWindow
+from collector.history import HistoryWindow
 
 
 EXPECTED = load_expected('collection.json')
@@ -48,7 +48,7 @@ class WindowTestCase(offline_guard.OfflineAsyncTestCase):
 		)
 
 		with contextlib.redirect_stdout(io.StringIO()):
-			return await collector.run_collection(
+			return await collector.run.run_collection(
 				['alpha_fx'],
 				self.out,
 				client_factory=lambda: self.client,

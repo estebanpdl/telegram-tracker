@@ -20,7 +20,8 @@ import offline_guard
 from api.auth import AuthenticationError, ensure_authorized
 from fakes import FakeTelegramClient, FakeTL, load_expected
 
-import collector
+import collector.run
+import storage.aggregates
 
 
 EXPECTED = load_expected('collection.json')
@@ -105,7 +106,7 @@ class CollectorTestCase(offline_guard.OfflineAsyncTestCase):
 			lambda c: ensure_authorized(c, None)
 		)
 		with contextlib.redirect_stdout(self.stdout), contextlib.redirect_stderr(self.stderr):
-			return await collector.run_collection(
+			return await collector.run.run_collection(
 				targets,
 				self.out,
 				client_factory=lambda: self.client,
@@ -323,7 +324,7 @@ class LifecycleTests(CollectorTestCase):
 
 		self.client = client
 		with contextlib.redirect_stdout(self.stdout):
-			await collector.run_collection(
+			await collector.run.run_collection(
 				['alpha_fx'], self.out,
 				client_factory=factory,
 				authorize=lambda c: ensure_authorized(c, None)
@@ -380,9 +381,9 @@ class ObservationTests(offline_guard.OfflineTestCase):
 
 	def test_observe_chat(self):
 		counter = {}
-		self.assertTrue(collector.observe_chat(counter, 1, 'a_fx', 'src_fx', 'channel_request'))
-		self.assertFalse(collector.observe_chat(counter, 1, 'a_fx', 'other_fx', 'from_messages'))
-		self.assertFalse(collector.observe_chat(counter, 1, 'a_fx', 'other_fx', 'from_messages'))
+		self.assertTrue(storage.aggregates.observe_chat(counter, 1, 'a_fx', 'src_fx', 'channel_request'))
+		self.assertFalse(storage.aggregates.observe_chat(counter, 1, 'a_fx', 'other_fx', 'from_messages'))
+		self.assertFalse(storage.aggregates.observe_chat(counter, 1, 'a_fx', 'other_fx', 'from_messages'))
 		self.assertEqual(counter[1], {
 			'username': 'a_fx', 'counter': 3, 'from_messages': 2, 'channel_request': 1,
 			'channel_req_targeted_by': {'channels': ['self']},
@@ -391,8 +392,8 @@ class ObservationTests(offline_guard.OfflineTestCase):
 
 	def test_observe_linked_chat(self):
 		counter = {}
-		collector.observe_linked_chat(counter, 2, 'b_fx', 'src_fx', 'parent_fx')
-		collector.observe_linked_chat(counter, 2, 'b_fx', 'other_fx', 'second_fx')
+		storage.aggregates.observe_linked_chat(counter, 2, 'b_fx', 'src_fx', 'parent_fx')
+		storage.aggregates.observe_linked_chat(counter, 2, 'b_fx', 'other_fx', 'second_fx')
 		self.assertEqual(counter[2], {
 			'username': 'b_fx', 'counter': 2, 'from_messages': 0, 'channel_request': 2,
 			'channel_req_targeted_by': {'channels': ['parent_fx', 'second_fx']},
