@@ -49,7 +49,7 @@ WINDOW_FLAGS = ('since', 'until', 'max_id', 'max_messages')
 # names listed by the existing-history warning before "and N more"
 WARN_LIST_LIMIT = 10
 
-# default channel workers for --batch-file (D1); a single channel runs at 1
+# Default channel workers for --batch-file; a single channel runs at 1
 BATCH_CONCURRENCY = 3
 
 # accepted target forms

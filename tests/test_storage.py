@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 '''
-Phase 5 persistence: one writer, completion-order-independent aggregates,
+Collection persistence: one writer, completion-order-independent aggregates,
 atomic files, reruns into an existing folder, the output lock, the
 collection-status.json sidecar and builder gate, cancellation, storage
 failures, and --update history merging.
 
 Expected counts come from fixtures/expected/collection.json (static
-inspection of the baseline); this module checks that the new ownership
-reproduces them and adds the Phase 5 behavior.
+inspection of the baseline); this module checks those counts together
+with persistence, recovery, and update behavior.
 '''
 
 # import modules

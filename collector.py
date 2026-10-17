@@ -249,8 +249,7 @@ async def enrichment_outcome(cache, chat_id):
 	with participants_count filled. Each other chat listed costs one more
 	full-channel request (shared through the cache). A missing or
 	inaccessible chat (requested or listed) ends the enrichment as
-	'not_found', keeping the linked chats seen before it, as the baseline
-	did for ValueError.
+	'not_found', keeping the linked chats seen before it.
 	'''
 	outcome = EnrichOutcome()
 	try:
@@ -399,7 +398,7 @@ async def fetch_history(get_page, *, window, on_page):
 	boundary page's chats and users may belong to trimmed messages.
 
 	`on_page(chats)` is awaited for every non-empty page after the first;
-	the first page's chats are stored but not counted (baseline policy).
+	the first page's chats are stored but not counted.
 	Raises PaginationStalled if the offset stops decreasing.
 	'''
 	posts = await get_page(

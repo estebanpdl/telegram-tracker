@@ -1,5 +1,5 @@
 {
-  "_about": "Dataset expectations from static inspection of baseline build-datasets.py over the collection 'batch' scenario output. Phase 3 consumes these. Rows exist only for '_' == 'Message'; MessageService items count toward other_actions but not rows. Row order follows glob order of <data>/**/*_messages.json, then stored message order.",
+  "_about": "Dataset expectations from static inspection of baseline build-datasets.py over the collection 'batch' scenario output. Rows exist only for '_' == 'Message'; MessageService items count toward other_actions but not rows. Row order follows sorted paths of <data>/**/*_messages.json, then stored message order.",
   "msgs_dataset_rows": 11,
   "msgs_dataset_rows_after_second_run": 22,
   "append_behavior": "msgs_dataset.csv is opened in append mode with the header written only when the file is missing, so a second run duplicates every row. collected_chats.xlsx is overwritten.",
@@ -24,6 +24,6 @@
     "msg_iteration.4.user.beta_fx.post.1": {"forward_msg_from_peer_id": 203, "forward_msg_from_peer_name": null, "forward_msg_link": null}
   },
   "compatibility": [
-    "pandas 3 removed to_datetime(infer_datetime_format=...); utils.get_forward_attrs and utils.timestamp_attrs raise TypeError. Phase 3 must drop the argument (a no-op since pandas 2.0, so behavior-preserving)."
+    "pandas 3 removed to_datetime(infer_datetime_format=...); utils.get_forward_attrs and utils.timestamp_attrs omit that argument (a no-op since pandas 2.0) to support pandas 3."
   ]
 }
