@@ -20,7 +20,7 @@ import offline_guard
 from api.auth import AuthenticationError, ensure_authorized
 from fakes import FakeTelegramClient, FakeTL, load_expected
 
-import collector
+import collector.run
 import storage.aggregates
 
 
@@ -106,7 +106,7 @@ class CollectorTestCase(offline_guard.OfflineAsyncTestCase):
 			lambda c: ensure_authorized(c, None)
 		)
 		with contextlib.redirect_stdout(self.stdout), contextlib.redirect_stderr(self.stderr):
-			return await collector.run_collection(
+			return await collector.run.run_collection(
 				targets,
 				self.out,
 				client_factory=lambda: self.client,
@@ -324,7 +324,7 @@ class LifecycleTests(CollectorTestCase):
 
 		self.client = client
 		with contextlib.redirect_stdout(self.stdout):
-			await collector.run_collection(
+			await collector.run.run_collection(
 				['alpha_fx'], self.out,
 				client_factory=factory,
 				authorize=lambda c: ensure_authorized(c, None)

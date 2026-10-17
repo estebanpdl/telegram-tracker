@@ -35,6 +35,7 @@ import cli
 import cli.collect
 import collector
 import collector.outcomes
+import collector.run
 import storage.files
 import storage.records
 import storage.writer
@@ -88,7 +89,7 @@ class ConcurrencyTests(SchedulerTestCase):
 		times = [t for t, _, _ in client.dispatches]
 		self.assertEqual(times, [i * experiment.INTERVAL for i in range(len(times))])
 		self.assertEqual(elapsed, (len(times) - 1) * experiment.INTERVAL)
-		self.assertNotIn('pause', inspect.signature(collector.run_collection).parameters)
+		self.assertNotIn('pause', inspect.signature(collector.run.run_collection).parameters)
 		self.assertFalse(hasattr(collector, 'BATCH_PAUSE_SECONDS'))
 
 	def test_in_flight_bound_includes_enrichment(self):
@@ -231,7 +232,7 @@ class CancellationTests(SchedulerTestCase):
 		client = self.client()
 
 		async def main():
-			task = asyncio.create_task(collector.run_collection(
+			task = asyncio.create_task(collector.run.run_collection(
 				experiment.batch_targets(),
 				self.out,
 				client_factory=lambda: client,

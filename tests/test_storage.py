@@ -30,8 +30,8 @@ from api.auth import ensure_authorized
 from fakes import FakeTelegramClient, FixtureWorld, load_expected
 
 import cli
-import collector
 import collector.channel
+import collector.run
 import datasets
 import network
 import storage.aggregates
@@ -124,7 +124,7 @@ class StorageTestCase(offline_guard.OfflineAsyncTestCase):
 			return self.client
 
 		with contextlib.redirect_stdout(self.stdout), contextlib.redirect_stderr(self.stderr):
-			return await collector.run_collection(
+			return await collector.run.run_collection(
 				targets,
 				out or self.out,
 				client_factory=factory,

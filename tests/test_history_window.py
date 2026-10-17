@@ -21,7 +21,7 @@ import offline_guard
 from api.auth import ensure_authorized
 from fakes import FakeTelegramClient, load_expected
 
-import collector
+import collector.run
 
 from collector.history import HistoryWindow
 
@@ -48,7 +48,7 @@ class WindowTestCase(offline_guard.OfflineAsyncTestCase):
 		)
 
 		with contextlib.redirect_stdout(io.StringIO()):
-			return await collector.run_collection(
+			return await collector.run.run_collection(
 				['alpha_fx'],
 				self.out,
 				client_factory=lambda: self.client,
