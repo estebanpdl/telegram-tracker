@@ -109,6 +109,36 @@ is a directed, unweighted graph whose repeated observations collapse into one ed
 A row whose `counter` is empty (for example a chat appended by an earlier run that this run's
 counter did not cover) is rejected with its line number. The rerun merge itself is fixed in Phase 5.
 
+### Phase 5: one owner for output
+
+`collect_channel` returns a `storage.ChannelResult` (identity, channel JSON, history payload,
+ordered chat observations) and writes nothing. `storage.OutputWriter` alone writes files: each
+channel's JSON when the channel is complete, and the aggregates at the end by replaying the
+committed results in input order. Every chat a channel sees directly is enriched the first
+time that channel sees it, through a per-run `collector.MetadataCache`, so the replay always
+has the outcome it needs and the aggregates do not depend on completion order.
+
+| Behavior | Phase 4 | Now |
+|---|---|---|
+| Full-channel requests | One per role: requested channel, newly observed chat, linked chat of every parent (fixture batch: 101, 102, 103 twice; 106 twice) | One per chat per run while it succeeds, shared by concurrent callers; a missing/private chat is remembered, any other failure is not (fix F7) |
+| Channel files | `<channel>.json` written before the history was fetched | Both JSON files written after the channel completes, each through a temporary file and `os.replace`; a failed channel keeps its earlier files |
+| Aggregates | Appended during the run, merged at the end | Written once at the end, each through a temporary file; exception logs appended at the end |
+| Rerun into a folder | `collected_chats.csv` gets `counter_x/_y`, `source_x/_y` | Earlier rows kept as written, this run's rows appended with this run's counts, legacy column names (fix F8). A run that adds no rows leaves the file untouched |
+| `collection-status.json` | None | `running` → `complete` / `partial` / `interrupted`; parameters (mode, window bounds); per target: status, reason, channel id, history mode (`replaced`, `merged`, `unchanged`, `created`, `not_collected`), message count, derived `min_id` (`--update`), `stale_history` (metadata only with an earlier messages file). No credentials or message text |
+| Output lock | None | `.collection.lock` (O_EXCL) for the run; checked before connecting and taken after login. A stale lock is reported with recovery steps, never removed |
+| Builders | Read any folder | Refuse `running` / `interrupted` (exit 1, recovery hint); note a `partial` run, a window, or `--update` on stderr; folders without a status file pass |
+| Cancellation / fatal error | Disconnect; aggregates not finalized | Completed channels stay; aggregates finalized from them; status `interrupted` with the reason; lock removed; disconnect once |
+| Storage error | Traceback | `> cannot write ...`, exit 1; the channel is `failed`, never reported as collected |
+| `--update` (`collect` only) | Not available | See README; exclusive with every window flag and metadata-only (exit 2) |
+
+The legacy form does not get `--update`: its parser stays frozen to the baseline flags, as
+decided in Phase 4. Enrichment outcomes are unchanged, including the baseline quirk that an
+inaccessible linked chat ends its parent's enrichment as not found (the parent is logged).
+
+Memory: a channel's history is held until its result is written, and the replay keeps every
+committed channel's observations (chat ids and usernames, not messages) until the end.
+Updates hold the parsed earlier history of a channel while it is collected.
+
 ### Login
 
 An authorized session (`./session_file.session`) skips every prompt. Otherwise the
@@ -160,8 +190,9 @@ The test suite pins the pandas and matplotlib removals and checks that project c
   channels sharing a discovered chat, an empty channel, missing and private targets,
   Unicode text, forwards, replies, service messages, and web page, document, poll,
   geo, contact, and venue media.
-- Collection modules: `collector.py` (async run, pagination, counting, aggregate files),
-  `api/__init__.py` (Telethon request helpers and client factory), `api/auth.py`
+- Collection modules: `collector.py` (async run, pagination, enrichment cache, channel
+  results), `storage.py` (counting replay, every output file, lock, status sidecar, history
+  merge), `api/__init__.py` (Telethon request helpers and client factory), `api/auth.py`
   (login), `utils/__init__.py` (pure helpers). Fakes replace the client and the
   prompts; no test constructs a real client.
 - Builder modules: `datasets.py` and `network.py`. `tests/builder_data.py` collects the
