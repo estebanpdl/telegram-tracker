@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 '''
 The run's application RPCs: `Requests` tags each call with its method
-class and admits it through the request policy; `MetadataCache` makes one
-full-channel request per chat per run, shared by every channel that sees
-the chat, and holds the chats' enrichment outcomes.
+class and admits it through the request policy; `MetadataCache` shares
+full-channel requests in flight and caches successful responses and
+permanent access errors by chat for the run. Other failures are not cached.
+It also holds the chats' enrichment outcomes.
 '''
 
 # import modules

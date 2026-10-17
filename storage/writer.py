@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 '''
 The run's output writer and the output-folder lock. `OutputWriter` is the
-single owner of a run's output files; `OutputLock` keeps a second
-collection out of the same folder.
+single owner of channel JSON and aggregate output; `OutputLock` keeps a
+second collection out of the same folder.
 '''
 
 # import modules
@@ -26,9 +26,9 @@ Writer
 
 class OutputWriter:
 	'''
-	Single owner of a run's output files. `commit` writes one channel's
-	JSON files; `finalize` writes the aggregates from every committed
-	channel.
+	Single owner of channel JSON and aggregate output. `commit` writes one
+	channel's JSON files; `finalize` writes the aggregates from every
+	committed channel.
 	'''
 	def __init__(self, output_folder):
 		self.output_folder = output_folder

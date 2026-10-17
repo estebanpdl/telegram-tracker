@@ -78,7 +78,8 @@ def warn_replaced_histories(targets, output_folder):
 
 def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 	'''
-	Validate, then run one collection. See main() for exit codes.
+	Validate, then run one collection. See the cli package docstring for
+	exit codes.
 	'''
 	metadata_only = args['limit_download_to_channel_metadata']
 	bounds = window_bounds(args, parser)
