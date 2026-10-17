@@ -29,6 +29,7 @@ from builder_data import ROOT, TESTS, collected_data, run_script
 from fakes import FakeTelegramClient, load_expected
 
 import cli
+import cli.builders
 import cli.parsers
 import collector
 import datasets
@@ -279,7 +280,7 @@ class DispatchEquivalenceTests(CliTestCase):
 				(network, 'build_network', 'build-network', 'channels-to-network.py')):
 			def record(data_path, name=name):
 				seen.append((name, data_path))
-				raise cli.DataInputError('recorded')
+				raise cli.builders.DataInputError('recorded')
 
 			with mock.patch.object(module, name, record):
 				for argv in ([], ['--data-path', 'some/dir/'], ['-d', 'some/dir'], ['--data-path=some/dir']):
