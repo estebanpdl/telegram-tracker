@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 '''
-History windows (collector.HistoryWindow) against the fake client.
+History windows (collector.history.HistoryWindow) against the fake client.
 
 Fixture channel alpha_fx (101) holds ids 10..4, newest first, one per day
 from 2026-01-10 down to 2026-01-04; the fake serves 2 messages per page.
@@ -23,7 +23,7 @@ from fakes import FakeTelegramClient, load_expected
 
 import collector
 
-from collector import HistoryWindow
+from collector.history import HistoryWindow
 
 
 EXPECTED = load_expected('collection.json')

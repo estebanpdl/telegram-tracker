@@ -33,6 +33,7 @@ import cli.collect
 import cli.builders
 import cli.parsers
 import collector
+import collector.history
 import collector.outcomes
 import datasets
 import network
@@ -268,7 +269,7 @@ class DispatchEquivalenceTests(CliTestCase):
 
 		self.assertEqual(calls[0]['targets'], ['alpha_fx', 'beta_fx'])
 		self.assertEqual(calls[0]['output'], 'out_dir')
-		self.assertEqual(calls[0]['window'], collector.HistoryWindow(min_id=7))
+		self.assertEqual(calls[0]['window'], collector.history.HistoryWindow(min_id=7))
 
 	def test_default_output_folder(self):
 		calls = self.record_collection()
