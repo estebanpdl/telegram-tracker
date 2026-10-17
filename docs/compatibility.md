@@ -42,6 +42,7 @@ reach the same handlers:
 
 - A first token that is an option other than `-h`/`--help` selects the legacy
   collection parser. It accepts only selectors, metadata-only, output, and `--min-id`.
+  Both collection parsers list `--min-id` in a "history window" help group.
 - No arguments prints the overview to stderr and exits 2. Help exits 0 without
   credentials, sessions, Telethon, pandas, or plotting libraries.
 - Validation precedes credential reads: selectors, batch file and target forms,
