@@ -31,6 +31,7 @@ from fakes import FakeTelegramClient, FixtureWorld, load_expected
 
 import cli
 import collector
+import collector.channel
 import datasets
 import network
 import storage.aggregates
@@ -152,7 +153,7 @@ class ReducerTests(StorageTestCase):
 		results = []
 		with contextlib.redirect_stdout(io.StringIO()):
 			for index, target in enumerate(['alpha_fx', 'beta_fx', 'empty_fx']):
-				results.append(await collector.collect_channel(
+				results.append(await collector.channel.collect_channel(
 					cache.requests, cache, index, target, output_folder=self.out
 				))
 		await cache.close()
