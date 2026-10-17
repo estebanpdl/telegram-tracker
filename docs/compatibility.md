@@ -30,7 +30,7 @@ or an account-specific safe request rate. The README contains option examples.
 
 ## CLI contract
 
-`python main.py <command>` (`cli.py`) is the canonical interface. Legacy forms
+`python main.py <command>` (the `cli` package) is the canonical interface. Legacy forms
 reach the same handlers:
 
 | Legacy invocation | Inputs | Outputs | Canonical form |

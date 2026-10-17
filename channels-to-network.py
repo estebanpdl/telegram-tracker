@@ -5,7 +5,7 @@ Build Graph.gexf and network.png from collected_chats.csv.
 	python channels-to-network.py [--data-path/-d DIR]
 
 Legacy form of `python main.py build-network`; same handler and exit
-codes (cli.py). Reads only local files.
+codes (cli/builders.py). Reads only local files.
 '''
 
 # import local submodules

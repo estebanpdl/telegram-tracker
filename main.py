@@ -9,7 +9,7 @@ Telegram Tracker entry point.
 
 The legacy collection form `python main.py --telegram-channel NAME ...`
 (or `--batch-file FILE`) keeps working. The parser, validation, and
-dispatch live in cli.py; importing this module does nothing.
+dispatch live in the cli package; importing this module does nothing.
 '''
 
 # import local submodules

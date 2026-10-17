@@ -5,7 +5,7 @@ Build msgs_dataset.csv and collected_chats.xlsx from collected data.
 	python build-datasets.py [--data-path/-d DIR]
 
 Legacy form of `python main.py build-dataset`; same handler and exit
-codes (cli.py). Reads only local files.
+codes (cli/builders.py). Reads only local files.
 '''
 
 # import local submodules

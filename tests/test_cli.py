@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 '''
-Unified CLI (cli.py): canonical subcommands, legacy forms, validation
+Unified CLI (cli package): canonical subcommands, legacy forms, validation
 before credentials, history-window options, and offline help.
 
 In-process runs inject the fake client; argument errors run with no
