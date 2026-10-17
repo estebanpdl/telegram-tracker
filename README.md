@@ -110,7 +110,7 @@ The earlier commands still work and reach the same code. They are supported thro
 | `... --min-id N` | `python main.py collect ... --min-id N` | Same meaning: only messages with an id above N |
 | (none) | `python main.py collect ... --since/--until/--max-id/--max-messages` | History window: **`collect` only**. The earlier form accepts only `--min-id` |
 | (none) | `python main.py collect ... --update` | Merge new posts into saved histories: **`collect` only** |
-| (none) | `python main.py collect ... --concurrency/--request-interval/--max-flood-wait/--max-retries` | Request controls: `collect` only. Validated but not applied yet |
+| (none) | `python main.py collect ... --concurrency/--request-interval/--max-flood-wait/--max-retries` | Request controls: `collect` only. The earlier form runs with the defaults (3 channels at once for `--batch-file`) |
 | `python build-datasets.py [--data-path DIR]` | `python main.py build-dataset [--data-path DIR]` | `-d` also works |
 | `python channels-to-network.py [--data-path DIR]` | `python main.py build-network [--data-path DIR]` | `-d` also works |
 
@@ -146,18 +146,23 @@ update:
                         merged history again, duplicating earlier rows.
 
 request controls:
-  Validated now; not applied yet. This version collects channels one at a
-  time.
+  Shared by every Telegram request of the run, including metadata lookups.
+  These are project limits, not a safe rate guaranteed by Telegram. The
+  earlier `python main.py --batch-file ...` form uses the defaults.
 
-  --concurrency N       Channels collected at once, 1-10 (default: 3 for
-                        --batch-file, 1 for --telegram-channel).
+  --concurrency N       Channels collected at once, 1-10; also the most
+                        requests in flight (default: 3 for --batch-file;
+                        --telegram-channel always runs at 1). Use 1 to collect
+                        one channel at a time.
   --request-interval SECONDS
                         Minimum gap between Telegram requests, 0.1-60
                         (default: 0.25).
   --max-flood-wait SECONDS
-                        Longest server flood wait to sit out, 0-3600; 0 stops
-                        on any flood wait (default: 60).
-  --max-retries N       Additional attempts per request, 0-10 (default: 3).
+                        Longest server flood wait to sit out, 0-3600; a longer
+                        one stops the whole run, keeping completed channels. 0
+                        stops on any flood wait (default: 60).
+  --max-retries N       Additional attempts per request after a flood wait or
+                        a transient error, 0-10 (default: 3).
 ```
 
 ### Collecting part of a history
@@ -185,6 +190,21 @@ Known limits:
 - Pages are counted whole, so the chats and users of the page that crosses a bound may include some referenced only by excluded messages.
 - `--since` stops paging at the first page older than the date. This assumes message dates follow id order, which imported or forwarded-in-bulk histories can break.
 - `count` in the saved JSON (`collected_actions` in the dataset) is Telegram's total for the channel, not the number of messages saved.
+
+### Batch targets and concurrency
+
+A batch file holds one target per line: a username, `@username`, a public link (`https://t.me/username`, `t.me/s/username`), or a numeric id. Links and `@` are reduced to the username, which also names the output folder. Blank lines are skipped. Repeated targets are dropped case-insensitively, keeping the first. Anything else (paths, invite or post links, spaces) stops the command with exit 2 and the line number, before connecting. Two targets that turn out to be the same channel (for example an old and a new username) are collected once; the later one is reported as a duplicate.
+
+`--batch-file` collects up to 3 channels at once by default (`--concurrency 1` to `10`). The pages of one channel are still fetched in order. Every request of the run, including metadata lookups of discovered chats, goes through one shared policy:
+
+- at most `--concurrency` requests in flight, and at least `--request-interval` seconds (0.25) between any two;
+- a flood wait from Telegram pauses every channel until it ends, then the request is retried. A wait longer than `--max-flood-wait` (60 s), or one more flood wait after `--max-retries` (3) retries, stops the whole run: completed channels are kept, the rest are reported as not collected, and the exit code is 1;
+- server errors, timeouts (60 s per attempt), and dropped connections are retried after 1, 2, 4 ... seconds (at most 30) within `--max-retries`; when they keep failing, only that channel fails;
+- a missing or private channel fails only that channel; a rejected session stops the run.
+
+The summary prints the counts (given, after removing duplicates, succeeded, failed, duplicates, cancelled) and, per kind of request (`resolve`, `channel`, `history`, `enrichment`), the requests sent, retries, flood waits, and flood-wait seconds. `collection-status.json` records the same numbers.
+
+More concurrency does not raise Telegram's limits for an account: the request gap applies to the whole run, and flood waits pause everything. Only run one collection per account session at a time. On simulated 1-second requests, 3 workers took about 40% of the serial time and 10 workers were limited by the 0.25 s gap (see `docs/compatibility.md`); real timings depend on Telegram.
 
 ### Updating saved histories (`--update`)
 

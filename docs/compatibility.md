@@ -60,8 +60,7 @@ except for the corrections listed per phase. The README has the migration table.
   - window options with `--limit-download-to-channel-metadata` (rejected in `collect`;
     the legacy form keeps accepting `--min-id` with it, as before);
   - flags given to the wrong command.
-- **Request controls** are parsed and validated but **inert** until Phase 6. Their group
-  help says so, and they are not passed to the collector.
+- **Request controls** were parsed and validated but inert in Phase 4; Phase 6 applies them.
 - **History window** (`collector.HistoryWindow`, `collect` only):
   - The server receives `min_id`/`max_id` on every page and `--until` as `offset_date`
     on the first page.
@@ -85,7 +84,7 @@ except for the corrections listed per phase. The README has the migration table.
 | Missing/private/invalid target | Missing: logged; private: crash | Both logged to `_exceptions-channels-not-found.txt`; the run continues |
 | Exit code | 0 unless a traceback | 0 all targets collected; 1 any target failed or login failed; 130 interrupted; 2 argument errors |
 | Empty history, empty batch, all targets failed | Crash | Empty `<channel>_messages.json`; header-correct `counter.csv` / `collected_chats.csv` |
-| Batch pause | `time.sleep(2)` blocking the loop | `await asyncio.sleep(2)` between resolved channels (removed in Phase 6) |
+| Batch pause | `time.sleep(2)` blocking the loop | `await asyncio.sleep(2)` between resolved channels; removed in Phase 6 (the request policy spaces requests) |
 
 ### Phase 3 changes to the builders
 
@@ -139,6 +138,40 @@ Memory: a channel's history is held until its result is written, and the replay 
 committed channel's observations (chat ids and usernames, not messages) until the end.
 Updates hold the parsed earlier history of a channel while it is collected.
 
+### Phase 6: bounded workers and one request policy
+
+| Behavior | Phase 5 | Now |
+|---|---|---|
+| Scheduling | One channel at a time, 2 s pause after each | `--concurrency` workers (batch default 3, single channel 1) take targets in input order; pages of a channel stay sequential; results go through a queue of at most N to the one writer. No pause |
+| Requests | Sent directly | Every RPC (`get_entity`, both full-channel uses, history) through `request_policy.RequestPolicy`: at most N in flight, `--request-interval` spacing (slots reserved in call order, re-checked after the permit), shared flood cooldown, 60 s per-attempt timeout |
+| Flood wait | Telethon slept up to 60 s per request, unseen | Telethon `flood_sleep_threshold=0`; the policy pauses all admissions for the server's seconds and retries; over `--max-flood-wait` or out of retries → account stop: run ends with completed channels saved, status `interrupted`, exit 1 |
+| Transient errors | Telethon retried 5 times; then the run aborted | Telethon `request_retries=1` (keeps one DC migration) and `raise_last_call_error=True` (the real error, not a ValueError that would read as "not found"); the policy retries ServerError/TimedOutError/ConnectionError/timeouts with 1, 2, 4 ... s backoff (cap 30) within `--max-retries`, then fails that channel |
+| Permanent errors | — | Not retried. Channel access errors fail the channel; `UnauthorizedError`/`AuthKeyError` stop the run (`session rejected`) |
+| Discovered private chat | Run aborted (`ChannelPrivateError`) | Logged as `ID - <id>` in `_exceptions-users-not-found.txt`, like a missing chat (fix F9) |
+| Targets | Raw lines | Normalized (`@name`, t.me links → `name`), blank lines skipped, case-insensitive duplicates dropped, unsupported forms rejected with the line number (exit 2); targets resolving to an earlier target's channel are skipped as `duplicate` (decided in input order) |
+| Statistics | — | Per method class (`resolve`, `channel`, `history`, `enrichment`): requests, retries, flood waits, flood-wait seconds, in the summary and `collection-status.json` (D2). A full-channel response shared by the cache is counted under the class that requested it first |
+| Updates | Telethon default | `receive_updates=False` |
+
+One process, one client, one session: login runs once, before any worker starts. Every worker
+is awaited before the single disconnect.
+
+**Fake-latency experiment** (`python tests/scheduler_experiment.py`, virtual clock): 10 generated
+channels × 3 pages plus an alias, a missing and a private target; every fake request takes
+1.0 s, `--request-interval 0.25`.
+
+| `--concurrency` | Peak in flight | Virtual seconds | Requests | Succeeded / failed / duplicate |
+|---|---|---|---|---|
+| 1 | 1 | 66.00 | 66 | 10 / 2 / 1 |
+| 3 | 3 | 26.00 | 66 | 10 / 2 / 1 |
+| 10 | 5 | 18.75 | 66 | 10 / 2 / 1 |
+
+Output files are byte-identical across the three runs (status file excluded). At 10, the
+0.25 s gap, not the worker count, limits overlap (1.0 s / 0.25 s). This shows scheduler behavior
+under these assumptions only, not Telegram latency, throughput, or safe rates.
+
+Tests run collections on `tests/virtual_time.VirtualTimeLoop`, a selector loop whose clock jumps
+to the next timer, so spacing and cooldowns cost no wall time.
+
 ### Login
 
 An authorized session (`./session_file.session`) skips every prompt. Otherwise the
@@ -190,8 +223,8 @@ The test suite pins the pandas and matplotlib removals and checks that project c
   channels sharing a discovered chat, an empty channel, missing and private targets,
   Unicode text, forwards, replies, service messages, and web page, document, poll,
   geo, contact, and venue media.
-- Collection modules: `collector.py` (async run, pagination, enrichment cache, channel
-  results), `storage.py` (counting replay, every output file, lock, status sidecar, history
+- Collection modules: `collector.py` (async run, workers, pagination, enrichment cache,
+  channel results), `request_policy.py` (admission, cooldown, retries, statistics), `storage.py` (counting replay, every output file, lock, status sidecar, history
   merge), `api/__init__.py` (Telethon request helpers and client factory), `api/auth.py`
   (login), `utils/__init__.py` (pure helpers). Fakes replace the client and the
   prompts; no test constructs a real client.
