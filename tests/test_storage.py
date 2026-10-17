@@ -144,8 +144,7 @@ class StorageTestCase(offline_guard.OfflineAsyncTestCase):
 
 class ReducerTests(StorageTestCase):
 	'''
-	5.1 / 5.2: workers return results; one reducer replays them in input
-	order.
+	Workers return results; one reducer replays them in input order.
 	'''
 
 	async def channel_results(self, client):
@@ -218,7 +217,7 @@ class ReducerTests(StorageTestCase):
 
 class CacheTests(StorageTestCase):
 	'''
-	5.2: one in-flight request per chat; transient failures are not kept.
+	One in-flight request per chat; transient failures are not kept.
 	'''
 
 	async def test_concurrent_callers_share_one_request(self):
@@ -262,7 +261,7 @@ class CacheTests(StorageTestCase):
 
 class FileTests(StorageTestCase):
 	'''
-	5.3: atomic replacement, reruns, and no _x/_y columns.
+	Atomic replacement, reruns, and no _x/_y columns.
 	'''
 
 	async def test_rerun_keeps_legacy_columns_and_earlier_rows(self):
@@ -385,7 +384,7 @@ class LockTests(StorageTestCase):
 
 class StatusTests(StorageTestCase):
 	'''
-	5.4: sidecar lifecycle and contents.
+	Sidecar lifecycle and contents.
 	'''
 
 	async def test_partial_batch(self):
@@ -471,8 +470,8 @@ class StatusTests(StorageTestCase):
 
 class BuilderGateTests(StorageTestCase):
 	'''
-	5.4: builders refuse running/interrupted generations and note partial
-	or subset ones.
+	Builders refuse running/interrupted generations and note partial or
+	subset ones.
 	'''
 
 	def write_status(self, **fields):
@@ -528,7 +527,7 @@ class BuilderGateTests(StorageTestCase):
 
 class UpdateTests(StorageTestCase):
 	'''
-	5.3 / 5.4 / 5.6: --update.
+	--update.
 	'''
 
 	def messages_path(self, target='alpha_fx'):
