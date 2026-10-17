@@ -4,13 +4,16 @@ Asynchronous channel collection.
 
 `run_collection` owns one client for the whole run. It creates the client
 through an injected factory inside the running event loop, connects,
-authorizes, collects each target, finalizes the aggregate files, and
-disconnects exactly once after success, failure, or cancellation.
+authorizes once, collects the targets with at most `concurrency` channel
+workers (pages of one channel stay sequential), finalizes the aggregate
+files, and disconnects exactly once after success, failure, or
+cancellation.
 
 Boundaries:
-	- network: `Requests` (application RPCs by method class) and
-	  `MetadataCache` (one full-channel request per chat per run, shared by
-	  every channel that sees the chat);
+	- network: `Requests` (application RPCs by method class, all admitted
+	  through one `request_policy.RequestPolicy`) and `MetadataCache` (one
+	  full-channel request per chat per run, shared by every channel that
+	  sees the chat);
 	- collection: `collect_channel` returns a `storage.ChannelResult` and
 	  writes nothing;
 	- files: `storage.OutputWriter` alone writes channel JSON, aggregates,
@@ -22,6 +25,7 @@ connections, or writes.
 
 # import modules
 import asyncio
+import functools
 import json
 import os
 import sys
@@ -32,15 +36,15 @@ from datetime import datetime, timezone
 # import local submodules
 import storage
 
+from telethon import errors
+
 from api import CHANNEL_ACCESS_ERRORS, full_channel_req, get_entity_attrs, get_posts
+from request_policy import AccountStopped, RequestFailed, RequestPolicy
 from storage import ChannelResult, EnrichOutcome, HistoryUnreadable, \
 	OutputLock, OutputWriter, StatusFile, StorageError, observe_chat, \
 	observe_linked_chat, new_counter_entry
 from utils import JSONEncoder, create_dirs
 
-
-# pause between resolved channels of a batch (baseline behavior)
-BATCH_PAUSE_SECONDS = 2
 
 CHANNELS_NOT_FOUND = storage.CHANNELS_NOT_FOUND
 USERS_NOT_FOUND = storage.USERS_NOT_FOUND
@@ -68,6 +72,26 @@ class TargetUnavailable(Exception):
 	'''
 
 
+class DuplicateTarget(Exception):
+	'''
+	A target resolved to the same channel as an earlier target.
+	'''
+	def __init__(self, alias_of):
+		super().__init__(alias_of)
+		self.alias_of = alias_of
+
+
+class SessionRejected(Exception):
+	'''
+	Telegram refused the session's authorization during collection.
+	Ends the run.
+	'''
+
+
+# authorization/session errors that end the run
+SESSION_ERRORS = (errors.UnauthorizedError, errors.AuthKeyError)
+
+
 @dataclass
 class CollectionSummary:
 	'''
@@ -80,9 +104,14 @@ class CollectionSummary:
 	succeeded: list = field(default_factory=list)
 	failed: list = field(default_factory=list)
 	cancelled: list = field(default_factory=list)
+	duplicates: list = field(default_factory=list)
 	collected_in_full: list = field(default_factory=list)
 	stale_histories: list = field(default_factory=list)
 	stop_reason: str | None = None
+	concurrency: int = 1
+	requests: dict = field(default_factory=dict)
+	peak_in_flight: int = 0
+	peak_queued_results: int = 0
 
 
 '''
@@ -100,22 +129,30 @@ def to_json_safe(data):
 
 class Requests:
 	'''
-	The run's application RPCs, each tagged with its method class.
+	The run's application RPCs, each tagged with its method class and
+	admitted through the request policy (a default one when none is given).
 	'''
-	def __init__(self, client):
+	def __init__(self, client, policy=None):
 		self.client = client
+		self.policy = policy or RequestPolicy()
 
 	async def resolve(self, target):
 		'''
 		The entity for `target`, or False when it is missing/inaccessible.
 		'''
-		return await get_entity_attrs(self.client, target)
+		return await self.policy.call(
+			RESOLVE, lambda: get_entity_attrs(self.client, target)
+		)
 
 	async def full_channel(self, chat_id, method_class):
-		return await full_channel_req(self.client, chat_id)
+		return await self.policy.call(
+			method_class, lambda: full_channel_req(self.client, chat_id)
+		)
 
 	async def history(self, channel_id, **kwargs):
-		return await get_posts(self.client, channel_id, **kwargs)
+		return await self.policy.call(
+			HISTORY, lambda: get_posts(self.client, channel_id, **kwargs)
+		)
 
 
 class MetadataCache:
@@ -453,7 +490,8 @@ async def collect_channel(
 		output_folder,
 		metadata_only=False,
 		window=None,
-		update=False
+		update=False,
+		after_resolve=None
 	):
 	'''
 	Collect one target and return its ChannelResult; nothing is written.
@@ -463,19 +501,22 @@ async def collect_channel(
 	in input order whatever the completion order.
 
 	With `update`, an existing <target>_messages.json sets min_id to its
-	newest id and the fetched posts are merged into it; without one the
-	history is collected in full. Raises TargetUnavailable, PaginationStalled,
-	or HistoryUnreadable for a target that fails on its own.
+	newest id (checked before any request) and the fetched posts are merged
+	into it, read again after the fetch; without one the history is
+	collected in full. `after_resolve(entity)` is awaited right after entity
+	resolution (entity is False when missing) and may raise to stop.
+	Raises TargetUnavailable, PaginationStalled, HistoryUnreadable, or
+	RequestFailed for a target that fails on its own.
 	'''
 	window = window or HistoryWindow()
 	result = ChannelResult(index=index, target=target)
 
-	earlier = None
+	path = storage.history_path(output_folder, target)
+	has_history = False
 	if update and not metadata_only:
-		path = storage.history_path(output_folder, target)
 		if os.path.exists(path):
-			earlier = storage.read_history(path)
-			window = HistoryWindow(min_id=storage.newest_id(earlier))
+			has_history = True
+			window = HistoryWindow(min_id=storage.newest_id(storage.read_history(path)))
 		result.min_id = window.min_id
 
 	print('')
@@ -484,6 +525,8 @@ async def collect_channel(
 	print('')
 
 	entity_attrs = await requests.resolve(target)
+	if after_resolve is not None:
+		await after_resolve(entity_attrs)
 	if not entity_attrs:
 		raise TargetUnavailable(target)
 
@@ -520,11 +563,13 @@ async def collect_channel(
 		await fetch_history(get_page, window=window, on_page=on_page)
 	)
 
+	earlier = None
 	if not update:
 		result.history, result.history_mode = data, 'replaced'
-	elif earlier is None:
+	elif not has_history:
 		result.history, result.history_mode = data, 'created'
 	else:
+		earlier = storage.read_history(path)
 		result.history = storage.merge_histories(earlier, data)
 		result.history_mode = 'unchanged' if result.history is None else 'merged'
 
@@ -538,7 +583,7 @@ Orchestration
 
 '''
 
-def run_parameters(metadata_only, window, update):
+def run_parameters(metadata_only, window, update, controls=None):
 	'''
 	The run's collection parameters for the sidecar (no credentials).
 	'''
@@ -551,12 +596,14 @@ def run_parameters(metadata_only, window, update):
 	else:
 		mode = 'full'
 
-	return {
+	parameters = {
 		'mode': mode,
 		'metadata_only': metadata_only,
 		'window': window.as_record() if mode == 'window' else None,
 		'window_description': window.describe() if mode == 'window' else None
 	}
+	parameters.update(controls or {})
+	return parameters
 
 
 async def run_collection(
@@ -569,30 +616,43 @@ async def run_collection(
 		min_id=0,
 		window=None,
 		update=False,
-		pause=asyncio.sleep
+		concurrency=1,
+		request_interval=0.25,
+		max_flood_wait=60,
+		max_retries=3,
+		requested_concurrency=None,
+		targets_given=None,
+		policy=None
 	):
 	'''
-	Collect `targets` with one client.
+	Collect `targets` (normalized, without duplicates) with one client.
 
 	client_factory -> zero-argument callable returning an unconnected client;
 		called inside the running loop
-	authorize -> coroutine function awaited with the connected client
-		(api.auth.ensure_authorized in production)
+	authorize -> coroutine function awaited once with the connected client,
+		before any worker starts (api.auth.ensure_authorized in production)
 	window -> HistoryWindow selecting the messages kept (default: all
 		above min_id)
 	update -> merge new posts into each channel's saved history
-	pause -> coroutine function used for the pause between batch channels
+	concurrency -> channel workers, capped at the number of targets; also
+		the bound on application RPCs in flight
+	request_interval / max_flood_wait / max_retries -> the request policy
+		(see request_policy.py); `policy` replaces it (tests)
+	requested_concurrency / targets_given -> recorded in the sidecar only
 
-	Missing/inaccessible targets, stalled pagination, and unreadable saved
-	histories (--update) fail only that target. A storage error,
-	AuthenticationError, any other exception, or cancellation ends the
+	Missing/inaccessible targets, stalled pagination, unreadable saved
+	histories (--update), and requests that keep failing transiently fail
+	only that target; a target resolving to an earlier target's channel
+	is skipped as a duplicate. An account stop (flood wait), a rejected
+	session, a storage error, any other exception, or cancellation ends the
 	run: completed channels stay written, aggregates are finalized from
 	them, and collection-status.json says "interrupted". The output folder
-	is locked for the run, and the client is disconnected exactly once in
-	every case.
+	is locked for the run, and the client is disconnected exactly once
+	after every worker has finished.
 	'''
 	window = window or HistoryWindow(min_id=min_id)
 	summary = CollectionSummary(requested=list(targets), output_folder=output_folder)
+	summary.concurrency = max(1, min(concurrency, len(summary.requested)))
 
 	storage.check_unlocked(output_folder)
 	client = client_factory()
@@ -605,14 +665,31 @@ async def run_collection(
 		except OSError as exc:
 			raise StorageError(f'cannot create {output_folder}: {exc}') from exc
 
+		policy = policy or RequestPolicy(
+			concurrency=summary.concurrency,
+			interval=request_interval,
+			max_flood_wait=max_flood_wait,
+			max_retries=max_retries
+		)
+		parameters = run_parameters(metadata_only, window, update, {
+			'targets_given': len(summary.requested) if targets_given is None else targets_given,
+			'concurrency': {
+				'requested': requested_concurrency or concurrency,
+				'effective': summary.concurrency
+			},
+			'request_interval': policy.interval,
+			'max_flood_wait': policy.max_flood_wait,
+			'max_retries': policy.max_retries
+		})
 		with OutputLock(output_folder):
 			await _collect_locked(
 				client,
 				summary,
+				policy,
+				parameters,
 				metadata_only=metadata_only,
 				window=window,
-				update=update,
-				pause=pause
+				update=update
 			)
 	finally:
 		await client.disconnect()
@@ -620,96 +697,174 @@ async def run_collection(
 	return summary
 
 
-async def _collect_locked(client, summary, *, metadata_only, window, update, pause):
-	output_folder = summary.output_folder
-	status = StatusFile(
-		output_folder,
-		summary.requested,
-		run_parameters(metadata_only, window, update)
-	)
+async def _collect_locked(client, summary, policy, parameters, *, metadata_only, window, update):
+	targets = summary.requested
+	status = StatusFile(summary.output_folder, targets, parameters)
 	status.write()
 
-	writer = OutputWriter(output_folder)
-	cache = MetadataCache(Requests(client))
-	try:
-		for index, target in enumerate(summary.requested):
-			await _collect_target(
-				cache, writer, status, summary, index, target,
-				metadata_only=metadata_only, window=window, update=update
+	writer = OutputWriter(summary.output_folder)
+	cache = MetadataCache(Requests(client, policy))
+	queue = asyncio.Queue(maxsize=summary.concurrency)
+	resolved = {}
+	resolved_events = [asyncio.Event() for _ in targets]
+
+	async def after_resolve(index, entity):
+		'''
+		Record the resolved channel; skip the target when an earlier target
+		(lower index) resolved to the same channel. Earlier targets started
+		first and record their resolution before collecting, so this waits
+		at most for their resolution.
+		'''
+		resolved[index] = entity.id if entity else None
+		resolved_events[index].set()
+		if not entity:
+			return
+		for earlier in range(index):
+			await resolved_events[earlier].wait()
+			if resolved.get(earlier) == entity.id:
+				raise DuplicateTarget(targets[earlier])
+
+	async def process(index):
+		target = targets[index]
+		try:
+			result = await collect_channel(
+				cache.requests,
+				cache,
+				index,
+				target,
+				output_folder=summary.output_folder,
+				metadata_only=metadata_only,
+				window=window,
+				update=update,
+				after_resolve=functools.partial(after_resolve, index)
 			)
-			if status.target(index)['status'] == 'succeeded' and len(summary.requested) > 1:
-				await pause(BATCH_PAUSE_SECONDS)
+			outcome = ('result', result)
+		except TargetUnavailable:
+			outcome = ('not_found', NOT_FOUND_REASON)
+		except DuplicateTarget as exc:
+			outcome = ('duplicate', exc.alias_of)
+		except (PaginationStalled, HistoryUnreadable, RequestFailed) as exc:
+			print(f'> {target}: {exc}; messages not saved.', file=sys.stderr)
+			outcome = ('failed', str(exc))
+		except SESSION_ERRORS as exc:
+			raise SessionRejected(
+				f'Telegram rejected the session ({type(exc).__name__}); log in again'
+			) from None
+		finally:
+			resolved_events[index].set()
+
+		await queue.put((index, outcome))
+		summary.peak_queued_results = max(summary.peak_queued_results, queue.qsize())
+
+	def record(index, kind, payload):
+		'''
+		Writer side: commit a result or record a failure. Only this
+		function touches output files and target statuses.
+		'''
+		entry = status.target(index)
+		target = targets[index]
+		if kind == 'result':
+			try:
+				writer.commit(payload)
+			except StorageError as exc:
+				entry.update(status='failed', reason=f'storage error: {exc}')
+				raise
+			print(f'> Saved {target}')
+			entry.update(
+				status='succeeded',
+				channel_id=payload.channel_id,
+				history=payload.history_mode,
+				messages=payload.messages
+			)
+			if payload.min_id is not None:
+				entry['min_id'] = payload.min_id
+			if payload.history_mode == 'not_collected' and os.path.isfile(
+					storage.history_path(summary.output_folder, target)):
+				entry['stale_history'] = True
+		elif kind == 'duplicate':
+			entry.update(status='duplicate', alias_of=payload)
+		else:
+			if kind == 'not_found':
+				writer.record_not_found(index, target)
+			entry.update(status='failed', reason=payload)
+
+	async def write_results():
+		while True:
+			item = await queue.get()
+			if item is None:
+				return
+			record(item[0], *item[1])
+
+	order = iter(range(len(targets)))
+
+	async def worker():
+		for index in order:
+			await process(index)
+
+	workers = [asyncio.create_task(worker()) for _ in range(summary.concurrency if targets else 0)]
+	writer_task = asyncio.create_task(write_results())
+	try:
+		await _supervise(workers, writer_task, queue)
 	except BaseException as exc:
 		summary.stop_reason = stop_reason_for(exc)
+		await _cancel_all(workers + [writer_task])
 		await _close_quietly(cache)
-		_finish(writer, cache, status, summary, failing=True)
+		if not isinstance(exc, StorageError):
+			# results already collected and waiting for the writer
+			_drain(queue, record)
+		_finish(writer, cache, status, summary, policy, failing=True)
+		if isinstance(exc, (AccountStopped, SessionRejected)):
+			# a planned stop: the summary carries stop_reason
+			return
 		raise
 
 	await cache.close()
-	_finish(writer, cache, status, summary, failing=False)
+	_finish(writer, cache, status, summary, policy, failing=False)
 
 
-async def _collect_target(
-		cache, writer, status, summary, index, target, *,
-		metadata_only, window, update
-	):
+async def _supervise(workers, writer_task, queue):
 	'''
-	Collect and commit one target, recording its outcome. Target-level
-	failures are recorded; anything else propagates.
+	Wait for every worker, then let the writer finish the queue. A failing
+	worker or writer raises at once (the caller cancels the rest).
 	'''
-	entry = status.target(index)
-	try:
-		result = await collect_channel(
-			cache.requests,
-			cache,
-			index,
-			target,
-			output_folder=summary.output_folder,
-			metadata_only=metadata_only,
-			window=window,
-			update=update
-		)
-	except TargetUnavailable:
-		writer.record_not_found(index, target)
-		_fail(entry, summary, target, NOT_FOUND_REASON)
-		return
-	except (PaginationStalled, HistoryUnreadable) as exc:
-		print(f'> {target}: {exc}; messages not saved.', file=sys.stderr)
-		_fail(entry, summary, target, str(exc))
-		return
-
-	try:
-		writer.commit(result)
-	except StorageError as exc:
-		_fail(entry, summary, target, f'storage error: {exc}')
-		raise
-	print(f'> Saved {target}')
-
-	entry.update(
-		status='succeeded',
-		channel_id=result.channel_id,
-		history=result.history_mode,
-		messages=result.messages
-	)
-	if result.min_id is not None:
-		entry['min_id'] = result.min_id
-	if result.history_mode == 'created':
-		summary.collected_in_full.append(target)
-	if result.history_mode == 'not_collected' and os.path.isfile(
-			storage.history_path(summary.output_folder, target)):
-		entry['stale_history'] = True
-		summary.stale_histories.append(target)
-	summary.succeeded.append(target)
+	gathered = asyncio.gather(*workers)
+	# a cancelled run leaves gathered with CancelledError: mark it retrieved
+	gathered.add_done_callback(lambda f: f.cancelled() or f.exception())
+	pending = {gathered, writer_task}
+	while gathered in pending:
+		done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+		if writer_task in done:
+			writer_task.result()
+			raise RuntimeError('result writer stopped before the workers')
+	gathered.result()
+	await queue.put(None)
+	await writer_task
 
 
-def _fail(entry, summary, target, reason):
-	entry.update(status='failed', reason=reason)
-	summary.failed.append((target, reason))
+async def _cancel_all(tasks):
+	for task in tasks:
+		task.cancel()
+	await asyncio.gather(*tasks, return_exceptions=True)
+
+
+def _drain(queue, record):
+	while not queue.empty():
+		item = queue.get_nowait()
+		if item is None:
+			continue
+		try:
+			record(item[0], *item[1])
+		except StorageError:
+			return
 
 
 def stop_reason_for(exc):
 	if isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt)):
 		return 'cancelled'
+	if isinstance(exc, AccountStopped):
+		return f'account stopped: {exc}'
+	if isinstance(exc, SessionRejected):
+		return f'session rejected: {exc}'
 	if isinstance(exc, StorageError):
 		return f'storage error: {exc}'
 	return f'{type(exc).__name__}: {exc}'
@@ -722,16 +877,31 @@ async def _close_quietly(cache):
 		pass
 
 
-def _finish(writer, cache, status, summary, *, failing):
+def _finish(writer, cache, status, summary, policy, *, failing):
 	'''
-	Finalize aggregates from the committed channels and close the sidecar.
-	A storage error while finishing is raised unless the run is already
-	failing with another error.
+	Finalize aggregates from the committed channels, fill the summary from
+	the target statuses (input order), and close the sidecar. A storage
+	error while finishing is raised unless the run is already failing with
+	another error.
 	'''
 	for index, entry in enumerate(status.data['targets']):
+		target = summary.requested[index]
 		if entry['status'] == 'pending':
 			entry['status'] = 'cancelled'
-			summary.cancelled.append(summary.requested[index])
+			summary.cancelled.append(target)
+		elif entry['status'] == 'succeeded':
+			summary.succeeded.append(target)
+			if entry.get('history') == 'created':
+				summary.collected_in_full.append(target)
+			if entry.get('stale_history'):
+				summary.stale_histories.append(target)
+		elif entry['status'] == 'duplicate':
+			summary.duplicates.append((target, entry['alias_of']))
+		else:
+			summary.failed.append((target, entry.get('reason')))
+
+	summary.requests = policy.stats_record()
+	summary.peak_in_flight = policy.peak_active
 
 	error = None
 	try:
@@ -751,12 +921,15 @@ def _finish(writer, cache, status, summary, *, failing):
 		status.finish(
 			state,
 			summary={
+				'given': status.data['parameters'].get('targets_given'),
 				'requested': len(summary.requested),
 				'succeeded': len(summary.succeeded),
 				'failed': len(summary.failed),
+				'duplicates': len(summary.duplicates),
 				'cancelled': len(summary.cancelled)
 			},
-			stop_reason=summary.stop_reason
+			stop_reason=summary.stop_reason,
+			requests=summary.requests
 		)
 	except StorageError as exc:
 		error = error or exc

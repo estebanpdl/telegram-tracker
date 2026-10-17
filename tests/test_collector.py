@@ -96,12 +96,8 @@ class CollectorTestCase(offline_guard.OfflineAsyncTestCase):
 		tmp = tempfile.TemporaryDirectory()
 		self.addCleanup(tmp.cleanup)
 		self.out = os.path.join(tmp.name, 'data')
-		self.pauses = []
 		self.stdout = io.StringIO()
 		self.stderr = io.StringIO()
-
-	async def pause(self, seconds):
-		self.pauses.append(seconds)
 
 	async def run_targets(self, targets, client=None, **kwargs):
 		self.client = client or FakeTelegramClient(page_size=EXPECTED['page_size'])
@@ -114,7 +110,6 @@ class CollectorTestCase(offline_guard.OfflineAsyncTestCase):
 				self.out,
 				client_factory=lambda: self.client,
 				authorize=authorize,
-				pause=self.pause,
 				**kwargs
 			)
 
@@ -160,7 +155,6 @@ class BatchScenarioTests(CollectorTestCase):
 		self.assert_single_lifecycle()
 		self.assertEqual(self.summary.succeeded, self.spec['succeeded'])
 		self.assertEqual([t for t, _ in self.summary.failed], self.spec['failed'])
-		self.assertEqual(self.pauses, self.spec['pauses'])
 
 	def test_files(self):
 		self.assertEqual(list_files(self.out), self.spec['files'])
@@ -232,7 +226,6 @@ class OtherScenarioTests(CollectorTestCase):
 		self.assertEqual(list_files(self.out), spec['files'])
 		self.assert_chats_txt(spec['chats_txt'])
 		self.assert_counter(spec['counter'])
-		self.assertEqual(self.pauses, spec['pauses'])
 		self.assert_single_lifecycle()
 
 	async def test_min_id_filters_every_history_request(self):
@@ -247,7 +240,6 @@ class OtherScenarioTests(CollectorTestCase):
 		self.assertEqual([m['id'] for m in data['messages']], expected['message_ids'])
 		self.assertEqual([c['id'] for c in data['chats']], expected['chat_ids'])
 		self.assert_counter(spec['counter'])
-		self.assertEqual(self.pauses, [])
 
 	async def test_empty_batch_writes_header_correct_outputs(self):
 		summary = await self.run_targets([])
@@ -334,8 +326,7 @@ class LifecycleTests(CollectorTestCase):
 			await collector.run_collection(
 				['alpha_fx'], self.out,
 				client_factory=factory,
-				authorize=lambda c: ensure_authorized(c, None),
-				pause=self.pause
+				authorize=lambda c: ensure_authorized(c, None)
 			)
 		self.assertEqual(set(client.loop_ids), set(loops))
 		self.assert_single_lifecycle()

@@ -29,6 +29,8 @@ import sqlite3
 import threading
 import unittest
 
+from virtual_time import VirtualTimeLoop
+
 
 class OfflineViolation(RuntimeError):
 	'''
@@ -258,8 +260,11 @@ class OfflineTestCase(_OfflineChecks, unittest.TestCase):
 
 class OfflineAsyncTestCase(_OfflineChecks, unittest.IsolatedAsyncioTestCase):
 	'''
-	Async test case running under the offline guard.
+	Async test case running under the offline guard, on a virtual-time
+	loop: request spacing and other sleeps cost no wall time.
 	'''
+	loop_factory = VirtualTimeLoop
+
 	def setUp(self):
 		super().setUp()
 		self._start_offline_checks()

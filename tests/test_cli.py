@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from unittest import mock
 
 import offline_guard
+import virtual_time
 
 from builder_data import ROOT, TESTS, collected_data, run_script
 from fakes import FakeTelegramClient, load_expected
@@ -45,10 +46,10 @@ class CliTestCase(offline_guard.OfflineTestCase):
 		self.tmp = tmp.name
 		self.out = os.path.join(self.tmp, 'data')
 		self.factory_calls = 0
+		virtual = mock.patch.object(cli, 'asyncio_run', virtual_time.run)
+		virtual.start()
+		self.addCleanup(virtual.stop)
 		self.client = FakeTelegramClient(page_size=EXPECTED['page_size'])
-		pause = mock.patch.object(collector, 'BATCH_PAUSE_SECONDS', 0)
-		pause.start()
-		self.addCleanup(pause.stop)
 
 	def factory(self):
 		self.factory_calls += 1
@@ -104,7 +105,7 @@ class HelpTests(CliTestCase):
 		expected = {
 			'collect': ('--telegram-channel', '--since', '--until', '--max-id', '--max-messages',
 				'--concurrency', '--request-interval', '--max-flood-wait', '--max-retries',
-				'excludes 1 October', 'not applied yet'),
+				'excludes 1 October', '--update', 'not a safe rate guaranteed'),
 			'build-dataset': ('--data-path', '-d'),
 			'build-network': ('--data-path', '-d'),
 		}

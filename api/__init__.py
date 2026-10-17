@@ -36,14 +36,30 @@ Client-side
 
 '''
 
+# Client settings: the collector's request policy owns flood waits and
+# retries, so Telethon sleeps on no flood wait and raises the last error
+# (a ServerError, not a generic ValueError that would read as "not
+# found"). One library retry remains so a DC migration (for example at
+# login) can complete; it also means a server error may be retried once
+# inside an attempt. Updates are not received.
+CLIENT_SETTINGS = {
+	'flood_sleep_threshold': 0,
+	'request_retries': 1,
+	'raise_last_call_error': True,
+	'connection_retries': 5,
+	'retry_delay': 1,
+	'receive_updates': False
+}
+
+
 # create client
 def create_client(session_file, api_id, api_hash):
 	'''
-	Create an unconnected client. Call inside the running event loop that
-	will connect, use, and disconnect it: Telethon binds a client to that
-	loop.
+	Create an unconnected client with CLIENT_SETTINGS. Call inside the
+	running event loop that will connect, use, and disconnect it: Telethon
+	binds a client to that loop.
 	'''
-	return TelegramClient(session_file, api_id, api_hash)
+	return TelegramClient(session_file, api_id, api_hash, **CLIENT_SETTINGS)
 
 # get connection
 async def get_connection(session_file, api_id, api_hash, phone):

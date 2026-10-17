@@ -47,9 +47,6 @@ class WindowTestCase(offline_guard.OfflineAsyncTestCase):
 			page_size=EXPECTED['page_size'], honor_bounds=honor_bounds
 		)
 
-		async def no_pause(seconds):
-			pass
-
 		with contextlib.redirect_stdout(io.StringIO()):
 			return await collector.run_collection(
 				['alpha_fx'],
@@ -57,7 +54,6 @@ class WindowTestCase(offline_guard.OfflineAsyncTestCase):
 				client_factory=lambda: self.client,
 				authorize=lambda c: ensure_authorized(c, None),
 				window=window,
-				pause=no_pause,
 				**kwargs
 			)
 

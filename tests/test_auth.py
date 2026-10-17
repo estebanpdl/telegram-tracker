@@ -318,7 +318,6 @@ class LoginInCollectionTests(offline_guard.OfflineAsyncTestCase):
 						code_prompt=code_prompt,
 						password_prompt=password_prompt
 					),
-					pause=asyncio.sleep
 				)
 			written = ''
 			for d, _, files in os.walk(out):

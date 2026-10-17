@@ -109,9 +109,6 @@ class StorageTestCase(offline_guard.OfflineAsyncTestCase):
 		self.stdout = io.StringIO()
 		self.stderr = io.StringIO()
 
-	async def no_pause(self, seconds):
-		pass
-
 	async def collect(self, targets, client=None, out=None, **kwargs):
 		self.client = client or FakeTelegramClient(page_size=EXPECTED['page_size'])
 		self.factory_calls = 0
@@ -126,7 +123,6 @@ class StorageTestCase(offline_guard.OfflineAsyncTestCase):
 				out or self.out,
 				client_factory=factory,
 				authorize=lambda c: ensure_authorized(c, None),
-				pause=self.no_pause,
 				**kwargs
 			)
 
@@ -390,7 +386,7 @@ class StatusTests(StorageTestCase):
 		await self.collect(BATCH)
 		status = self.status()
 		self.assertEqual(status['state'], storage.PARTIAL)
-		self.assertEqual(status['summary'], {'requested': 5, 'succeeded': 3, 'failed': 2, 'cancelled': 0})
+		self.assertEqual(status['summary'], {'given': 5, 'requested': 5, 'succeeded': 3, 'failed': 2, 'duplicates': 0, 'cancelled': 0})
 		self.assertEqual(status['parameters']['mode'], 'full')
 		by_input = {t['input']: t for t in status['targets']}
 		self.assertEqual(by_input['alpha_fx']['history'], 'replaced')
