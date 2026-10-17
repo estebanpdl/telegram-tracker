@@ -15,13 +15,10 @@ import shutil
 import tempfile
 
 from fakes import FIXTURES, FakeTelegramClient, load_expected
+from virtual_time import VirtualTimeLoop
 
 
 _TEMPLATES = {}
-
-
-async def _no_pause(seconds):
-	pass
 
 
 def _collect(targets, out):
@@ -40,9 +37,9 @@ def _collect(targets, out):
 				targets,
 				out,
 				client_factory=lambda: client,
-				authorize=lambda c: ensure_authorized(c, None),
-				pause=_no_pause
-			)
+				authorize=lambda c: ensure_authorized(c, None)
+			),
+			loop_factory=VirtualTimeLoop
 		)
 
 

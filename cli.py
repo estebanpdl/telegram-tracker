@@ -24,6 +24,7 @@ import argparse
 import functools
 import math
 import os
+import re
 import sys
 import time
 import warnings
@@ -47,6 +48,18 @@ WINDOW_FLAGS = ('since', 'until', 'max_id', 'max_messages')
 
 # names listed by the existing-history warning before "and N more"
 WARN_LIST_LIMIT = 10
+
+# default channel workers for --batch-file (D1); a single channel runs at 1
+BATCH_CONCURRENCY = 3
+
+# accepted target forms
+USERNAME_OR_ID = re.compile(r'^(?:[A-Za-z0-9_]+|-?[0-9]+)$')
+PUBLIC_LINK = re.compile(
+	r'^(?:https?://)?(?:www\.)?(?:t\.me|telegram\.me|telegram\.dog)/(?:s/)?'
+	r'([A-Za-z0-9_]+)/?$',
+	re.IGNORECASE
+)
+TARGET_FORMS = 'use a username, @username, t.me/username, or a numeric id'
 
 LEGACY_FORMS = '''\
 legacy forms (still supported):
@@ -202,17 +215,37 @@ def add_collect_arguments(parser):
 		help='At most N messages per channel, newest first.'
 	)
 
+	update = parser.add_argument_group(
+		'update',
+		'Add new posts to saved histories instead of replacing them. Not '
+		'allowed with the history window options or '
+		'--limit-download-to-channel-metadata.'
+	)
+	update.add_argument(
+		'--update',
+		action='store_true',
+		help='For each channel, collect only posts newer than the newest one in '
+			'its saved <channel>_messages.json and merge them into that file '
+			'(fetched copies win). A channel without a saved history is collected '
+			'in full. Posts deleted or edited on Telegram since the earlier run '
+			'are not reflected, and build-dataset appends the merged history '
+			'again, duplicating earlier rows.'
+	)
+
 	controls = parser.add_argument_group(
 		'request controls',
-		'Validated now; not applied yet. This version collects channels one '
-		'at a time.'
+		'Shared by every Telegram request of the run, including metadata '
+		'lookups. These are project limits, not a safe rate guaranteed by '
+		'Telegram. The earlier `python main.py --batch-file ...` form uses the '
+		'defaults.'
 	)
 	controls.add_argument(
 		'--concurrency',
 		type=bounded_int(1, 10),
 		metavar='N',
-		help='Channels collected at once, 1-10 (default: 3 for --batch-file, '
-			'1 for --telegram-channel).'
+		help='Channels collected at once, 1-10; also the most requests in '
+			'flight (default: 3 for --batch-file; --telegram-channel always runs '
+			'at 1). Use 1 to collect one channel at a time.'
 	)
 	controls.add_argument(
 		'--request-interval',
@@ -226,15 +259,17 @@ def add_collect_arguments(parser):
 		type=bounded_int(0, 3600),
 		default=60,
 		metavar='SECONDS',
-		help='Longest server flood wait to sit out, 0-3600; 0 stops on any '
-			'flood wait (default: 60).'
+		help='Longest server flood wait to sit out, 0-3600; a longer one stops '
+			'the whole run, keeping completed channels. 0 stops on any flood wait '
+			'(default: 60).'
 	)
 	controls.add_argument(
 		'--max-retries',
 		type=bounded_int(0, 10),
 		default=3,
 		metavar='N',
-		help='Additional attempts per request, 0-10 (default: 3).'
+		help='Additional attempts per request after a flood wait or a transient '
+			'error, 0-10 (default: 3).'
 	)
 
 
@@ -333,20 +368,67 @@ Collection
 
 '''
 
+def normalize_target(text):
+	'''
+	One target in canonical form: a bare username or numeric id. `@name`
+	and public t.me/name links become `name`. Returns None for a blank
+	value; raises ValueError for anything else (paths, invite links,
+	post links).
+	'''
+	value = text.strip()
+	if not value:
+		return None
+
+	if value.startswith('@'):
+		value = value[1:]
+	else:
+		link = PUBLIC_LINK.match(value)
+		if link:
+			value = link.group(1)
+
+	if not USERNAME_OR_ID.match(value):
+		raise ValueError(f'unsupported target {text.strip()!r}')
+	return value
+
+
 def read_targets(args, parser):
 	'''
-	Targets from --telegram-channel, or one per line from --batch-file.
-	An unreadable batch file is an argument error (exit 2).
+	Targets from --telegram-channel, or one per line from --batch-file,
+	normalized (see normalize_target) and deduplicated case-insensitively,
+	first occurrence kept. Blank lines are skipped. Returns (targets,
+	number of targets given). An unreadable batch file or an unsupported
+	target is an argument error (exit 2).
 	'''
 	req_type, req_input = cmd_request_type(args)
 	if req_type != 'batch':
-		return [req_input]
+		try:
+			target = normalize_target(req_input)
+		except ValueError as exc:
+			parser.error(f'--telegram-channel: {exc}; {TARGET_FORMS}')
+		if target is None:
+			parser.error('--telegram-channel is empty')
+		return [target], 1
 
 	try:
 		with open(req_input, encoding='utf-8', mode='r') as reader:
-			return [i.rstrip() for i in reader]
-	except OSError as exc:
-		parser.error(f'cannot read --batch-file {req_input!r}: {exc.strerror}')
+			lines = reader.read().splitlines()
+	except (OSError, UnicodeDecodeError) as exc:
+		reason = getattr(exc, 'strerror', None) or str(exc)
+		parser.error(f'cannot read --batch-file {req_input!r}: {reason}')
+
+	targets, seen, given = [], set(), 0
+	for number, line in enumerate(lines, start=1):
+		try:
+			target = normalize_target(line)
+		except ValueError as exc:
+			parser.error(f'--batch-file {req_input!r} line {number}: {exc}; {TARGET_FORMS}')
+		if target is None:
+			continue
+		given += 1
+		if target.lower() not in seen:
+			seen.add(target.lower())
+			targets.append(target)
+	return targets, given
 
 
 def window_bounds(args, parser):
@@ -403,6 +485,18 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 	'''
 	metadata_only = args['limit_download_to_channel_metadata']
 	bounds = window_bounds(args, parser)
+	update = args.get('update', False)
+	if update and bounds:
+		parser.error(
+			'--update cannot be combined with the history window options '
+			'(--since, --until, --min-id, --max-id, --max-messages): it sets '
+			'min_id from each saved history'
+		)
+	if update and metadata_only:
+		parser.error(
+			'--update needs message collection; remove '
+			'--limit-download-to-channel-metadata'
+		)
 	if not legacy and metadata_only and bounds:
 		parser.error(
 			'history window options (--since, --until, --min-id, --max-id, '
@@ -410,14 +504,26 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 			'--limit-download-to-channel-metadata'
 		)
 
-	targets = read_targets(args, parser)
+	targets, given = read_targets(args, parser)
 	output_folder = data_folder_from(args['output'], DEFAULT_OUTPUT)
 	if bounds and not metadata_only:
 		warn_replaced_histories(targets, output_folder)
 
+	batch = args['batch_file'] is not None
+	requested = args.get('concurrency') or (BATCH_CONCURRENCY if batch else 1)
+	controls = {
+		'concurrency': requested if batch else 1,
+		'requested_concurrency': requested,
+		'request_interval': args.get('request_interval', 0.25),
+		'max_flood_wait': args.get('max_flood_wait', 60),
+		'max_retries': args.get('max_retries', 3),
+		'targets_given': given
+	}
+
 	try:
 		from api.auth import AuthenticationError, ensure_authorized
 		from collector import HistoryWindow, run_collection
+		from storage import OutputLocked, StorageError
 	except ModuleNotFoundError as exc:
 		return missing_dependency(COLLECT, exc)
 
@@ -443,6 +549,16 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 	print(f'\nInit program at {time.ctime()}\n')
 	if window.is_filtered and not metadata_only:
 		print(f'History window: {window.describe()}\n')
+	if update:
+		print('Update: new posts are merged into saved histories\n')
+	if batch:
+		duplicates = given - len(targets)
+		print(
+			f'Targets: {len(targets)}'
+			+ (f' ({duplicates} duplicate line(s) skipped)' if duplicates else '')
+			+ f'; up to {min(requested, max(1, len(targets)))} at once '
+			f'(--concurrency {requested})\n'
+		)
 	print('')
 
 	try:
@@ -455,11 +571,16 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 					client_factory=client_factory,
 					authorize=authorize,
 					metadata_only=metadata_only,
-					window=window
+					window=window,
+					update=update,
+					**controls
 				)
 			)
 	except AuthenticationError as exc:
 		print(f'> Login failed: {exc}', file=sys.stderr)
+		return 1
+	except (OutputLocked, StorageError) as exc:
+		print(f'> {exc}', file=sys.stderr)
 		return 1
 	except KeyboardInterrupt:
 		print('> Interrupted.', file=sys.stderr)
@@ -470,16 +591,67 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 		f'> Collected {len(summary.succeeded)} of {len(summary.requested)} '
 		f'targets into {output_folder}\n'
 	)
+	print_summary(summary, given)
 
+	if summary.collected_in_full:
+		print(
+			f'> {len(summary.collected_in_full)} channel(s) had no saved history and '
+			'were collected in full: ' + ', '.join(summary.collected_in_full) + '\n'
+		)
+	if summary.stale_histories:
+		print(
+			f'> Metadata only: the saved messages of {len(summary.stale_histories)} '
+			'channel(s) are from an earlier run: '
+			+ ', '.join(summary.stale_histories) + '\n'
+		)
+
+	if summary.stop_reason:
+		print(f'> Stopped: {summary.stop_reason}', file=sys.stderr)
+	if summary.cancelled:
+		print(
+			f'> {len(summary.cancelled)} target(s) not collected: '
+			+ list_names(summary.cancelled),
+			file=sys.stderr
+		)
 	if summary.failed:
 		print(
 			f'> {len(summary.failed)} of {len(summary.requested)} targets failed: '
 			+ ', '.join(target for target, _ in summary.failed),
 			file=sys.stderr
 		)
+	if summary.failed or summary.stop_reason:
 		return 1
 
 	return 0
+
+
+def list_names(names):
+	text = ', '.join(names[:WARN_LIST_LIMIT])
+	if len(names) > WARN_LIST_LIMIT:
+		text += f', and {len(names) - WARN_LIST_LIMIT} more'
+	return text
+
+
+def print_summary(summary, given):
+	'''
+	Counts and per-method-class request statistics (stdout).
+	'''
+	print(
+		f'> Targets: {given} given, {len(summary.requested)} after removing '
+		f'duplicates; {len(summary.succeeded)} succeeded, {len(summary.failed)} '
+		f'failed, {len(summary.duplicates)} same channel as an earlier target, '
+		f'{len(summary.cancelled)} cancelled. Concurrency {summary.concurrency}.'
+	)
+	for target, alias_of in summary.duplicates:
+		print(f'>   {target}: same channel as {alias_of}, skipped')
+	if summary.requests:
+		print('> Requests by method class (sent / retries / flood waits / flood wait seconds):')
+		for name, stats in summary.requests.items():
+			print(
+				f'>   {name:<11} {stats["requests"]} / {stats["retries"]} / '
+				f'{stats["flood_waits"]} / {stats["flood_wait_seconds"]}'
+			)
+	print('')
 
 
 def asyncio_run(coroutine):

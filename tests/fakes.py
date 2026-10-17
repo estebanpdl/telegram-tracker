@@ -9,12 +9,15 @@ client, opens a socket, or touches credentials or session files.
 - `FakeTelegramClient` implements the client methods the project awaits
   (`connect`, `is_user_authorized`, `send_code_request`, `sign_in`,
   `get_entity`, `__call__`, `disconnect`) and records every call. Outcomes
-  can be scripted per call (exceptions, delays, gates).
+  can be scripted per call (exceptions, delays, gates). An optional
+  latency makes data requests take time; requests in flight, their peak,
+  and dispatch times (loop clock) are recorded.
 - `ScriptedPrompt` stands in for `input`/`getpass` prompts.
 '''
 
 # import modules
 import asyncio
+import contextlib
 import copy
 import json
 import os
@@ -87,13 +90,21 @@ def _wrap(value):
 	return value
 
 
+def load_world_raw(path=WORLD_PATH):
+	'''
+	The fixture world as plain JSON (for building variants).
+	'''
+	with open(path, encoding='utf-8') as fh:
+		return json.load(fh)
+
+
 class FixtureWorld:
 	'''
 	Synthetic Telegram state with server-like lookups.
 	'''
-	def __init__(self, path=WORLD_PATH):
-		with open(path, encoding='utf-8') as fh:
-			raw = json.load(fh)
+	def __init__(self, path=WORLD_PATH, *, raw=None):
+		if raw is None:
+			raw = load_world_raw(path)
 
 		self.raw = raw
 		self.chats = {
@@ -151,6 +162,8 @@ class FixtureWorld:
 			raise ValueError(
 				f'Could not find the input entity for PeerChannel(channel_id={channel_id})'
 			)
+		if 'error' in spec:
+			raise getattr(errors, spec['error'])(request=None)
 		return FakeTL({
 			'_': 'messages.ChatFull',
 			'full_chat': {
@@ -230,6 +243,10 @@ class FakeTelegramClient:
 	  name or a request type name such as 'GetHistoryRequest'). An outcome
 	  is None (normal), an exception (raised), or an async callable
 	  (awaited; its non-None result replaces the response).
+	- `latency`: seconds each data request (`get_entity`, `__call__`) takes,
+	  or a callable(kind, key) returning them. `dispatches` lists
+	  (loop time, kind, key) per request; `active` / `peak_active` count
+	  requests in flight.
 	'''
 	def __init__(
 			self,
@@ -239,12 +256,17 @@ class FakeTelegramClient:
 			password=None,
 			code=FIXTURE_CODE,
 			page_size=2,
-			honor_bounds=True
+			honor_bounds=True,
+			latency=0
 		):
 		self.world = world or FixtureWorld()
 		self.authorized = authorized
 		self.page_size = page_size
 		self.honor_bounds = honor_bounds
+		self.latency = latency
+		self.dispatches = []
+		self.active = 0
+		self.peak_active = 0
 		self.flood_sleep_threshold = 60
 		self._password = password
 		self._code = code
@@ -277,6 +299,19 @@ class FakeTelegramClient:
 	def call_names(self):
 		return [name for name, _ in self.calls]
 
+	@contextlib.asynccontextmanager
+	async def _in_flight(self, kind, key):
+		self.dispatches.append((asyncio.get_running_loop().time(), kind, key))
+		self.active += 1
+		self.peak_active = max(self.peak_active, self.active)
+		try:
+			delay = self.latency(kind, key) if callable(self.latency) else self.latency
+			if delay:
+				await asyncio.sleep(delay)
+			yield
+		finally:
+			self.active -= 1
+
 	# lifecycle
 	async def connect(self):
 		self.loop_ids.append(id(asyncio.get_running_loop()))
@@ -289,6 +324,7 @@ class FakeTelegramClient:
 		self.loop_ids.append(id(asyncio.get_running_loop()))
 		self._record('disconnect')
 		self.disconnect_count += 1
+		self.active_at_disconnect = self.active
 		self.connected = False
 
 	# auth
@@ -345,10 +381,11 @@ class FakeTelegramClient:
 	# data
 	async def get_entity(self, target):
 		self._record('get_entity', target=target)
-		replaced = await self._apply_script('get_entity')
-		if replaced is not None:
-			return replaced
-		return self.world.entity(target)
+		async with self._in_flight('get_entity', target):
+			replaced = await self._apply_script('get_entity')
+			if replaced is not None:
+				return replaced
+			return self.world.entity(target)
 
 	async def __call__(self, request, ordered=False):
 		kind = type(request).__name__
@@ -370,28 +407,30 @@ class FakeTelegramClient:
 
 		self.requests.append({'type': kind, **details})
 		self._record(kind, **details)
-		replaced = await self._apply_script(kind)
-		if replaced is not None:
-			return replaced
+		key = request.channel if kind == 'GetFullChannelRequest' else request.peer
+		async with self._in_flight(kind, key):
+			replaced = await self._apply_script(kind)
+			if replaced is not None:
+				return replaced
 
-		if kind == 'GetFullChannelRequest':
-			return self.world.full_channel(request.channel)
-		if not self.honor_bounds:
+			if kind == 'GetFullChannelRequest':
+				return self.world.full_channel(request.channel)
+			if not self.honor_bounds:
+				return self.world.page(
+					request.peer,
+					offset_id=request.offset_id,
+					limit=request.limit,
+					page_size=self.page_size
+				)
 			return self.world.page(
 				request.peer,
 				offset_id=request.offset_id,
+				min_id=request.min_id,
+				max_id=request.max_id,
+				offset_date=request.offset_date or None,
 				limit=request.limit,
 				page_size=self.page_size
 			)
-		return self.world.page(
-			request.peer,
-			offset_id=request.offset_id,
-			min_id=request.min_id,
-			max_id=request.max_id,
-			offset_date=request.offset_date or None,
-			limit=request.limit,
-			page_size=self.page_size
-		)
 
 
 class ScriptedPrompt:

@@ -43,6 +43,22 @@ def request_log(client):
 	return log
 
 
+def cached_requests(baseline):
+	'''
+	The baseline request sequence as sent with the per-run metadata cache
+	(fix F7): a repeated GetFullChannelRequest for the same chat is served
+	from the cache.
+	'''
+	seen, out = set(), []
+	for entry in baseline:
+		if entry[0] == 'GetFullChannelRequest':
+			if entry[1] in seen:
+				continue
+			seen.add(entry[1])
+		out.append(entry)
+	return out
+
+
 def read_csv_rows(path):
 	with open(path, encoding='utf-8', newline='') as fh:
 		reader = csv.DictReader(fh)
@@ -80,12 +96,8 @@ class CollectorTestCase(offline_guard.OfflineAsyncTestCase):
 		tmp = tempfile.TemporaryDirectory()
 		self.addCleanup(tmp.cleanup)
 		self.out = os.path.join(tmp.name, 'data')
-		self.pauses = []
 		self.stdout = io.StringIO()
 		self.stderr = io.StringIO()
-
-	async def pause(self, seconds):
-		self.pauses.append(seconds)
 
 	async def run_targets(self, targets, client=None, **kwargs):
 		self.client = client or FakeTelegramClient(page_size=EXPECTED['page_size'])
@@ -98,7 +110,6 @@ class CollectorTestCase(offline_guard.OfflineAsyncTestCase):
 				self.out,
 				client_factory=lambda: self.client,
 				authorize=authorize,
-				pause=self.pause,
 				**kwargs
 			)
 
@@ -126,7 +137,7 @@ class BatchScenarioTests(CollectorTestCase):
 		self.summary = await self.run_targets(self.spec['targets'])
 
 	def test_request_sequence(self):
-		self.assertEqual(request_log(self.client), self.spec['requests'])
+		self.assertEqual(request_log(self.client), cached_requests(self.spec['requests']))
 
 	def test_every_history_request_uses_baseline_arguments(self):
 		history = [r for r in self.client.requests if r['type'] == 'GetHistoryRequest']
@@ -144,7 +155,6 @@ class BatchScenarioTests(CollectorTestCase):
 		self.assert_single_lifecycle()
 		self.assertEqual(self.summary.succeeded, self.spec['succeeded'])
 		self.assertEqual([t for t, _ in self.summary.failed], self.spec['failed'])
-		self.assertEqual(self.pauses, self.spec['pauses'])
 
 	def test_files(self):
 		self.assertEqual(list_files(self.out), self.spec['files'])
@@ -212,17 +222,16 @@ class OtherScenarioTests(CollectorTestCase):
 	async def test_metadata_only_makes_no_history_requests(self):
 		spec = SCENARIOS['metadata_only']
 		await self.run_targets(spec['targets'], metadata_only=True)
-		self.assertEqual(request_log(self.client), spec['requests'])
+		self.assertEqual(request_log(self.client), cached_requests(spec['requests']))
 		self.assertEqual(list_files(self.out), spec['files'])
 		self.assert_chats_txt(spec['chats_txt'])
 		self.assert_counter(spec['counter'])
-		self.assertEqual(self.pauses, spec['pauses'])
 		self.assert_single_lifecycle()
 
 	async def test_min_id_filters_every_history_request(self):
 		spec = SCENARIOS['min_id']
 		await self.run_targets(spec['targets'], min_id=spec['min_id'])
-		self.assertEqual(request_log(self.client), spec['requests'])
+		self.assertEqual(request_log(self.client), cached_requests(spec['requests']))
 		for request in self.client.requests:
 			if request['type'] == 'GetHistoryRequest':
 				self.assertEqual(request['min_id'], spec['min_id'])
@@ -231,7 +240,6 @@ class OtherScenarioTests(CollectorTestCase):
 		self.assertEqual([m['id'] for m in data['messages']], expected['message_ids'])
 		self.assertEqual([c['id'] for c in data['chats']], expected['chat_ids'])
 		self.assert_counter(spec['counter'])
-		self.assertEqual(self.pauses, [])
 
 	async def test_empty_batch_writes_header_correct_outputs(self):
 		summary = await self.run_targets([])
@@ -248,7 +256,7 @@ class OtherScenarioTests(CollectorTestCase):
 	async def test_all_failed_batch(self):
 		spec = SCENARIOS['all_failed']
 		summary = await self.run_targets(spec['targets'])
-		self.assertEqual(request_log(self.client), spec['requests'])
+		self.assertEqual(request_log(self.client), cached_requests(spec['requests']))
 		self.assertEqual(list_files(self.out), spec['files'])
 		self.assertEqual([t for t, _ in summary.failed], spec['targets'])
 		header, rows = read_csv_rows(os.path.join(self.out, 'collected_chats.csv'))
@@ -318,8 +326,7 @@ class LifecycleTests(CollectorTestCase):
 			await collector.run_collection(
 				['alpha_fx'], self.out,
 				client_factory=factory,
-				authorize=lambda c: ensure_authorized(c, None),
-				pause=self.pause
+				authorize=lambda c: ensure_authorized(c, None)
 			)
 		self.assertEqual(set(client.loop_ids), set(loops))
 		self.assert_single_lifecycle()

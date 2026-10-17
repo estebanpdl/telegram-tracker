@@ -21,10 +21,12 @@ import ast
 import math
 import numbers
 import os
+import sys
 
 from dataclasses import dataclass
 
 # import local submodules
+from storage import check_collection_status
 from utils import DataInputError, discard, normalize_values, temp_path_for
 
 
@@ -208,14 +210,20 @@ def build_network(data_path, *, image=True):
 	Build Graph.gexf and (unless image=False) network.png from
 	`data_path`/collected_chats.csv. Returns a NetworkSummary.
 
-	Raises DataInputError, before writing anything, when the CSV is
-	missing, lacks username/counter/source, or has a malformed row.
+	Raises DataInputError, before writing anything, when the last
+	collection into `data_path` is running or was interrupted
+	(collection-status.json), or the CSV is missing, lacks
+	username/counter/source, or has a malformed row. A note about a
+	partial collection goes to stderr.
 	'''
 	import networkx as nx
 
 	chats_path = f'{data_path}/{COLLECTED_CHATS}'
 	gexf_path = f'{data_path}/{GRAPH_FILE}'
 	png_path = f'{data_path}/{IMAGE_FILE}'
+
+	for note in check_collection_status(data_path, messages=False):
+		print(f'> Note: {note}.', file=sys.stderr)
 
 	print('Creating network graph')
 	edges = edge_list(read_chats(chats_path))

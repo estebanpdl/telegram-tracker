@@ -16,6 +16,7 @@ import unittest
 from unittest import mock
 
 import offline_guard
+import virtual_time
 
 from api.auth import ensure_authorized
 from fakes import FIXTURE_CODE, FIXTURE_PHONE, FakeTelegramClient, ScriptedPrompt
@@ -37,10 +38,10 @@ class MainTestCase(offline_guard.OfflineTestCase):
 		self.tmp = tmp.name
 		self.out = os.path.join(self.tmp, 'data')
 		self.factory_calls = 0
+		virtual = mock.patch.object(cli, 'asyncio_run', virtual_time.run)
+		virtual.start()
+		self.addCleanup(virtual.stop)
 		self.client = FakeTelegramClient()
-		pause = mock.patch.object(collector, 'BATCH_PAUSE_SECONDS', 0)
-		pause.start()
-		self.addCleanup(pause.stop)
 
 	def factory(self):
 		self.factory_calls += 1
