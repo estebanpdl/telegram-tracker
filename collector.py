@@ -40,9 +40,10 @@ from telethon import errors
 
 from api import CHANNEL_ACCESS_ERRORS, full_channel_req, get_entity_attrs, get_posts
 from request_policy import AccountStopped, RequestFailed, RequestPolicy
-from storage import ChannelResult, EnrichOutcome, HistoryUnreadable, \
-	OutputLock, OutputWriter, StatusFile, StorageError, observe_chat, \
+from storage import OutputLock, OutputWriter, StatusFile, observe_chat, \
 	observe_linked_chat, new_counter_entry
+from storage.records import COMPLETE, INTERRUPTED, PARTIAL, ChannelResult, \
+	EnrichOutcome, HistoryUnreadable, StorageError
 from utils import JSONEncoder, create_dirs
 
 
@@ -905,11 +906,11 @@ def _finish(writer, cache, status, summary, policy, *, failing):
 		summary.stop_reason = summary.stop_reason or f'storage error: {exc}'
 
 	if summary.stop_reason is not None:
-		state = storage.INTERRUPTED
+		state = INTERRUPTED
 	elif summary.failed:
-		state = storage.PARTIAL
+		state = PARTIAL
 	else:
-		state = storage.COMPLETE
+		state = COMPLETE
 
 	try:
 		status.finish(

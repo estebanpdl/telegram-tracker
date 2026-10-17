@@ -34,6 +34,7 @@ import collector
 import datasets
 import network
 import storage
+import storage.records
 
 from collector import HistoryWindow, MetadataCache, Requests
 from utils import DataInputError
@@ -71,7 +72,7 @@ def snapshot(root):
 		for name in names:
 			path = os.path.join(d, name)
 			rel = os.path.relpath(path, root).replace('\\', '/')
-			if rel != storage.STATUS_FILE:
+			if rel != storage.records.STATUS_FILE:
 				files[rel] = read_bytes(path)
 	return files
 
@@ -127,7 +128,7 @@ class StorageTestCase(offline_guard.OfflineAsyncTestCase):
 			)
 
 	def status(self, out=None):
-		return read_json(os.path.join(out or self.out, storage.STATUS_FILE))
+		return read_json(os.path.join(out or self.out, storage.records.STATUS_FILE))
 
 	def full_channel_requests(self, client=None):
 		return [
@@ -186,9 +187,9 @@ class ReducerTests(StorageTestCase):
 		)
 
 	def test_reducer_counts_match_the_sequential_contract(self):
-		outcome_101 = storage.EnrichOutcome(linked=[(106, 'alpha_chat_fx')], rows=[{'id': 101}, {'id': 106}])
-		outcome_106 = storage.EnrichOutcome(linked=[(101, 'alpha_fx')], rows=[{'id': 106}, {'id': 101}])
-		result = storage.ChannelResult(index=0, target='alpha_fx', observations=[
+		outcome_101 = storage.records.EnrichOutcome(linked=[(106, 'alpha_chat_fx')], rows=[{'id': 101}, {'id': 106}])
+		outcome_106 = storage.records.EnrichOutcome(linked=[(101, 'alpha_fx')], rows=[{'id': 106}, {'id': 101}])
+		result = storage.records.ChannelResult(index=0, target='alpha_fx', observations=[
 			('channel_request', [(101, 'alpha_fx'), (106, 'alpha_chat_fx')]),
 			('from_messages', [(101, 'alpha_fx')])
 		])
@@ -272,7 +273,7 @@ class FileTests(StorageTestCase):
 		self.assertEqual(rows, first_rows + first_rows)
 		self.assertEqual(read_bytes(os.path.join(self.out, 'chats.txt')), first_chats)
 		self.assertEqual(read_bytes(os.path.join(self.out, 'counter.csv')), first_counter)
-		with open(os.path.join(self.out, storage.CHANNELS_NOT_FOUND), encoding='utf-8') as fh:
+		with open(os.path.join(self.out, storage.records.CHANNELS_NOT_FOUND), encoding='utf-8') as fh:
 			self.assertEqual(fh.read().splitlines(), ['missing_fx', 'private_fx'] * 2)
 
 	async def test_rerun_with_other_channels_keeps_earlier_counts_and_builds(self):
@@ -312,12 +313,12 @@ class FileTests(StorageTestCase):
 			return real_replace(src, dst)
 
 		with mock.patch.object(storage.os, 'replace', failing_replace):
-			with self.assertRaises(storage.StorageError):
+			with self.assertRaises(storage.records.StorageError):
 				await self.collect(['alpha_fx', 'beta_fx', 'empty_fx'])
 
 		self.assertEqual(read_bytes(beta_messages), before)
 		status = self.status()
-		self.assertEqual(status['state'], storage.INTERRUPTED)
+		self.assertEqual(status['state'], storage.records.INTERRUPTED)
 		self.assertIn('storage error', status['stop_reason'])
 		self.assertEqual(
 			[t['status'] for t in status['targets']],
@@ -349,7 +350,7 @@ class LockTests(StorageTestCase):
 		os.makedirs(self.out)
 		with open(storage.lock_path(self.out), 'w', encoding='utf-8') as fh:
 			json.dump({'pid': 4242, 'started_at': '2026-10-17T00:00:00+00:00'}, fh)
-		with self.assertRaises(storage.OutputLocked) as caught:
+		with self.assertRaises(storage.records.OutputLocked) as caught:
 			await self.collect(['alpha_fx'])
 		self.assertEqual(self.factory_calls, 0)
 		self.assertIn('pid 4242', str(caught.exception))
@@ -371,7 +372,7 @@ class LockTests(StorageTestCase):
 	async def test_second_lock_on_the_same_folder_fails(self):
 		os.makedirs(self.out)
 		with storage.OutputLock(self.out):
-			with self.assertRaises(storage.OutputLocked):
+			with self.assertRaises(storage.records.OutputLocked):
 				with storage.OutputLock(self.out):
 					pass
 		self.assertFalse(os.path.exists(storage.lock_path(self.out)))
@@ -385,7 +386,7 @@ class StatusTests(StorageTestCase):
 	async def test_partial_batch(self):
 		await self.collect(BATCH)
 		status = self.status()
-		self.assertEqual(status['state'], storage.PARTIAL)
+		self.assertEqual(status['state'], storage.records.PARTIAL)
 		self.assertEqual(status['summary'], {'given': 5, 'requested': 5, 'succeeded': 3, 'failed': 2, 'duplicates': 0, 'cancelled': 0})
 		self.assertEqual(status['parameters']['mode'], 'full')
 		by_input = {t['input']: t for t in status['targets']}
@@ -407,8 +408,8 @@ class StatusTests(StorageTestCase):
 
 		client.script('GetHistoryRequest', look)
 		await self.collect(['alpha_fx'], client=client)
-		self.assertEqual(seen, [storage.RUNNING])
-		self.assertEqual(self.status()['state'], storage.COMPLETE)
+		self.assertEqual(seen, [storage.records.RUNNING])
+		self.assertEqual(self.status()['state'], storage.records.COMPLETE)
 
 	async def test_window_and_metadata_parameters(self):
 		window = HistoryWindow(min_id=6, max_messages=2)
@@ -442,7 +443,7 @@ class StatusTests(StorageTestCase):
 			await task
 
 		status = self.status()
-		self.assertEqual(status['state'], storage.INTERRUPTED)
+		self.assertEqual(status['state'], storage.records.INTERRUPTED)
 		self.assertEqual(status['stop_reason'], 'cancelled')
 		self.assertEqual([t['status'] for t in status['targets']], ['succeeded', 'cancelled', 'cancelled'])
 		self.assertTrue(os.path.isfile(os.path.join(self.out, 'alpha_fx', 'alpha_fx_messages.json')))
@@ -458,7 +459,7 @@ class StatusTests(StorageTestCase):
 		with self.assertRaisesRegex(RuntimeError, 'boom'):
 			await self.collect(['alpha_fx', 'beta_fx'], client=client)
 		status = self.status()
-		self.assertEqual(status['state'], storage.INTERRUPTED)
+		self.assertEqual(status['state'], storage.records.INTERRUPTED)
 		self.assertIn('RuntimeError: boom', status['stop_reason'])
 		self.assertTrue(os.path.isfile(os.path.join(self.out, 'counter.csv')))
 
@@ -471,30 +472,30 @@ class BuilderGateTests(StorageTestCase):
 
 	def write_status(self, **fields):
 		os.makedirs(self.out, exist_ok=True)
-		data = {'format': 1, 'state': storage.COMPLETE, 'targets': [], 'parameters': {'mode': 'full'}}
+		data = {'format': 1, 'state': storage.records.COMPLETE, 'targets': [], 'parameters': {'mode': 'full'}}
 		data.update(fields)
-		with open(os.path.join(self.out, storage.STATUS_FILE), 'w', encoding='utf-8') as fh:
+		with open(os.path.join(self.out, storage.records.STATUS_FILE), 'w', encoding='utf-8') as fh:
 			json.dump(data, fh)
 
 	def test_running_and_interrupted_are_rejected(self):
-		for state, text in ((storage.RUNNING, 'still running'), (storage.INTERRUPTED, 'interrupted')):
+		for state, text in ((storage.records.RUNNING, 'still running'), (storage.records.INTERRUPTED, 'interrupted')):
 			with self.subTest(state=state):
 				self.write_status(state=state, stop_reason='cancelled')
 				for build in (datasets.build_dataset, network.build_network):
 					with self.assertRaisesRegex(DataInputError, text):
 						build(self.out)
-				self.assertEqual(sorted(os.listdir(self.out)), [storage.STATUS_FILE])
+				self.assertEqual(sorted(os.listdir(self.out)), [storage.records.STATUS_FILE])
 
 	def test_unreadable_sidecar_is_rejected(self):
 		os.makedirs(self.out)
-		with open(os.path.join(self.out, storage.STATUS_FILE), 'w', encoding='utf-8') as fh:
+		with open(os.path.join(self.out, storage.records.STATUS_FILE), 'w', encoding='utf-8') as fh:
 			fh.write('{"state": ')
 		with self.assertRaisesRegex(DataInputError, 'cannot be read'):
 			storage.check_collection_status(self.out)
 
 	def test_notes(self):
 		self.write_status(
-			state=storage.PARTIAL,
+			state=storage.records.PARTIAL,
 			targets=[{'input': 'a_fx', 'status': 'succeeded'}, {'input': 'b_fx', 'status': 'failed'}],
 			parameters={'mode': 'window', 'window_description': 'id > 6'}
 		)
