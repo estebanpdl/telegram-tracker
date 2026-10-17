@@ -42,7 +42,7 @@ from utils import DataInputError
 EXPECTED = load_expected('collection.json')
 SCENARIOS = EXPECTED['scenarios']
 BATCH = SCENARIOS['batch']['targets']
-ALPHA, BETA = 101, 102
+ALPHA = 101
 
 
 def read_bytes(path):

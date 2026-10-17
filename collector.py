@@ -46,16 +46,11 @@ from storage import ChannelResult, EnrichOutcome, HistoryUnreadable, \
 from utils import JSONEncoder, create_dirs
 
 
-CHANNELS_NOT_FOUND = storage.CHANNELS_NOT_FOUND
-USERS_NOT_FOUND = storage.USERS_NOT_FOUND
-COUNTER_COLUMNS = storage.COUNTER_COLUMNS
-
 # method classes of application RPCs
 RESOLVE = 'resolve'
 CHANNEL = 'channel'
 HISTORY = 'history'
 ENRICHMENT = 'enrichment'
-METHOD_CLASSES = (RESOLVE, CHANNEL, HISTORY, ENRICHMENT)
 
 NOT_FOUND_REASON = 'not found or not accessible'
 
