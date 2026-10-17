@@ -2,7 +2,7 @@
 '''
 Environment readiness: interpreter, pinned dependency versions, and the
 Telethon 1.x interfaces the collector and login flow rely on. Also pins the
-two known library API removals that Phase 3 must handle.
+two known library API removals the builders must avoid.
 '''
 
 # import modules
@@ -101,7 +101,7 @@ class TelethonInterfaceTests(offline_guard.OfflineTestCase):
 class KnownLibraryRemovalTests(offline_guard.OfflineTestCase):
 	'''
 	Characterize API removals the offline builders used to depend on.
-	Phase 3 fixed the callers; these tests flag a dependency change, and
+	These tests flag a dependency change, and
 	the source check keeps the removed calls from coming back.
 	'''
 

@@ -110,13 +110,13 @@ def read_chats(chats_path):
 
 '''
 
-Graph (baseline logic)
+Graph
 
 '''
 
 def edge_list(rows):
 	'''
-	Directed (source, target) pairs. As in the baseline, a username's
+	Directed (source, target) pairs. A username's
 	first row supplies its sources and each target repeats `counter` times
 	(the DiGraph collapses repeats). Sources keep first-occurrence order.
 	'''

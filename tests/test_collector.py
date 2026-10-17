@@ -45,8 +45,8 @@ def request_log(client):
 
 def cached_requests(baseline):
 	'''
-	The baseline request sequence as sent with the per-run metadata cache
-	(fix F7): a repeated GetFullChannelRequest for the same chat is served
+	The baseline request sequence as sent with the per-run metadata cache:
+	a repeated GetFullChannelRequest for the same chat is served
 	from the cache.
 	'''
 	seen, out = set(), []

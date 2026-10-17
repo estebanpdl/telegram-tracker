@@ -269,7 +269,7 @@ class CanonicalRunTests(CliTestCase):
 		self.assertEqual(code, 0)
 		self.assertIn('> Wrote 5 nodes and 4 edges to', out)
 
-	def test_legacy_min_id_requests_match_phase_2(self):
+	def test_legacy_and_canonical_min_id_requests_match(self):
 		spec = EXPECTED['scenarios']['min_id']
 		logs = []
 		for argv in (['--telegram-channel', 'alpha_fx', '--min-id', str(spec['min_id'])],

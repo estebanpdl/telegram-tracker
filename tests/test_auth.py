@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 '''
-Interactive login (D3 Option B) with two-step verification, against the
+Interactive login with two-step verification, against the
 fake client and scripted prompts. Sentinel secrets must never appear in
 output, error messages, or written files.
 '''

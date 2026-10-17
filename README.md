@@ -1,12 +1,11 @@
 <div align="center">
 
-# **Telegram-API**: `a Python-based open-source tool for Telegram`
+# **Telegram Tracker**: `a Python-based open-source tool for Telegram`
 
 ---
 
 [![GitHub forks](https://img.shields.io/github/forks/estebanpdl/telegram-tracker.svg?style=social&label=Fork&maxAge=2592000)](https://GitHub.com/estebanpdl/telegram-tracker/network/)
 [![GitHub stars](https://img.shields.io/github/stars/estebanpdl/telegram-tracker?style=social)](https://github.com/estebanpdl/telegram-tracker/stargazers)
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://github.com/estebanpdl/telegram-tracker/blob/main/LICENCE)
 [![Open Source](https://badges.frapsoft.com/os/v1/open-source.svg?v=103)](https://twitter.com/estebanpdl)
 [![Made-with-python](https://img.shields.io/badge/Made%20with-Python-1f425f.svg)](https://www.python.org/)
 [![Twitter estebanpdl](https://badgen.net/badge/icon/twitter?icon=twitter&label)](https://twitter.com/estebanpdl)
@@ -45,7 +44,7 @@ Installing
 - **Via git clone**
 
 ```
-git clone https://github.com/estebanpdl/telegram-api.git
+git clone https://github.com/estebanpdl/telegram-tracker.git
 ```
 
 This will create a directory called `telegram-tracker` which contains the Python scripts. Cloning allows you to easily upgrade and switch between available releases.
@@ -54,7 +53,7 @@ This will create a directory called `telegram-tracker` which contains the Python
 
 Download the ZIP file from github and use your favorite zip utility to unpack the file `telegram-tracker.zip` on your preferred location.
 
-**After cloning or downloding the repository, install the libraries from `requirements.txt`.**
+**After cloning or downloading the repository, install the libraries from `requirements.txt`.**
 
 ```
 pip install -r requirements.txt
@@ -242,7 +241,7 @@ Each collection writes `collection-status.json` in the output folder. It records
 
 - **One collection per folder.** A run holds `.collection.lock` in the output folder and removes it when it ends. A second run into the same folder exits 1 before connecting. A lock left by a crash is not removed automatically: if no collection is running, delete the file, or collect into a fresh `--output`. Never run two collections with the same account session, even into different folders.
 - **Files are replaced atomically, one at a time.** Each JSON and CSV file is written to a temporary file and moved into place, so a reader sees the old or the new version. A hard crash can still leave files from different runs, with the status file saying `running`. To recover, keep that folder for inspection and collect into a fresh `--output`; the completed channel JSON files stay readable.
-- **A failed channel keeps its earlier files.** Its `<channel>.json` and `<channel>_messages.json` are written only after the whole channel was collected.
+- **A collection request failure keeps the channel's earlier files.** Its `<channel>.json` and `<channel>_messages.json` are written only after the whole channel was collected. A storage failure between the two replacements can leave them from different runs; the run is then interrupted.
 - **Rerunning into a folder:** `chats.txt` adds new ids, `collected_chats.csv` keeps its earlier rows as they were and appends this run's rows with this run's counts, `counter.csv` describes this run, and the exception logs are appended to. No `_x`/`_y` columns are created.
 - **Metadata only** leaves an earlier `<channel>_messages.json` in place; the summary and the status file (`stale_history`) say which channels have messages from an earlier run.
 
@@ -273,8 +272,8 @@ This Python script will connect to Telegram's API and handle your API request.
 |   	└──collected_chats.xlsx // TM channels or groups found in data (e.g., forwards)
 |   	└──counter.csv // TM channels, groups or users found in data (e.g., forwards)
 |   	└──collection-status.json // State and per-channel outcome of the last collection
-|   	└──user_exceptions.txt // From collected_chats, these are mostly TM users' which 
-|									metadata was not possible to retrieve via the API
+|   	└──_exceptions-channels-not-found.txt // Missing or inaccessible requested targets (when present)
+|   	└──_exceptions-users-not-found.txt // Discovered chats whose metadata could not be retrieved (when present)
 |   	└──msgs_dataset.csv // Posts and messages from the requested channels
 ```
 
@@ -287,7 +286,7 @@ This Python script will connect to Telegram's API and handle your API request.
 ### **Basic request**
 
 ```
-python main.py --telegram-channel channel_name`
+python main.py --telegram-channel channel_name
 ```
 
 **Expected output**
@@ -295,7 +294,9 @@ python main.py --telegram-channel channel_name`
 - Files of collected channels:
 	- chats.txt
 	- collected_chats.csv
-	- user_exceptions.txt
+	- _exceptions-channels-not-found.txt (if targets were inaccessible)
+	- _exceptions-users-not-found.txt (if discovered chats were inaccessible)
+	- collection-status.json
 	- counter.csv
 - A new folder: *<channel_name>* containing
 	- A JSON file containing channel's profile metadata
@@ -314,7 +315,9 @@ python main.py --batch-file './path/to/channels_text_file.txt'
 - Files of collected channels:
 	- chats.txt
 	- collected_chats.csv
-	- user_exceptions.txt
+	- _exceptions-channels-not-found.txt (if targets were inaccessible)
+	- _exceptions-users-not-found.txt (if discovered chats were inaccessible)
+	- collection-status.json
 	- counter.csv
 - New folders - based on the number of requested channels: *<channel_name>* containing
 	- A JSON file containing channel's profile metadata
@@ -359,7 +362,9 @@ The saved `<channel_name>_messages.json` then holds **only** the messages after 
 - Files of collected channels:
 	- chats.txt
 	- collected_chats.csv
-	- user_exceptions.txt
+	- _exceptions-channels-not-found.txt (if targets were inaccessible)
+	- _exceptions-users-not-found.txt (if discovered chats were inaccessible)
+	- collection-status.json
 	- counter.csv
 - A new folder: *<channel_name>* containing
 	- A JSON file containing channel's profile metadata
@@ -369,13 +374,13 @@ The saved `<channel_name>_messages.json` then holds **only** the messages after 
 
 ### **Specify output folder**
 
-The script allows you to specify a specific output directory to save collected data. The sxcript will create those folders in case do not exist.
+Use `--output` to choose where collected data is saved. The script creates the directory if it does not exist.
 
 ```
-python main.py --telegram-channel channelname --output ./path/to/chosen/directory`
+python main.py --telegram-channel channelname --output ./path/to/chosen/directory
 ```
 
-The expected output is the same a described above but data will be save using the chosen directory.
+The expected output is the same as described above, saved in the chosen directory.
 
 <br />
 
@@ -383,13 +388,13 @@ The expected output is the same a described above but data will be save using th
 
 ## `build-datasets.py`
 
-This Python script reads the collected files and creates a new dataset containing messages from the requested channels. By default, the created dataset will be located in the `output` folder.
+This Python script reads the collected files and creates a new dataset containing messages from the requested channels. By default, the dataset is saved as `./output/data/msgs_dataset.csv`.
 
 If you provided a specific directory to save collected data, you need to provide the same path to use this script.
 
 ### Options
 
-* `--data-path` Path were data is located. Will use `./output/data` if not given.
+* `--data-path` Path where data is located. Will use `./output/data` if not given.
 
 If a specific directory was not provided in `main.py`, run:
 
@@ -403,7 +408,7 @@ If you provided a specific directory using the option `--output` in `main.py`, r
 python build-datasets.py --data-path ./path/to/chosen/directory
 ```
 
-These option will create the above-mentioned dataset: `msgs_dataset.csv`, a file containing posts and messages from the requested channels.
+These options create the above-mentioned dataset: `msgs_dataset.csv`, a file containing posts and messages from the requested channels.
 
 <br />
 
@@ -411,11 +416,11 @@ These option will create the above-mentioned dataset: `msgs_dataset.csv`, a file
 
 ## `channels-to-network.py`
 
-This Python script builds a network graph. By default, the file will be located in the `output` folder. The script also saves a preliminary graph: `network.png` using the modules matplotlib, networkx, and python-louvain, which implements community detection. You can import the GEFX Graph File using different softwares, including Gephi.
+This Python script builds a network graph. By default, the graph is saved as `./output/data/Graph.gexf`. The script also saves a preliminary graph: `network.png` using the modules matplotlib, networkx, and python-louvain, which implements community detection. You can import the GEXF graph file using software, including Gephi.
 
 ### Options
 
-* `--data-path` Path were data is located. Will use `./output/data` if not given.
+* `--data-path` Path where data is located. Will use `./output/data` if not given.
 
 If a specific directory was not provided in `main.py`, run:
 

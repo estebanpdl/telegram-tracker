@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 '''
-Phase 6 scheduler: bounded channel workers under one request policy, on
+Collection scheduler: bounded channel workers under one request policy, on
 the virtual-time loop with fake latency. Covers overlap and the in-flight
 bound, output equivalence for N=1/3/10, alias coalescing, the discovered
-private chat (fix F9), account stops, shared flood pauses, transient
+private chat, account stops, shared flood pauses, transient
 failures, rejected sessions, cancellation, the result-queue bound, no
 write handles across requests, no hidden throttle, target normalization,
 and CLI wiring of the controls.
@@ -137,7 +137,7 @@ class OutcomeTests(SchedulerTestCase):
 		self.assertEqual((alias['status'], alias['alias_of']), ('duplicate', 'gen01_fx'))
 		self.assertFalse(os.path.exists(os.path.join(self.out, experiment.ALIAS)))
 		self.assertEqual(summary.duplicates, [(experiment.ALIAS, 'gen01_fx')])
-		# fix F9: the private discovered chat is logged, the run goes on
+		# A private discovered chat is logged without stopping the run
 		with open(os.path.join(self.out, storage.USERS_NOT_FOUND), encoding='utf-8') as fh:
 			self.assertIn(f'ID - {experiment.PRIVATE_CHAT}', fh.read().splitlines())
 		self.assertEqual(len(summary.succeeded), 10)

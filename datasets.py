@@ -78,7 +78,7 @@ def message_files(data_path):
 
 def channel_name(file_path):
 	'''
-	Channel username from a <channel>_messages.json path (baseline rule).
+	Channel username from a <channel>_messages.json path.
 	'''
 	return file_path.split('.json')[0].replace('\\', '/').split('/')[-1].replace(
 		'_messages', ''
@@ -136,7 +136,7 @@ def read_messages(file_path):
 
 '''
 
-Transforms (baseline logic)
+Transforms
 
 '''
 
@@ -190,8 +190,8 @@ def message_rows(messages, username, chats):
 	Yield one msgs_dataset row (dict) per `Message`; service messages are
 	skipped. `chats` (collected_chats) resolves forward source names.
 
-	As in the baseline, one response dict is reused across messages and a
-	copy is yielded for each row.
+	One response dict is reused across messages; a copy is yielded for
+	each row.
 	'''
 	response = {
 		'channel_name': username
@@ -372,7 +372,7 @@ def build_dataset(data_path, *, progress=True):
 			for username, rows in channels:
 				summary.channels.append(username)
 				for row in rows:
-					# one frame per row keeps the baseline value formatting
+					# one frame per row preserves per-row value formatting
 					df = pd.DataFrame.from_dict([row])[columns]
 					df.to_csv(writer, header=header, index=False)
 					header = False

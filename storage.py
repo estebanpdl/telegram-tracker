@@ -14,10 +14,11 @@ order, so they do not depend on the order in which channels finished:
 	                     run's counts (no _x/_y columns on a rerun)
 	_exceptions-*.txt    appended
 
-Every file is replaced through a sibling temporary file and os.replace, so
-a reader sees the old or the new file, never a half-written one. Atomicity
-is per file: a hard crash can leave files of different generations, and
-collection-status.json then still says "running".
+JSON, CSV, and chats.txt files are replaced through sibling temporary
+files and os.replace, so a reader sees the old or the new file. Exception
+logs are appended directly. Atomicity is per replaced file: a hard crash
+can leave files of different generations, and collection-status.json then
+still says "running".
 
 Importing this module has no side effects and loads neither Telethon nor
 pandas (pandas loads when aggregates are written).
@@ -184,7 +185,7 @@ def observe_chat(counter, chat_id, username, source, req_type):
 def observe_linked_chat(counter, chat_id, username, source, parent_username):
 	'''
 	Count a chat listed in a newly observed chat's full-channel response.
-	Baseline policy: a repeat observation records the parent in
+	A repeat observation records the parent in
 	`channel_req_targeted_by` but does not extend `source`.
 	'''
 	entry = counter.get(chat_id)
@@ -217,9 +218,9 @@ def reduce_results(results, outcomes, not_found=()):
 	Replay committed channel results in input order and return the run's
 	Aggregates. `outcomes` maps a chat id to its EnrichOutcome; it must
 	hold every chat observed directly (workers enrich each one). The
-	replay applies an outcome only when the chat is new to the run, as the
-	sequential baseline did. `not_found` is [(index, target)] for targets
-	that could not be resolved or accessed.
+	replay applies an outcome only when the chat is new to the run.
+	`not_found` is [(index, target)] for targets that could not be resolved
+	or accessed.
 	'''
 	agg = Aggregates()
 	agg.channels_not_found = [t for _, t in sorted(not_found)]
@@ -257,7 +258,7 @@ Files
 
 def to_json_text(data):
 	'''
-	Compact UTF-8 JSON (baseline format).
+	Compact UTF-8 JSON.
 	'''
 	return json.dumps(data, ensure_ascii=False, separators=(',', ':'))
 
@@ -503,7 +504,7 @@ class OutputWriter:
 	def finalize(self, outcomes):
 		'''
 		Replay committed results and write the aggregate files. Returns the
-		Aggregates. Runs at most once.
+		Aggregates. The caller must invoke this only once per run.
 		'''
 		agg = reduce_results(self.committed, outcomes, self.not_found)
 		self.finalized = True
