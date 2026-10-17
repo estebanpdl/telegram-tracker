@@ -34,17 +34,15 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 # import local submodules
-import storage
-
 from telethon import errors
 
 from api import CHANNEL_ACCESS_ERRORS, full_channel_req, get_entity_attrs, get_posts
 from request_policy import AccountStopped, RequestFailed, RequestPolicy
-from storage import OutputLock, OutputWriter
 from storage.files import history_path, merge_histories, newest_id, read_history
 from storage.records import COMPLETE, INTERRUPTED, PARTIAL, ChannelResult, \
 	EnrichOutcome, HistoryUnreadable, StorageError
 from storage.status import StatusFile
+from storage.writer import OutputLock, OutputWriter, check_unlocked
 from utils import JSONEncoder, create_dirs
 
 
@@ -650,7 +648,7 @@ async def run_collection(
 	summary = CollectionSummary(requested=list(targets), output_folder=output_folder)
 	summary.concurrency = max(1, min(concurrency, len(summary.requested)))
 
-	storage.check_unlocked(output_folder)
+	check_unlocked(output_folder)
 	client = client_factory()
 	try:
 		await client.connect()

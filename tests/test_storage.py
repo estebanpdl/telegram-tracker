@@ -33,11 +33,11 @@ import cli
 import collector
 import datasets
 import network
-import storage
 import storage.aggregates
 import storage.files
 import storage.records
 import storage.status
+import storage.writer
 
 from collector import HistoryWindow, MetadataCache, Requests
 from utils import DataInputError
@@ -163,7 +163,7 @@ class ReducerTests(StorageTestCase):
 		for order in (results, list(reversed(results))):
 			out = os.path.join(self.tmp, f'out{len(folders)}')
 			os.makedirs(out)
-			writer = storage.OutputWriter(out)
+			writer = storage.writer.OutputWriter(out)
 			for result in order:
 				writer.commit(result)
 			writer.finalize(cache.outcomes)
@@ -328,7 +328,7 @@ class FileTests(StorageTestCase):
 			['succeeded', 'failed', 'cancelled']
 		)
 		self.assertEqual(self.client.disconnect_count, 1)
-		self.assertFalse(os.path.exists(storage.lock_path(self.out)))
+		self.assertFalse(os.path.exists(storage.writer.lock_path(self.out)))
 		self.assertEqual([f for f in snapshot(self.out) if '.tmp' in f], [])
 
 	async def test_failed_channel_keeps_its_earlier_files(self):
@@ -351,34 +351,34 @@ class LockTests(StorageTestCase):
 
 	async def test_locked_folder_is_refused_before_connecting(self):
 		os.makedirs(self.out)
-		with open(storage.lock_path(self.out), 'w', encoding='utf-8') as fh:
+		with open(storage.writer.lock_path(self.out), 'w', encoding='utf-8') as fh:
 			json.dump({'pid': 4242, 'started_at': '2026-10-17T00:00:00+00:00'}, fh)
 		with self.assertRaises(storage.records.OutputLocked) as caught:
 			await self.collect(['alpha_fx'])
 		self.assertEqual(self.factory_calls, 0)
 		self.assertIn('pid 4242', str(caught.exception))
 		self.assertIn('fresh --output', str(caught.exception))
-		self.assertTrue(os.path.exists(storage.lock_path(self.out)), 'stale lock was removed')
+		self.assertTrue(os.path.exists(storage.writer.lock_path(self.out)), 'stale lock was removed')
 
 	async def test_lock_is_held_during_the_run_and_released(self):
 		held = []
 		client = FakeTelegramClient()
 
 		async def look():
-			held.append(os.path.exists(storage.lock_path(self.out)))
+			held.append(os.path.exists(storage.writer.lock_path(self.out)))
 
 		client.script('GetHistoryRequest', look)
 		await self.collect(['alpha_fx'], client=client)
 		self.assertEqual(held, [True])
-		self.assertFalse(os.path.exists(storage.lock_path(self.out)))
+		self.assertFalse(os.path.exists(storage.writer.lock_path(self.out)))
 
 	async def test_second_lock_on_the_same_folder_fails(self):
 		os.makedirs(self.out)
-		with storage.OutputLock(self.out):
+		with storage.writer.OutputLock(self.out):
 			with self.assertRaises(storage.records.OutputLocked):
-				with storage.OutputLock(self.out):
+				with storage.writer.OutputLock(self.out):
 					pass
-		self.assertFalse(os.path.exists(storage.lock_path(self.out)))
+		self.assertFalse(os.path.exists(storage.writer.lock_path(self.out)))
 
 
 class StatusTests(StorageTestCase):
@@ -454,7 +454,7 @@ class StatusTests(StorageTestCase):
 		_, rows = read_csv_rows(os.path.join(self.out, 'counter.csv'))
 		self.assertEqual({r['source'] for r in rows}, {"['alpha_fx']"})
 		self.assertEqual(self.client.disconnect_count, 1)
-		self.assertFalse(os.path.exists(storage.lock_path(self.out)))
+		self.assertFalse(os.path.exists(storage.writer.lock_path(self.out)))
 
 	async def test_unexpected_error_interrupts_and_finalizes(self):
 		client = FakeTelegramClient()
@@ -690,7 +690,7 @@ class CliStorageErrorTests(offline_guard.OfflineTestCase):
 		with tempfile.TemporaryDirectory() as tmp:
 			out = os.path.join(tmp, 'data')
 			os.makedirs(out)
-			open(storage.lock_path(out), 'w').close()
+			open(storage.writer.lock_path(out), 'w').close()
 			stderr = io.StringIO()
 			with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
 				code = cli.main(

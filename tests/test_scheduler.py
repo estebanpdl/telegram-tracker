@@ -34,9 +34,9 @@ import api
 import cli
 import cli.collect
 import collector
-import storage
 import storage.files
 import storage.records
+import storage.writer
 
 
 def read_json(path):
@@ -221,7 +221,7 @@ class FloodTests(SchedulerTestCase):
 			read_json(storage.files.history_path(self.out, target))
 		self.assertTrue([t for t in status['targets'] if t['status'] == 'cancelled'])
 		self.assertEqual((client.disconnect_count, client.active_at_disconnect), (1, 0))
-		self.assertFalse(os.path.exists(storage.lock_path(self.out)))
+		self.assertFalse(os.path.exists(storage.writer.lock_path(self.out)))
 
 
 class CancellationTests(SchedulerTestCase):
@@ -256,7 +256,7 @@ class CancellationTests(SchedulerTestCase):
 			else:
 				self.assertFalse(os.path.exists(folder), entry)
 		self.assertEqual((client.disconnect_count, client.active_at_disconnect), (1, 0))
-		self.assertFalse(os.path.exists(storage.lock_path(self.out)))
+		self.assertFalse(os.path.exists(storage.writer.lock_path(self.out)))
 		self.assertEqual([f for f in os.listdir(self.out) if '.tmp' in f], [])
 
 
@@ -277,10 +277,10 @@ class WriteHandleTests(SchedulerTestCase):
 				violations.append((kind, key))
 			return 1.0
 
-		with mock.patch('storage.open', tracking_open, create=True), \
-				mock.patch('storage.aggregates.open', tracking_open, create=True), \
+		with mock.patch('storage.aggregates.open', tracking_open, create=True), \
 				mock.patch('storage.files.open', tracking_open, create=True), \
-				mock.patch('storage.status.open', tracking_open, create=True):
+				mock.patch('storage.status.open', tracking_open, create=True), \
+				mock.patch('storage.writer.open', tracking_open, create=True):
 			self.collect(3, latency=latency)
 		self.assertTrue(open_files)
 		self.assertEqual(violations, [])
