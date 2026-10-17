@@ -123,6 +123,44 @@ class HelpTests(CliTestCase):
 		self.assertIn('--min-id', out)
 		self.assertNotIn('--since', out)
 
+	def help_sections(self, argv):
+		'''
+		Option names listed under each help section heading. A section with
+		a description lists its options after the first blank line.
+		'''
+		code, out, _ = self.run_cli(argv, client_factory=None)
+		self.assertEqual(code, 0)
+		blocks, heading = {}, None
+		for line in out.splitlines():
+			if line and not line[0].isspace() and line.endswith(':'):
+				heading = line[:-1]
+				blocks[heading] = [[]]
+			elif heading and not line.strip():
+				blocks[heading].append([])
+			elif heading:
+				blocks[heading][-1].append(line)
+
+		sections = {}
+		for heading, parts in blocks.items():
+			options = [part for part in parts if part][-1]
+			sections[heading] = [
+				line.split()[0].rstrip(',') for line in options if line.startswith('  -')
+			]
+		return sections
+
+	def test_min_id_is_grouped_with_the_history_window(self):
+		sections = self.help_sections(['collect', '--help'])
+		self.assertEqual(
+			sections['history window'],
+			['--min-id', '--since', '--until', '--max-id', '--max-messages']
+		)
+		self.assertNotIn('--min-id', sections['options'])
+
+		sections = self.help_sections(['--telegram-channel', 'x', '--help'])
+		self.assertEqual(sections['history window'], ['--min-id'])
+		self.assertNotIn('--min-id', sections['options'])
+		self.assertIn('--output', sections['options'])
+
 
 class HelpWithoutDependenciesTests(offline_guard.OfflineTestCase):
 	'''
