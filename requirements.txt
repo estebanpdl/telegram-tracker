@@ -1,5 +1,5 @@
 # Tested with Python 3.14.7 (conda env `telegram-tracker`) on 2026-10-16.
-# Telethon must stay on 1.x; a 2.x migration needs a separate decision.
+# Telethon 2.x is not supported.
 telethon==1.45.0
 pandas==3.0.6
 openpyxl==3.1.5

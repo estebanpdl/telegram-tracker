@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 '''
-Unified CLI (cli.py): canonical subcommands, legacy forms, validation
+Unified CLI (cli package): canonical subcommands, legacy forms, validation
 before credentials, history-window options, and offline help.
 
 In-process runs inject the fake client; argument errors run with no
@@ -29,6 +29,9 @@ from builder_data import ROOT, TESTS, collected_data, run_script
 from fakes import FakeTelegramClient, load_expected
 
 import cli
+import cli.collect
+import cli.builders
+import cli.parsers
 import collector
 import datasets
 import network
@@ -46,7 +49,7 @@ class CliTestCase(offline_guard.OfflineTestCase):
 		self.tmp = tmp.name
 		self.out = os.path.join(self.tmp, 'data')
 		self.factory_calls = 0
-		virtual = mock.patch.object(cli, 'asyncio_run', virtual_time.run)
+		virtual = mock.patch.object(cli.collect, 'asyncio_run', virtual_time.run)
 		virtual.start()
 		self.addCleanup(virtual.stop)
 		self.client = FakeTelegramClient(page_size=EXPECTED['page_size'])
@@ -278,7 +281,7 @@ class DispatchEquivalenceTests(CliTestCase):
 				(network, 'build_network', 'build-network', 'channels-to-network.py')):
 			def record(data_path, name=name):
 				seen.append((name, data_path))
-				raise cli.DataInputError('recorded')
+				raise cli.builders.DataInputError('recorded')
 
 			with mock.patch.object(module, name, record):
 				for argv in ([], ['--data-path', 'some/dir/'], ['-d', 'some/dir'], ['--data-path=some/dir']):
@@ -389,13 +392,13 @@ class ValidationTests(CliTestCase):
 				('--max-flood-wait', '0'), ('--max-flood-wait', '3600'),
 				('--max-retries', '0'), ('--max-retries', '10')):
 			with self.subTest(flag=flag, value=value):
-				args = cli.build_parser().parse_args(
+				args = cli.parsers.build_parser().parse_args(
 					['collect', '--telegram-channel', 'a_fx', f'{flag}={value}']
 				)
 				self.assertEqual(vars(args)[flag[2:].replace('-', '_')], float(value))
 
 	def test_control_defaults(self):
-		args = cli.build_parser().parse_args(['collect', '--telegram-channel', 'a_fx'])
+		args = cli.parsers.build_parser().parse_args(['collect', '--telegram-channel', 'a_fx'])
 		self.assertEqual(
 			(args.concurrency, args.request_interval, args.max_flood_wait, args.max_retries),
 			(None, 0.25, 60, 3)
@@ -471,7 +474,7 @@ class DateParsingTests(offline_guard.OfflineTestCase):
 		}
 		for text, expected in cases.items():
 			with self.subTest(text=text):
-				value = cli.utc_datetime(text)
+				value = cli.parsers.utc_datetime(text)
 				self.assertEqual(value, expected)
 				self.assertEqual(value.utcoffset().total_seconds(), 0)
 

@@ -110,6 +110,19 @@ class ImportSafetyTests(offline_guard.OfflineTestCase):
 		)
 		self.assertEqual(completed.stdout.strip(), '[]', completed.stderr)
 
+	def test_cli_modules_load_no_services_at_import(self):
+		code = textwrap.dedent(f'''
+			import sys
+			sys.path[:0] = [{TESTS!r}, {ROOT!r}]
+			import cli, cli.builders, cli.collect, cli.dispatch, cli.parsers, cli.targets, main
+			print(sorted(m for m in ('telethon', 'api', 'collector', 'storage', 'request_policy', 'datasets', 'network', 'pandas') if m in sys.modules))
+		''')
+		completed = subprocess.run(
+			[sys.executable, '-I', '-c', code],
+			capture_output=True, text=True, timeout=120
+		)
+		self.assertEqual(completed.stdout.strip(), '[]', completed.stderr)
+
 	def test_utils_no_longer_loads_telethon(self):
 		code = textwrap.dedent(f'''
 			import sys
