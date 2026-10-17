@@ -202,6 +202,23 @@ def add_collect_arguments(parser):
 		help='At most N messages per channel, newest first.'
 	)
 
+	update = parser.add_argument_group(
+		'update',
+		'Add new posts to saved histories instead of replacing them. Not '
+		'allowed with the history window options or '
+		'--limit-download-to-channel-metadata.'
+	)
+	update.add_argument(
+		'--update',
+		action='store_true',
+		help='For each channel, collect only posts newer than the newest one in '
+			'its saved <channel>_messages.json and merge them into that file '
+			'(fetched copies win). A channel without a saved history is collected '
+			'in full. Posts deleted or edited on Telegram since the earlier run '
+			'are not reflected, and build-dataset appends the merged history '
+			'again, duplicating earlier rows.'
+	)
+
 	controls = parser.add_argument_group(
 		'request controls',
 		'Validated now; not applied yet. This version collects channels one '
@@ -403,6 +420,18 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 	'''
 	metadata_only = args['limit_download_to_channel_metadata']
 	bounds = window_bounds(args, parser)
+	update = args.get('update', False)
+	if update and bounds:
+		parser.error(
+			'--update cannot be combined with the history window options '
+			'(--since, --until, --min-id, --max-id, --max-messages): it sets '
+			'min_id from each saved history'
+		)
+	if update and metadata_only:
+		parser.error(
+			'--update needs message collection; remove '
+			'--limit-download-to-channel-metadata'
+		)
 	if not legacy and metadata_only and bounds:
 		parser.error(
 			'history window options (--since, --until, --min-id, --max-id, '
@@ -418,6 +447,7 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 	try:
 		from api.auth import AuthenticationError, ensure_authorized
 		from collector import HistoryWindow, run_collection
+		from storage import OutputLocked, StorageError
 	except ModuleNotFoundError as exc:
 		return missing_dependency(COLLECT, exc)
 
@@ -443,6 +473,8 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 	print(f'\nInit program at {time.ctime()}\n')
 	if window.is_filtered and not metadata_only:
 		print(f'History window: {window.describe()}\n')
+	if update:
+		print('Update: new posts are merged into saved histories\n')
 	print('')
 
 	try:
@@ -455,11 +487,15 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 					client_factory=client_factory,
 					authorize=authorize,
 					metadata_only=metadata_only,
-					window=window
+					window=window,
+					update=update
 				)
 			)
 	except AuthenticationError as exc:
 		print(f'> Login failed: {exc}', file=sys.stderr)
+		return 1
+	except (OutputLocked, StorageError) as exc:
+		print(f'> {exc}', file=sys.stderr)
 		return 1
 	except KeyboardInterrupt:
 		print('> Interrupted.', file=sys.stderr)
@@ -470,6 +506,18 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 		f'> Collected {len(summary.succeeded)} of {len(summary.requested)} '
 		f'targets into {output_folder}\n'
 	)
+
+	if summary.collected_in_full:
+		print(
+			f'> {len(summary.collected_in_full)} channel(s) had no saved history and '
+			'were collected in full: ' + ', '.join(summary.collected_in_full) + '\n'
+		)
+	if summary.stale_histories:
+		print(
+			f'> Metadata only: the saved messages of {len(summary.stale_histories)} '
+			'channel(s) are from an earlier run: '
+			+ ', '.join(summary.stale_histories) + '\n'
+		)
 
 	if summary.failed:
 		print(

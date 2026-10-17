@@ -1,18 +1,20 @@
 # -*- coding: utf-8 -*-
 '''
-Asynchronous, sequential channel collection.
+Asynchronous channel collection.
 
 `run_collection` owns one client for the whole run. It creates the client
 through an injected factory inside the running event loop, connects,
-authorizes, collects each target in order, finalizes the aggregate files,
-and disconnects exactly once after success, failure, or cancellation.
+authorizes, collects each target, finalizes the aggregate files, and
+disconnects exactly once after success, failure, or cancellation.
 
 Boundaries:
-	- network: `api` request helpers awaited on the injected client;
-	- counting: `observe_chat` / `observe_linked_chat` are pure updates of
-	  the run's counter dict;
-	- files: channel JSON, chats.txt, collected_chats.csv, counter.csv, and
-	  the exception logs, written under the output folder.
+	- network: `Requests` (application RPCs by method class) and
+	  `MetadataCache` (one full-channel request per chat per run, shared by
+	  every channel that sees the chat);
+	- collection: `collect_channel` returns a `storage.ChannelResult` and
+	  writes nothing;
+	- files: `storage.OutputWriter` alone writes channel JSON, aggregates,
+	  the lock, and collection-status.json.
 
 Importing this module is inert: no event loop, argv parsing, config reads,
 connections, or writes.
@@ -27,39 +29,31 @@ import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-import pandas as pd
-
 # import local submodules
-from api import full_channel_req, get_entity_attrs, get_posts
-from utils import JSONEncoder, chats_dataset_columns, create_dirs
+import storage
+
+from api import CHANNEL_ACCESS_ERRORS, full_channel_req, get_entity_attrs, get_posts
+from storage import ChannelResult, EnrichOutcome, HistoryUnreadable, \
+	OutputLock, OutputWriter, StatusFile, StorageError, observe_chat, \
+	observe_linked_chat, new_counter_entry
+from utils import JSONEncoder, create_dirs
 
 
 # pause between resolved channels of a batch (baseline behavior)
 BATCH_PAUSE_SECONDS = 2
 
-CHANNELS_NOT_FOUND = '_exceptions-channels-not-found.txt'
-USERS_NOT_FOUND = '_exceptions-users-not-found.txt'
+CHANNELS_NOT_FOUND = storage.CHANNELS_NOT_FOUND
+USERS_NOT_FOUND = storage.USERS_NOT_FOUND
+COUNTER_COLUMNS = storage.COUNTER_COLUMNS
 
-COUNTER_COLUMNS = [
-	'id',
-	'username',
-	'counter',
-	'from_messages',
-	'channel_request',
-	'channel_req_targeted_by',
-	'source'
-]
+# method classes of application RPCs
+RESOLVE = 'resolve'
+CHANNEL = 'channel'
+HISTORY = 'history'
+ENRICHMENT = 'enrichment'
+METHOD_CLASSES = (RESOLVE, CHANNEL, HISTORY, ENRICHMENT)
 
-# columns build-datasets.py adds; not part of collection output
-DATASET_STAT_COLUMNS = (
-	'collected_actions',
-	'collected_posts',
-	'replies',
-	'other_actions',
-	'number_views',
-	'forwards',
-	'replies_received'
-)
+NOT_FOUND_REASON = 'not found or not accessible'
 
 
 class PaginationStalled(Exception):
@@ -68,79 +62,32 @@ class PaginationStalled(Exception):
 	'''
 
 
+class TargetUnavailable(Exception):
+	'''
+	A requested target does not exist or is not accessible.
+	'''
+
+
 @dataclass
 class CollectionSummary:
 	'''
-	Outcome of one run. `failed` holds (target, reason) pairs.
+	Outcome of one run. `failed` holds (target, reason) pairs; `cancelled`
+	lists targets not finished when the run stopped; `collected_in_full`
+	lists --update targets that had no saved history.
 	'''
 	requested: list
 	output_folder: str
 	succeeded: list = field(default_factory=list)
 	failed: list = field(default_factory=list)
+	cancelled: list = field(default_factory=list)
+	collected_in_full: list = field(default_factory=list)
+	stale_histories: list = field(default_factory=list)
+	stop_reason: str | None = None
 
 
 '''
 
-Counting (pure)
-
-'''
-
-def new_counter_entry(username, source, req_type, targeted_by='self'):
-	'''
-	First observation of a chat.
-	'''
-	return {
-		'username': username,
-		'counter': 1,
-		'from_messages': 1 if req_type == 'from_messages' else 0,
-		'channel_request': 1 if req_type == 'channel_request' else 0,
-		'channel_req_targeted_by': {
-			'channels': [targeted_by]
-		},
-		'source': [source]
-	}
-
-
-def observe_chat(counter, chat_id, username, source, req_type):
-	'''
-	Count a chat seen directly in a channel response (`channel_request`) or
-	in a history page (`from_messages`). Returns True for a new chat, which
-	the caller then enriches.
-	'''
-	entry = counter.get(chat_id)
-	if entry is None:
-		counter[chat_id] = new_counter_entry(username, source, req_type)
-		return True
-
-	entry['counter'] += 1
-	entry[req_type] += 1
-	if source not in entry['source']:
-		entry['source'].append(source)
-
-	return False
-
-
-def observe_linked_chat(counter, chat_id, username, source, parent_username):
-	'''
-	Count a chat listed in a newly observed chat's full-channel response.
-	Baseline policy: a repeat observation records the parent in
-	`channel_req_targeted_by` but does not extend `source`.
-	'''
-	entry = counter.get(chat_id)
-	if entry is None:
-		counter[chat_id] = new_counter_entry(
-			username, source, 'channel_request', targeted_by=parent_username
-		)
-		return
-
-	entry['counter'] += 1
-	entry['channel_request'] += 1
-	entry['channel_req_targeted_by']['channels'].append(parent_username)
-
-
-'''
-
-Files
+Requests
 
 '''
 
@@ -151,200 +98,163 @@ def to_json_safe(data):
 	return json.loads(JSONEncoder().encode(data))
 
 
-def write_json(file_path, data):
+class Requests:
 	'''
-	Write compact UTF-8 JSON (baseline format).
+	The run's application RPCs, each tagged with its method class.
 	'''
-	obj = json.dumps(data, ensure_ascii=False, separators=(',', ':'))
-	with open(file_path, mode='w', encoding='utf-8') as writer:
-		writer.write(obj)
+	def __init__(self, client):
+		self.client = client
+
+	async def resolve(self, target):
+		'''
+		The entity for `target`, or False when it is missing/inaccessible.
+		'''
+		return await get_entity_attrs(self.client, target)
+
+	async def full_channel(self, chat_id, method_class):
+		return await full_channel_req(self.client, chat_id)
+
+	async def history(self, channel_id, **kwargs):
+		return await get_posts(self.client, channel_id, **kwargs)
 
 
-def append_line(file_path, text):
-	with open(file_path, mode='a', encoding='utf-8') as writer:
-		writer.write(f'{text}\n')
-
-
-def _has_no_rows(csv_path):
+class MetadataCache:
 	'''
-	True when a CSV holds at most a header line.
+	Per-run full-channel responses and enrichment outcomes by chat id.
+
+	A request already in flight is shared by every caller (single flight).
+	Successful responses and permanent access errors are kept for the run;
+	any other failure is raised to the callers waiting for it and not
+	kept, so the next caller asks again.
 	'''
-	with open(csv_path, encoding='utf-8') as reader:
-		reader.readline()
-		return reader.readline() == ''
+	def __init__(self, requests):
+		self.requests = requests
+		self.outcomes = {}
+		self._full = {}
+		self._full_tasks = {}
+		self._enrich_tasks = {}
+		self._tasks = []
+
+	def _task(self, coroutine):
+		task = asyncio.ensure_future(coroutine)
+		self._tasks.append(task)
+		return task
+
+	async def full_channel(self, chat_id, method_class):
+		'''
+		The chat's GetFullChannelRequest response, requested at most once
+		per run while it succeeds.
+		'''
+		if chat_id in self._full:
+			cached = self._full[chat_id]
+			if isinstance(cached, BaseException):
+				raise cached.with_traceback(None)
+			return cached
+
+		task = self._full_tasks.get(chat_id)
+		if task is None:
+			task = self._task(self._fetch_full(chat_id, method_class))
+			self._full_tasks[chat_id] = task
+		return await asyncio.shield(task)
+
+	async def _fetch_full(self, chat_id, method_class):
+		try:
+			response = await self.requests.full_channel(chat_id, method_class)
+		except CHANNEL_ACCESS_ERRORS as exc:
+			self._full[chat_id] = exc
+			raise
+		else:
+			self._full[chat_id] = response
+			return response
+		finally:
+			self._full_tasks.pop(chat_id, None)
+
+	async def participants_count(self, chat_id):
+		'''
+		Participants count for a chat (its full-channel response).
+		'''
+		response = await self.full_channel(chat_id, ENRICHMENT)
+		return response.full_chat.participants_count
+
+	async def enrich(self, chat_id):
+		'''
+		Make sure `outcomes[chat_id]` holds the chat's EnrichOutcome.
+		'''
+		if chat_id in self.outcomes:
+			return
+
+		task = self._enrich_tasks.get(chat_id)
+		if task is None:
+			task = self._task(self._enrich(chat_id))
+			self._enrich_tasks[chat_id] = task
+		await asyncio.shield(task)
+
+	async def _enrich(self, chat_id):
+		try:
+			self.outcomes[chat_id] = await enrichment_outcome(self, chat_id)
+		finally:
+			self._enrich_tasks.pop(chat_id, None)
+
+	async def close(self):
+		'''
+		Cancel and await every request task still running.
+		'''
+		pending = [t for t in self._tasks if not t.done()]
+		for task in pending:
+			task.cancel()
+		await asyncio.gather(*self._tasks, return_exceptions=True)
+		self._tasks.clear()
 
 
-def append_collected_chats(output_folder, metadata):
+async def enrichment_outcome(cache, chat_id):
 	'''
-	Append enriched chat rows to collected_chats.csv. A header-only file
-	(from an earlier empty run) is replaced so the header matches the rows.
+	Enrich a discovered chat: its full-channel response's public chats,
+	with participants_count filled. Each other chat listed costs one more
+	full-channel request (shared through the cache). A missing or
+	inaccessible chat (requested or listed) ends the enrichment as
+	'not_found', keeping the linked chats seen before it, as the baseline
+	did for ValueError.
 	'''
-	if not metadata:
-		return
+	outcome = EnrichOutcome()
+	try:
+		response = await cache.full_channel(chat_id, ENRICHMENT)
+	except CHANNEL_ACCESS_ERRORS:
+		outcome.error = 'not_found'
+		return outcome
 
-	csv_path = f'{output_folder}/collected_chats.csv'
-	exists = os.path.isfile(csv_path)
-	replace = exists and _has_no_rows(csv_path)
-	pd.DataFrame(metadata).to_csv(
-		csv_path,
-		encoding='utf-8',
-		mode='w' if replace else 'a',
-		index=False,
-		header=replace or not exists
-	)
+	channel_request = response.to_dict()
+	try:
+		full_chat = channel_request['full_chat']
+		collected_chats = channel_request['chats']
 
+		for ch in collected_chats:
+			if ch['id'] == full_chat['id']:
+				ch['participants_count'] = full_chat['participants_count']
+				continue
 
-def empty_collected_chats_columns():
-	'''
-	Header for a collected_chats.csv with no rows: the selected chat
-	columns plus the merged counter columns.
-	'''
-	chat_columns = [
-		c for c in chats_dataset_columns() if c not in DATASET_STAT_COLUMNS
-	]
-	return chat_columns + COUNTER_COLUMNS[2:]
+			try:
+				ch['participants_count'] = await cache.participants_count(ch['id'])
+			except TypeError:
+				ch['participants_count'] = 0
+			except CHANNEL_ACCESS_ERRORS:
+				outcome.error = 'not_found'
+				return outcome
 
+			if ch['username'] != None:
+				outcome.linked.append((ch['id'], ch['username']))
 
-def finalize_outputs(output_folder, counter):
-	'''
-	Deduplicate chats.txt (first occurrence order), write counter.csv for
-	this run, and merge it into collected_chats.csv. Runs with no data get
-	header-correct empty files.
-	'''
-	chats_path = f'{output_folder}/chats.txt'
-	with open(chats_path, mode='r', encoding='utf-8') as reader:
-		collected_chats = list(dict.fromkeys(line.rstrip() for line in reader))
-	with open(chats_path, mode='w', encoding='utf-8') as writer:
-		for c in collected_chats:
-			writer.write(f'{c}\n')
+		outcome.rows = [i for i in collected_chats if i['username'] != None]
+	except KeyError as exc:
+		outcome.error = f'missing field {exc}'
 
-	counter_df = pd.DataFrame.from_dict(
-		counter,
-		orient='index'
-	).reset_index().rename(
-		columns={
-			'index': 'id'
-		}
-	).reindex(columns=COUNTER_COLUMNS)
-
-	counter_df.to_csv(
-		f'{output_folder}/counter.csv',
-		encoding='utf-8',
-		index=False
-	)
-
-	csv_path = f'{output_folder}/collected_chats.csv'
-	if not os.path.isfile(csv_path) or _has_no_rows(csv_path):
-		pd.DataFrame(columns=empty_collected_chats_columns()).to_csv(
-			csv_path,
-			encoding='utf-8',
-			index=False
-		)
-		return
-
-	df = pd.read_csv(csv_path, encoding='utf-8')
-	counter_df = counter_df.drop(columns='username').astype(
-		{'id': df['id'].dtype}
-	)
-	df = df.merge(counter_df, how='left', on='id')
-	df.to_csv(
-		csv_path,
-		index=False,
-		encoding='utf-8'
-	)
+	return outcome
 
 
 '''
 
-Network enrichment
+History
 
 '''
-
-async def participants_count(client, channel_id):
-	'''
-	Participants count for a chat (one GetFullChannelRequest).
-	'''
-	channel_request = await full_channel_req(client, channel_id)
-	return channel_request.full_chat.participants_count
-
-
-async def enrich_chat(client, chat_id, username, *, source, counter, chats_file):
-	'''
-	Fetch a newly observed chat's full-channel response and return its
-	public chats with participants_count filled. Each linked chat costs one
-	more request and is counted as a channel_request observation targeted
-	by `username`.
-	'''
-	channel_request = (await full_channel_req(client, chat_id)).to_dict()
-	full_chat = channel_request['full_chat']
-	collected_chats = channel_request['chats']
-
-	for ch in collected_chats:
-		if ch['id'] == full_chat['id']:
-			ch['participants_count'] = full_chat['participants_count']
-			continue
-
-		try:
-			ch['participants_count'] = await participants_count(client, ch['id'])
-		except TypeError:
-			ch['participants_count'] = 0
-
-		if ch['username'] != None:
-			chats_file.write(f'{ch["id"]}\n')
-			observe_linked_chat(counter, ch['id'], ch['username'], source, username)
-
-	return [i for i in collected_chats if i['username'] != None]
-
-
-async def record_collected_chats(
-		client,
-		chats_object,
-		*,
-		source,
-		req_type,
-		counter,
-		chats_file,
-		output_folder
-	):
-	'''
-	Count the public chats in a response, enrich the new ones, and append
-	their metadata to collected_chats.csv.
-
-	chats_object -> chats from an API response (Vector<Chat> as dicts)
-	source -> channel requested by the user
-	req_type -> 'channel_request' or 'from_messages'
-	counter -> the run's counter dict, updated in place
-	chats_file -> open chats.txt handle
-	'''
-	metadata = []
-	for c in chats_object:
-		# basic groups and forbidden chats have no username field
-		if 'id' not in c or 'username' not in c or c['username'] == None:
-			continue
-
-		id_ = c['id']
-		chats_file.write(f'{id_}\n')
-		if not observe_chat(counter, id_, c['username'], source, req_type):
-			continue
-
-		try:
-			metadata.extend(
-				await enrich_chat(
-					client,
-					id_,
-					c['username'],
-					source=source,
-					counter=counter,
-					chats_file=chats_file
-				)
-			)
-		except ValueError:
-			append_line(f'{output_folder}/{USERS_NOT_FOUND}', f'ID - {id_}')
-		except KeyError as exc:
-			print(f'> Skipped metadata for chat {id_}: missing field {exc}', file=sys.stderr)
-
-	append_collected_chats(output_folder, metadata)
-
 
 @dataclass(frozen=True)
 class HistoryWindow:
@@ -416,6 +326,18 @@ class HistoryWindow:
 			parts.append(f'newest {self.max_messages} messages')
 		return ', '.join(parts)
 
+	def as_record(self):
+		'''
+		The bounds as JSON values (dates in ISO 8601), for the sidecar.
+		'''
+		return {
+			'min_id': self.min_id,
+			'max_id': self.max_id,
+			'since': self.since.isoformat() if self.since else None,
+			'until': self.until.isoformat() if self.until else None,
+			'max_messages': self.max_messages
+		}
+
 
 def message_date(message):
 	'''
@@ -427,28 +349,23 @@ def message_date(message):
 	return date if date.tzinfo else date.replace(tzinfo=timezone.utc)
 
 
-async def fetch_history(client, channel_id, *, min_id=0, window=None, on_page):
+async def fetch_history(get_page, *, window, on_page):
 	'''
 	Page through a channel's history, newest first, 100 messages per
-	request, until an empty page. Returns the first page's payload with
-	messages, chats, and users from later pages appended (deduplicated by
-	id).
+	request, until an empty page. `get_page(**arguments)` performs one
+	GetHistoryRequest. Returns the first page's payload with messages,
+	chats, and users from later pages appended (deduplicated by id).
 
-	`window` (default: everything above `min_id`) selects the messages
-	kept. Pagination stops early once the cap is reached (no further
-	request) or a page reaches below `since` / `min_id`. Pages are
-	requested and their chats counted whole, so the boundary page's chats
-	and users may belong to trimmed messages.
+	`window` selects the messages kept. Pagination stops early once the
+	cap is reached (no further request) or a page reaches below `since` /
+	`min_id`. Pages are requested and their chats counted whole, so the
+	boundary page's chats and users may belong to trimmed messages.
 
 	`on_page(chats)` is awaited for every non-empty page after the first;
 	the first page's chats are stored but not counted (baseline policy).
 	Raises PaginationStalled if the offset stops decreasing.
 	'''
-	window = window or HistoryWindow(min_id=min_id)
-
-	posts = await get_posts(
-		client,
-		channel_id,
+	posts = await get_page(
 		min_id=window.min_id,
 		max_id=window.max_id,
 		offset_date=window.until or 0,
@@ -474,9 +391,7 @@ async def fetch_history(client, channel_id, *, min_id=0, window=None, on_page):
 				and len(data['messages']) >= window.max_messages):
 			return data
 
-		posts = await get_posts(
-			client,
-			channel_id,
+		posts = await get_page(
 			min_id=window.min_id,
 			offset_id=offset_id,
 			max_id=window.max_id,
@@ -514,82 +429,134 @@ async def fetch_history(client, channel_id, *, min_id=0, window=None, on_page):
 
 '''
 
+Channels
+
+'''
+
+def public_chats(chats):
+	'''
+	(id, username) of the chats in a response that count: basic groups and
+	forbidden chats have no username field.
+	'''
+	return [
+		(c['id'], c['username']) for c in chats
+		if 'id' in c and 'username' in c and c['username'] != None
+	]
+
+
+async def collect_channel(
+		requests,
+		cache,
+		index,
+		target,
+		*,
+		output_folder,
+		metadata_only=False,
+		window=None,
+		update=False
+	):
+	'''
+	Collect one target and return its ChannelResult; nothing is written.
+
+	Every chat seen directly is enriched (through the shared cache) the
+	first time this channel sees it, so the writer can replay observations
+	in input order whatever the completion order.
+
+	With `update`, an existing <target>_messages.json sets min_id to its
+	newest id and the fetched posts are merged into it; without one the
+	history is collected in full. Raises TargetUnavailable, PaginationStalled,
+	or HistoryUnreadable for a target that fails on its own.
+	'''
+	window = window or HistoryWindow()
+	result = ChannelResult(index=index, target=target)
+
+	earlier = None
+	if update and not metadata_only:
+		path = storage.history_path(output_folder, target)
+		if os.path.exists(path):
+			earlier = storage.read_history(path)
+			window = HistoryWindow(min_id=storage.newest_id(earlier))
+		result.min_id = window.min_id
+
+	print('')
+	print(f'> Collecting data from Telegram Channel -> {target}')
+	print('> ...')
+	print('')
+
+	entity_attrs = await requests.resolve(target)
+	if not entity_attrs:
+		raise TargetUnavailable(target)
+
+	channel_id = entity_attrs.id
+	try:
+		channel_request = await cache.full_channel(channel_id, CHANNEL)
+	except CHANNEL_ACCESS_ERRORS:
+		raise TargetUnavailable(target) from None
+
+	result.channel_id = channel_id
+	result.channel_data = to_json_safe(channel_request.to_dict())
+
+	enriched = set()
+
+	async def observe(req_type, chats):
+		found = public_chats(chats)
+		result.observations.append((req_type, found))
+		for chat_id, _ in found:
+			if chat_id not in enriched:
+				enriched.add(chat_id)
+				await cache.enrich(chat_id)
+
+	await observe('channel_request', result.channel_data['chats'])
+	if metadata_only:
+		return result
+
+	async def get_page(**arguments):
+		return await requests.history(channel_id, **arguments)
+
+	async def on_page(chats):
+		await observe('from_messages', chats)
+
+	data = to_json_safe(
+		await fetch_history(get_page, window=window, on_page=on_page)
+	)
+
+	if not update:
+		result.history, result.history_mode = data, 'replaced'
+	elif earlier is None:
+		result.history, result.history_mode = data, 'created'
+	else:
+		result.history = storage.merge_histories(earlier, data)
+		result.history_mode = 'unchanged' if result.history is None else 'merged'
+
+	result.messages = len((result.history or earlier)['messages'])
+	return result
+
+
+'''
+
 Orchestration
 
 '''
 
-async def collect_channel(
-		client,
-		channel,
-		*,
-		output_folder,
-		chats_file,
-		counter,
-		metadata_only=False,
-		min_id=0,
-		window=None
-	):
+def run_parameters(metadata_only, window, update):
 	'''
-	Collect one target: channel JSON, chat observations, and (unless
-	metadata_only) the message history JSON. Returns False when the target
-	is missing or inaccessible; it is then logged to the channels-not-found
-	file.
+	The run's collection parameters for the sidecar (no credentials).
 	'''
-	print('')
-	print(f'> Collecting data from Telegram Channel -> {channel}')
-	print('> ...')
-	print('')
-
-	entity_attrs = await get_entity_attrs(client, channel)
-	if not entity_attrs:
-		append_line(f'{output_folder}/{CHANNELS_NOT_FOUND}', channel)
-		return False
-
-	channel_id = entity_attrs.id
-	channel_request = await full_channel_req(client, channel_id)
-	full_channel_data = to_json_safe(channel_request.to_dict())
-
-	print('> Writing channel data...')
-	create_dirs(output_folder, subfolders=channel)
-	write_json(f'{output_folder}/{channel}/{channel}.json', full_channel_data)
-	print('> done.')
-	print('')
-
-	async def record(chats, req_type):
-		await record_collected_chats(
-			client,
-			chats,
-			source=channel,
-			req_type=req_type,
-			counter=counter,
-			chats_file=chats_file,
-			output_folder=output_folder
-		)
-
-	await record(full_channel_data['chats'], 'channel_request')
 	if metadata_only:
-		return True
+		mode = 'metadata_only'
+	elif update:
+		mode = 'update'
+	elif window.is_filtered:
+		mode = 'window'
+	else:
+		mode = 'full'
 
-	async def on_page(chats):
-		await record(chats, 'from_messages')
-
-	data = await fetch_history(
-		client,
-		channel_id,
-		min_id=min_id,
-		window=window,
-		on_page=on_page
-	)
-
-	print('> Writing posts data...')
-	write_json(
-		f'{output_folder}/{channel}/{channel}_messages.json',
-		to_json_safe(data)
-	)
-	print('> done.')
-	print('')
-
-	return True
+	return {
+		'mode': mode,
+		'metadata_only': metadata_only,
+		'window': window.as_record() if mode == 'window' else None,
+		'window_description': window.describe() if mode == 'window' else None
+	}
 
 
 async def run_collection(
@@ -601,10 +568,11 @@ async def run_collection(
 		metadata_only=False,
 		min_id=0,
 		window=None,
+		update=False,
 		pause=asyncio.sleep
 	):
 	'''
-	Collect `targets` sequentially with one client.
+	Collect `targets` with one client.
 
 	client_factory -> zero-argument callable returning an unconnected client;
 		called inside the running loop
@@ -612,48 +580,186 @@ async def run_collection(
 		(api.auth.ensure_authorized in production)
 	window -> HistoryWindow selecting the messages kept (default: all
 		above min_id)
+	update -> merge new posts into each channel's saved history
 	pause -> coroutine function used for the pause between batch channels
 
-	Missing/inaccessible targets and stalled pagination fail only that
-	target. Any other exception, AuthenticationError, or cancellation ends
-	the run; the client is disconnected exactly once in every case.
+	Missing/inaccessible targets, stalled pagination, and unreadable saved
+	histories (--update) fail only that target. A storage error,
+	AuthenticationError, any other exception, or cancellation ends the
+	run: completed channels stay written, aggregates are finalized from
+	them, and collection-status.json says "interrupted". The output folder
+	is locked for the run, and the client is disconnected exactly once in
+	every case.
 	'''
+	window = window or HistoryWindow(min_id=min_id)
 	summary = CollectionSummary(requested=list(targets), output_folder=output_folder)
+
+	storage.check_unlocked(output_folder)
 	client = client_factory()
 	try:
 		await client.connect()
 		await authorize(client)
 
-		create_dirs(output_folder)
-		counter = {}
-		with open(f'{output_folder}/chats.txt', mode='a', encoding='utf-8') as chats_file:
-			for channel in summary.requested:
-				try:
-					found = await collect_channel(
-						client,
-						channel,
-						output_folder=output_folder,
-						chats_file=chats_file,
-						counter=counter,
-						metadata_only=metadata_only,
-						min_id=min_id,
-						window=window
-					)
-				except PaginationStalled as exc:
-					print(f'> {channel}: {exc}; messages not saved.', file=sys.stderr)
-					summary.failed.append((channel, str(exc)))
-					continue
+		try:
+			create_dirs(output_folder)
+		except OSError as exc:
+			raise StorageError(f'cannot create {output_folder}: {exc}') from exc
 
-				if not found:
-					summary.failed.append((channel, 'not found or not accessible'))
-					continue
-
-				summary.succeeded.append(channel)
-				if len(summary.requested) > 1:
-					await pause(BATCH_PAUSE_SECONDS)
-
-		finalize_outputs(output_folder, counter)
+		with OutputLock(output_folder):
+			await _collect_locked(
+				client,
+				summary,
+				metadata_only=metadata_only,
+				window=window,
+				update=update,
+				pause=pause
+			)
 	finally:
 		await client.disconnect()
 
 	return summary
+
+
+async def _collect_locked(client, summary, *, metadata_only, window, update, pause):
+	output_folder = summary.output_folder
+	status = StatusFile(
+		output_folder,
+		summary.requested,
+		run_parameters(metadata_only, window, update)
+	)
+	status.write()
+
+	writer = OutputWriter(output_folder)
+	cache = MetadataCache(Requests(client))
+	try:
+		for index, target in enumerate(summary.requested):
+			await _collect_target(
+				cache, writer, status, summary, index, target,
+				metadata_only=metadata_only, window=window, update=update
+			)
+			if status.target(index)['status'] == 'succeeded' and len(summary.requested) > 1:
+				await pause(BATCH_PAUSE_SECONDS)
+	except BaseException as exc:
+		summary.stop_reason = stop_reason_for(exc)
+		await _close_quietly(cache)
+		_finish(writer, cache, status, summary, failing=True)
+		raise
+
+	await cache.close()
+	_finish(writer, cache, status, summary, failing=False)
+
+
+async def _collect_target(
+		cache, writer, status, summary, index, target, *,
+		metadata_only, window, update
+	):
+	'''
+	Collect and commit one target, recording its outcome. Target-level
+	failures are recorded; anything else propagates.
+	'''
+	entry = status.target(index)
+	try:
+		result = await collect_channel(
+			cache.requests,
+			cache,
+			index,
+			target,
+			output_folder=summary.output_folder,
+			metadata_only=metadata_only,
+			window=window,
+			update=update
+		)
+	except TargetUnavailable:
+		writer.record_not_found(index, target)
+		_fail(entry, summary, target, NOT_FOUND_REASON)
+		return
+	except (PaginationStalled, HistoryUnreadable) as exc:
+		print(f'> {target}: {exc}; messages not saved.', file=sys.stderr)
+		_fail(entry, summary, target, str(exc))
+		return
+
+	try:
+		writer.commit(result)
+	except StorageError as exc:
+		_fail(entry, summary, target, f'storage error: {exc}')
+		raise
+	print(f'> Saved {target}')
+
+	entry.update(
+		status='succeeded',
+		channel_id=result.channel_id,
+		history=result.history_mode,
+		messages=result.messages
+	)
+	if result.min_id is not None:
+		entry['min_id'] = result.min_id
+	if result.history_mode == 'created':
+		summary.collected_in_full.append(target)
+	if result.history_mode == 'not_collected' and os.path.isfile(
+			storage.history_path(summary.output_folder, target)):
+		entry['stale_history'] = True
+		summary.stale_histories.append(target)
+	summary.succeeded.append(target)
+
+
+def _fail(entry, summary, target, reason):
+	entry.update(status='failed', reason=reason)
+	summary.failed.append((target, reason))
+
+
+def stop_reason_for(exc):
+	if isinstance(exc, (asyncio.CancelledError, KeyboardInterrupt)):
+		return 'cancelled'
+	if isinstance(exc, StorageError):
+		return f'storage error: {exc}'
+	return f'{type(exc).__name__}: {exc}'
+
+
+async def _close_quietly(cache):
+	try:
+		await cache.close()
+	except BaseException:
+		pass
+
+
+def _finish(writer, cache, status, summary, *, failing):
+	'''
+	Finalize aggregates from the committed channels and close the sidecar.
+	A storage error while finishing is raised unless the run is already
+	failing with another error.
+	'''
+	for index, entry in enumerate(status.data['targets']):
+		if entry['status'] == 'pending':
+			entry['status'] = 'cancelled'
+			summary.cancelled.append(summary.requested[index])
+
+	error = None
+	try:
+		writer.finalize(cache.outcomes)
+	except StorageError as exc:
+		error = exc
+		summary.stop_reason = summary.stop_reason or f'storage error: {exc}'
+
+	if summary.stop_reason is not None:
+		state = storage.INTERRUPTED
+	elif summary.failed:
+		state = storage.PARTIAL
+	else:
+		state = storage.COMPLETE
+
+	try:
+		status.finish(
+			state,
+			summary={
+				'requested': len(summary.requested),
+				'succeeded': len(summary.succeeded),
+				'failed': len(summary.failed),
+				'cancelled': len(summary.cancelled)
+			},
+			stop_reason=summary.stop_reason
+		)
+	except StorageError as exc:
+		error = error or exc
+
+	if error is not None and not failing:
+		raise error

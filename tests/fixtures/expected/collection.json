@@ -49,6 +49,7 @@
         "beta_fx/beta_fx_messages.json",
         "chats.txt",
         "collected_chats.csv",
+        "collection-status.json",
         "counter.csv",
         "empty_fx/empty_fx.json",
         "empty_fx/empty_fx_messages.json"
@@ -114,7 +115,7 @@
         ["GetFullChannelRequest", 102]
       ],
       "pauses": [2, 2],
-      "files": ["alpha_fx/alpha_fx.json", "beta_fx/beta_fx.json", "chats.txt", "collected_chats.csv", "counter.csv"],
+      "files": ["alpha_fx/alpha_fx.json", "beta_fx/beta_fx.json", "chats.txt", "collected_chats.csv", "collection-status.json", "counter.csv"],
       "chats_txt": [101, 106, 102],
       "counter": [
         {"id": 101, "username": "alpha_fx", "counter": 1, "from_messages": 0, "channel_request": 1, "channel_req_targeted_by": "{'channels': ['self']}", "source": "['alpha_fx']"},
@@ -147,13 +148,13 @@
     "empty_batch": {
       "targets": [],
       "requests": [],
-      "files": ["chats.txt", "collected_chats.csv", "counter.csv"],
+      "files": ["chats.txt", "collected_chats.csv", "collection-status.json", "counter.csv"],
       "legacy": "crash: NameError on chats_file.close() because no channel opened chats.txt"
     },
     "all_failed": {
       "targets": ["missing_fx", "private_fx"],
       "requests": [["get_entity", "missing_fx"], ["get_entity", "private_fx"]],
-      "files": ["_exceptions-channels-not-found.txt", "chats.txt", "collected_chats.csv", "counter.csv"],
+      "files": ["_exceptions-channels-not-found.txt", "chats.txt", "collected_chats.csv", "collection-status.json", "counter.csv"],
       "legacy": "crash: private_fx raises ChannelPrivateError; with only missing targets, NameError on chats_file.close()"
     }
   },
@@ -174,6 +175,9 @@
     {"id": "F3", "phase": 2, "defect": "Empty or all-failed runs crash (chats_file undefined, missing collected_chats.csv, KeyError on empty counter); an empty metadata batch appends a junk line to collected_chats.csv.", "fix": "Open chats.txt once per run; write header-correct counter.csv and collected_chats.csv when no data exists; skip empty metadata appends.", "fixture_evidence": "empty_batch and all_failed scenarios."},
     {"id": "F4", "phase": 2, "defect": "ChannelPrivateError (and other channel access errors) from get_entity crash the run.", "fix": "Treat as channel-local failure recorded in _exceptions-channels-not-found.txt, like ValueError.", "fixture_evidence": "batch: private_fx."},
     {"id": "F5", "phase": 2, "defect": "chats.txt rewritten in set order.", "fix": "Deduplicate preserving first occurrence.", "fixture_evidence": "batch: chats_txt order."},
-    {"id": "F6", "phase": 2, "defect": "Global asyncio.get_event_loop() at import raises RuntimeError on Python 3.14; nested run_until_complete.", "fix": "One asyncio.run per collection; awaited helpers.", "fixture_evidence": "import-safety tests."}
+    {"id": "F6", "phase": 2, "defect": "Global asyncio.get_event_loop() at import raises RuntimeError on Python 3.14; nested run_until_complete.", "fix": "One asyncio.run per collection; awaited helpers.", "fixture_evidence": "import-safety tests."},
+    {"id": "F7", "phase": 5, "defect": "The same chat's GetFullChannelRequest is sent again for every role it plays: requested channel, newly observed chat, linked chat of each parent.", "fix": "Per-run cache shared by every caller: one full-channel request per chat while it succeeds. Outputs unchanged.", "fixture_evidence": "every scenario: the baseline 'requests' with repeated GetFullChannelRequest ids removed (batch: second 101, 102, 103 and empty_fx's 106)."},
+    {"id": "F8", "phase": 5, "defect": "A rerun into an existing folder merges this run's counter into collected_chats.csv rows that already carry counter columns, producing counter_x/counter_y and source_x/source_y.", "fix": "Earlier rows are kept as written; this run's rows are appended with this run's counts; column names stay the legacy ones.", "fixture_evidence": "test_storage rerun tests."},
+    {"id": "F9", "phase": 6, "defect": "A discovered chat that is private or invalid raises ChannelPrivateError (not ValueError) during enrichment and aborts the run.", "fix": "Every channel access error during enrichment is handled like ValueError: 'ID - <id>' in _exceptions-users-not-found.txt; the run continues.", "fixture_evidence": "test_scheduler mixed-channel tests."}
   ]
 }

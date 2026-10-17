@@ -22,10 +22,12 @@ import glob
 import json
 import os
 import shutil
+import sys
 
 from dataclasses import dataclass, field
 
 # import local submodules
+from storage import check_collection_status
 from utils import (
 	DataInputError, chats_dataset_columns, clean_msg, discard, msg_attrs,
 	temp_path_for,
@@ -308,9 +310,11 @@ def build_dataset(data_path, *, progress=True):
 	Build msgs_dataset.csv (append) and collected_chats.xlsx (replace)
 	from the collected files in `data_path`. Returns a DatasetSummary.
 
-	Raises DataInputError, before writing anything, when
-	collected_chats.csv is missing or lacks columns, or a messages file is
-	malformed or produces an incomplete row.
+	Raises DataInputError, before writing anything, when the last
+	collection into `data_path` is running or was interrupted
+	(collection-status.json), collected_chats.csv is missing or lacks
+	columns, or a messages file is malformed or produces an incomplete row.
+	Notes about a partial or subset collection go to stderr.
 	'''
 	import pandas as pd
 	from tqdm import tqdm
@@ -318,6 +322,9 @@ def build_dataset(data_path, *, progress=True):
 	chats_path = f'{data_path}/{COLLECTED_CHATS}'
 	msgs_path = f'{data_path}/{MSGS_DATASET}'
 	xlsx_path = chats_path.replace('.csv', '.xlsx')
+
+	for note in check_collection_status(data_path):
+		print(f'> Note: {note}.', file=sys.stderr)
 
 	data = read_collected_chats(chats_path)
 	for column in STAT_COLUMNS:

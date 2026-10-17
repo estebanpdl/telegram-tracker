@@ -43,6 +43,22 @@ def request_log(client):
 	return log
 
 
+def cached_requests(baseline):
+	'''
+	The baseline request sequence as sent with the per-run metadata cache
+	(fix F7): a repeated GetFullChannelRequest for the same chat is served
+	from the cache.
+	'''
+	seen, out = set(), []
+	for entry in baseline:
+		if entry[0] == 'GetFullChannelRequest':
+			if entry[1] in seen:
+				continue
+			seen.add(entry[1])
+		out.append(entry)
+	return out
+
+
 def read_csv_rows(path):
 	with open(path, encoding='utf-8', newline='') as fh:
 		reader = csv.DictReader(fh)
@@ -126,7 +142,7 @@ class BatchScenarioTests(CollectorTestCase):
 		self.summary = await self.run_targets(self.spec['targets'])
 
 	def test_request_sequence(self):
-		self.assertEqual(request_log(self.client), self.spec['requests'])
+		self.assertEqual(request_log(self.client), cached_requests(self.spec['requests']))
 
 	def test_every_history_request_uses_baseline_arguments(self):
 		history = [r for r in self.client.requests if r['type'] == 'GetHistoryRequest']
@@ -212,7 +228,7 @@ class OtherScenarioTests(CollectorTestCase):
 	async def test_metadata_only_makes_no_history_requests(self):
 		spec = SCENARIOS['metadata_only']
 		await self.run_targets(spec['targets'], metadata_only=True)
-		self.assertEqual(request_log(self.client), spec['requests'])
+		self.assertEqual(request_log(self.client), cached_requests(spec['requests']))
 		self.assertEqual(list_files(self.out), spec['files'])
 		self.assert_chats_txt(spec['chats_txt'])
 		self.assert_counter(spec['counter'])
@@ -222,7 +238,7 @@ class OtherScenarioTests(CollectorTestCase):
 	async def test_min_id_filters_every_history_request(self):
 		spec = SCENARIOS['min_id']
 		await self.run_targets(spec['targets'], min_id=spec['min_id'])
-		self.assertEqual(request_log(self.client), spec['requests'])
+		self.assertEqual(request_log(self.client), cached_requests(spec['requests']))
 		for request in self.client.requests:
 			if request['type'] == 'GetHistoryRequest':
 				self.assertEqual(request['min_id'], spec['min_id'])
@@ -248,7 +264,7 @@ class OtherScenarioTests(CollectorTestCase):
 	async def test_all_failed_batch(self):
 		spec = SCENARIOS['all_failed']
 		summary = await self.run_targets(spec['targets'])
-		self.assertEqual(request_log(self.client), spec['requests'])
+		self.assertEqual(request_log(self.client), cached_requests(spec['requests']))
 		self.assertEqual(list_files(self.out), spec['files'])
 		self.assertEqual([t for t, _ in summary.failed], spec['targets'])
 		header, rows = read_csv_rows(os.path.join(self.out, 'collected_chats.csv'))
