@@ -36,8 +36,9 @@ from datetime import datetime, timezone
 from storage.records import CHANNELS_NOT_FOUND, COUNTER_COLUMNS, \
 	DATASET_STAT_COLUMNS, INTERRUPTED, LOCK_FILE, RUNNING, STATUS_FILE, \
 	STATUS_FORMAT, USERS_NOT_FOUND, HistoryUnreadable, OutputLocked, StorageError
-from utils import DataInputError, chats_dataset_columns, create_dirs, discard, \
-	temp_path_for
+from storage.files import append_lines, replace_file, write_json, \
+	write_json_pretty, write_text
+from utils import DataInputError, chats_dataset_columns, create_dirs, discard
 
 
 
@@ -159,49 +160,6 @@ Files
 
 '''
 
-def to_json_text(data):
-	'''
-	Compact UTF-8 JSON.
-	'''
-	return json.dumps(data, ensure_ascii=False, separators=(',', ':'))
-
-
-def replace_file(path, write):
-	'''
-	Call write(temp_path), then move the temporary file over `path`.
-	OSError becomes StorageError; the temporary file never survives.
-	'''
-	tmp = temp_path_for(path)
-	try:
-		write(tmp)
-		os.replace(tmp, path)
-	except OSError as exc:
-		raise StorageError(f'cannot write {path}: {exc}') from exc
-	finally:
-		discard(tmp)
-
-
-def write_text(path, text):
-	def write(tmp):
-		with open(tmp, mode='w', encoding='utf-8') as writer:
-			writer.write(text)
-
-	replace_file(path, write)
-
-
-def write_json(path, data):
-	write_text(path, to_json_text(data))
-
-
-def append_lines(path, lines):
-	if not lines:
-		return
-	try:
-		with open(path, mode='a', encoding='utf-8') as writer:
-			for line in lines:
-				writer.write(f'{line}\n')
-	except OSError as exc:
-		raise StorageError(f'cannot write {path}: {exc}') from exc
 
 
 def _has_no_rows(csv_path):
@@ -530,10 +488,6 @@ class StatusFile:
 			requests=requests or {}
 		)
 		self.write()
-
-
-def write_json_pretty(path, data):
-	write_text(path, json.dumps(data, ensure_ascii=False, indent=1) + '\n')
 
 
 def read_status(data_path):

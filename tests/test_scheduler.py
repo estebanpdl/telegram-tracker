@@ -276,7 +276,8 @@ class WriteHandleTests(SchedulerTestCase):
 				violations.append((kind, key))
 			return 1.0
 
-		with mock.patch('storage.open', tracking_open, create=True):
+		with mock.patch('storage.open', tracking_open, create=True), \
+				mock.patch('storage.files.open', tracking_open, create=True):
 			self.collect(3, latency=latency)
 		self.assertTrue(open_files)
 		self.assertEqual(violations, [])

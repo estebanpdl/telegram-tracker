@@ -34,6 +34,7 @@ import collector
 import datasets
 import network
 import storage
+import storage.files
 import storage.records
 
 from collector import HistoryWindow, MetadataCache, Requests
@@ -312,7 +313,7 @@ class FileTests(StorageTestCase):
 				raise OSError(28, 'No space left on device')
 			return real_replace(src, dst)
 
-		with mock.patch.object(storage.os, 'replace', failing_replace):
+		with mock.patch.object(storage.files.os, 'replace', failing_replace):
 			with self.assertRaises(storage.records.StorageError):
 				await self.collect(['alpha_fx', 'beta_fx', 'empty_fx'])
 
