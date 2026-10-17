@@ -39,7 +39,8 @@ import storage.records
 import storage.status
 import storage.writer
 
-from collector import HistoryWindow, MetadataCache, Requests
+from collector import HistoryWindow
+from collector.rpc import MetadataCache, Requests
 from utils import DataInputError
 
 
