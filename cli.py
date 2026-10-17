@@ -140,7 +140,8 @@ Parsers
 
 def add_target_arguments(parser):
 	'''
-	Arguments shared by `collect` and the legacy collection form.
+	Target, metadata-only, and output arguments shared by `collect` and the
+	legacy collection form.
 	'''
 	targets = parser.add_mutually_exclusive_group(required=True)
 	targets.add_argument(
@@ -165,12 +166,18 @@ def add_target_arguments(parser):
 		required=False,
 		help=f'Folder to save collected data. Default: `{DEFAULT_OUTPUT}`'
 	)
-	parser.add_argument(
+
+
+def add_min_id_argument(group):
+	'''
+	--min-id, accepted by `collect` and the legacy collection form. Each
+	parser lists it under its own "history window" group.
+	'''
+	group.add_argument(
 		'--min-id',
 		type=bounded_int(0),
 		metavar='N',
-		help='Collect only messages with an id above N (exclusive). A rerun '
-			'replaces the channel\'s saved messages with the messages collected.'
+		help='Only messages with an id above N (exclusive).'
 	)
 
 
@@ -188,6 +195,7 @@ def add_collect_arguments(parser):
 		'to a fresh --output to keep earlier histories. Not allowed with '
 		'--limit-download-to-channel-metadata.'
 	)
+	add_min_id_argument(window)
 	window.add_argument(
 		'--since',
 		type=utc_datetime,
@@ -340,6 +348,14 @@ def build_legacy_parser():
 		description='Arguments. (Legacy form of `python main.py collect`.)'
 	)
 	add_target_arguments(parser)
+	window = parser.add_argument_group(
+		'history window',
+		'Select which messages to collect. A run with --min-id replaces each '
+		'channel\'s saved messages with the selection, so write it to a fresh '
+		'--output to keep earlier histories. The other history window options '
+		'and --update need `python main.py collect`.'
+	)
+	add_min_id_argument(window)
 	return parser
 
 

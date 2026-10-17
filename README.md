@@ -15,77 +15,95 @@
 
 ## Overview
 
-This tool connects to Telegram's API. It generates JSON files containing channel's data, including channel's information and posts. You can search for a specific channel, or a set of channels provided in a text file (one channel per line.)
+Telegram Tracker collects public Telegram channels through Telegram's API and turns the collected files into a messages dataset and a channel network.
 
-Files are saved by default in a folder called *output/data*. These folders are created by the script. You can also give a specific output directory to store collected data.
+- `collect` saves each channel's profile metadata and posts as JSON, plus aggregate files about the chats found in that data (e.g., forward sources). You can collect one channel or a list of channels from a text file.
+- `build-dataset` reads the collected files and writes `msgs_dataset.csv` and `collected_chats.xlsx`.
+- `build-network` reads `collected_chats.csv` and writes a directed graph, `Graph.gexf`, and a preview image, `network.png`.
 
-**Software required**
+The two builders run offline: they read local files only and never connect to Telegram.
 
-* [Python 3.14](https://www.python.org/) (tested with 3.14.7; pinned library versions and known limitations are in [docs/compatibility.md](docs/compatibility.md))
-* [Telegram API credentials](https://my.telegram.org/auth?to=apps)
-	+ Telegram account
-	+ App `api_id`
-	+ App `api_hash`
+Contents:
 
-**Python required libraries**
+- [Requirements](#requirements)
+- [Installation and setup](#installation-and-setup)
+- [First login](#first-login)
+- [Commands](#commands)
+- [Collecting channels](#collecting-channels)
+- [Collecting part of a history](#collecting-part-of-a-history)
+- [Updating saved histories](#updating-saved-histories---update)
+- [Batches, concurrency, and rate limits](#batches-concurrency-and-rate-limits)
+- [Output files](#output-files)
+- [Collection status, locking, and recovery](#collection-status-locking-and-recovery)
+- [Building the dataset and the network](#building-the-dataset-and-the-network)
+- [Running the tests](#running-the-tests)
 
-* [Telethon](https://docs.telethon.dev/en/stable/)
-* [Pandas](https://pandas.pydata.org/)
-* [Openpyxl](https://openpyxl.readthedocs.io/en/stable/)
-* [tqdm](https://tqdm.github.io/)
-* [Networkx](https://networkx.org/)
-* [Matplotlib](https://matplotlib.org/)
-* [Louvain Community Detection](https://github.com/taynaud/python-louvain)
+## Requirements
 
+- [Python 3.14](https://www.python.org/). The project is tested with Python 3.14.7. Pinned library versions and the tested environment are in [docs/compatibility.md](docs/compatibility.md).
+- [Telegram API credentials](https://my.telegram.org/auth?to=apps): a Telegram account, plus an app `api_id` and `api_hash`.
+- The libraries in `requirements.txt`: [Telethon](https://docs.telethon.dev/en/stable/) 1.x, [pandas](https://pandas.pydata.org/), [openpyxl](https://openpyxl.readthedocs.io/en/stable/), [tqdm](https://tqdm.github.io/), [NetworkX](https://networkx.org/), [Matplotlib](https://matplotlib.org/), and [python-louvain](https://github.com/taynaud/python-louvain) for community detection.
 
-Installing
-----------
+## Installation and setup
 
-- **Via git clone**
+**1. Get the code.** Clone the repository:
 
 ```
 git clone https://github.com/estebanpdl/telegram-tracker.git
+cd telegram-tracker
 ```
 
-This will create a directory called `telegram-tracker` which contains the Python scripts. Cloning allows you to easily upgrade and switch between available releases.
+Or download the ZIP file from GitHub and unpack it.
 
-- **From the github download button**
-
-Download the ZIP file from github and use your favorite zip utility to unpack the file `telegram-tracker.zip` on your preferred location.
-
-**After cloning or downloading the repository, install the libraries from `requirements.txt`.**
+**2. Create a Python 3.14 environment and install the requirements.** Using an isolated environment keeps the pinned versions apart from other projects. With conda or mamba:
 
 ```
-pip install -r requirements.txt
+conda create -n telegram-tracker python=3.14
+conda activate telegram-tracker
+python -m pip install -r requirements.txt
+python -m pip check
 ```
 
-or
+Any other Python 3.14 virtual environment works the same way: activate it, then run the two `python -m pip` commands. `pip check` should report `No broken requirements found.` Always install with `python -m pip` from the activated environment, so packages go into that environment.
 
-```
-pip3 install -r requirements.txt
-```
-
-**Once you obtain an API ID and API hash on my.telegram.org, populate the `config/config.ini` file with the described values.**
+**3. Add your API credentials.** Once you have an API ID and API hash from my.telegram.org, fill in `config/config.ini`:
 
 ```ini
-
 [Telegram API credentials]
-api_id = api_id
-api_hash = api_hash
-phone = phone
+api_id = <your api_id>
+api_hash = <your api_hash>
+phone = <your phone number, international format, e.g. +<country code><number>>
 ```
 
-*Note: Your phone must be included to authenticate for the first time. Use the format +\<code>\<number> (e.g., +19876543210). Telegram API will send you a code via Telegram app that you will need to include.*
+Replace each `<...>` value, without the angle brackets. Keep these values private and do not commit them.
 
-<br />
+**4. Run commands from the repository folder.** `config/config.ini` and the session file `session_file.session` are looked up in the current working directory. Output goes to `./output/data` unless you pass `--output`.
 
----
+## First login
 
-# Example usage
+The first `collect` run logs in to Telegram and creates `session_file.session` in the working directory. Later runs reuse that session and skip every prompt. Both the canonical command (`python main.py collect ...`) and the earlier form (`python main.py --telegram-channel ...`) log in the same way.
+
+1. Run any collection, for example `python main.py collect --telegram-channel example_channel`.
+2. The tool prints `> Not Authorized! Sending code request...` and Telegram sends a login code to your Telegram app.
+3. At `Enter the code: `, type the code.
+4. If the account has two-step verification, the tool prints `> Two-step verification is enabled.` and asks `Enter your two-step verification password: `. The password is not shown while you type.
+5. `> Authorized!` means the session is ready, and the collection continues.
+
+Rules and failure cases:
+
+- **Attempts.** You get at most 3 attempts for the code and 3 for the password. An empty entry counts as an attempt. After the third rejected attempt, the run exits 1.
+- **Expired code.** The run stops at once (exit 1). Run the command again to request a new code.
+- **Rate limit.** If Telegram rate-limits the code request or the sign-in, the run stops at once with `> Login failed: Telegram rate-limited the login; wait N seconds before trying again.` It does not retry automatically. Wait at least that long before you run it again.
+- **Other refusals.** Exit 1 with the Telegram error name. Messages never include the phone number, code, or password.
+- **Interrupting.** Ctrl+C at a prompt exits 130. In every case the connection to Telegram is closed once before the program exits.
+- **Password handling.** The password is never a command-line option. The tool does not write it to a file or log, and keeps it only for the sign-in request. Never put it in `config.ini`, a script, or your shell history.
+- **A real terminal is required.** The prompts read from the terminal. If input is unavailable, the run exits 1 with `No login code was entered because input is unavailable; run collection from an interactive terminal.` The password prompt refuses to fall back to visible input. Activate the environment (`conda activate telegram-tracker`) and run `python main.py ...` directly. `conda run` does not attach the terminal's input by default, so do not use it for the first login.
+
+**Protect the session file.** `session_file.session` gives full access to your Telegram account. Do not share, copy, or commit it (it is listed in `.gitignore`). Use one collection process at a time per session: never run two collections with the same session, even into different output folders.
 
 ## Commands
 
-`main.py` is the single entry point, with one subcommand per step. Builders run offline and only read local files.
+`main.py` is the single entry point, with one subcommand per step:
 
 ```
 python main.py collect --telegram-channel NAME [options]
@@ -94,342 +112,230 @@ python main.py build-dataset [--data-path DIR]
 python main.py build-network [--data-path DIR]
 ```
 
-Run `python main.py --help` or `python main.py <command> --help` for the options. Help never needs credentials or a session.
+Run `python main.py --help` or `python main.py <command> --help` for the options. Help never needs credentials, a session, or the service libraries. `python main.py` without arguments prints the overview and exits 2.
 
-### Migrating from the earlier commands
+### Earlier commands
 
 The earlier commands still work and reach the same code. They are supported through the first release, with no removal date.
 
 | Earlier command | Canonical command | Notes |
 |---|---|---|
 | `python main.py --telegram-channel NAME` | `python main.py collect --telegram-channel NAME` | |
-| `python main.py --batch-file FILE` | `python main.py collect --batch-file FILE` | |
+| `python main.py --batch-file FILE` | `python main.py collect --batch-file FILE` | Collects up to 3 channels at once, like `collect` |
 | `... --limit-download-to-channel-metadata` | `python main.py collect ... --limit-download-to-channel-metadata` | |
 | `... --output DIR` / `-o DIR` | `python main.py collect ... --output DIR` | Default `./output/data`, relative to the working directory |
 | `... --min-id N` | `python main.py collect ... --min-id N` | Same meaning: only messages with an id above N |
-| (none) | `python main.py collect ... --since/--until/--max-id/--max-messages` | History window: **`collect` only**. The earlier form accepts only `--min-id` |
+| (none) | `python main.py collect ... --since/--until/--max-id/--max-messages` | History window: **`collect` only** |
 | (none) | `python main.py collect ... --update` | Merge new posts into saved histories: **`collect` only** |
-| (none) | `python main.py collect ... --concurrency/--request-interval/--max-flood-wait/--max-retries` | Request controls: `collect` only. The earlier form runs with the defaults (3 channels at once for `--batch-file`) |
+| (none) | `python main.py collect ... --concurrency/--request-interval/--max-flood-wait/--max-retries` | Request controls: **`collect` only**. The earlier form uses the defaults |
 | `python build-datasets.py [--data-path DIR]` | `python main.py build-dataset [--data-path DIR]` | `-d` also works |
 | `python channels-to-network.py [--data-path DIR]` | `python main.py build-network [--data-path DIR]` | `-d` also works |
 
-Exit codes for every form: `0` success; `1` a target, the login, the input data, or writing the output failed, the output folder is locked, or a dependency is missing; `2` invalid arguments, reported before any credentials are read; `130` interrupted.
+The earlier collection form accepts only `--telegram-channel`, `--batch-file`, `--limit-download-to-channel-metadata`, `--output`, and `--min-id`. Its help (`python main.py --telegram-channel x --help`) lists `--min-id` under "history window".
 
-### `collect --help` (excerpt)
+### Exit codes
+
+The same for every form:
+
+| Code | Meaning |
+|---|---|
+| `0` | Every requested target was collected, or the build succeeded. Empty channels and empty inputs count as success. |
+| `1` | A target failed, the login failed, the run stopped early (flood wait or rejected session), the output folder is locked, writing an output failed, the input data of a build is missing or malformed, or a library is missing. |
+| `2` | Invalid arguments, including an unreadable batch file or an unsupported line in it. Reported before any credentials are read. |
+| `130` | Interrupted with Ctrl+C. |
+
+## Collecting channels
 
 ```
-history window:
-  Select which messages to collect; bounds combine (AND). A filtered run
-  replaces each channel's saved messages with the selection, so write it to
-  a fresh --output to keep earlier histories. Not allowed with --limit-
-  download-to-channel-metadata.
+# one channel
+python main.py collect --telegram-channel example_channel
 
-  --since DATE          Only messages dated at or after DATE (UTC unless an
-                        offset is given; a date alone means midnight).
-                        Example: --since 2026-09-01
-  --until DATE          Only messages dated before DATE (exclusive). Example:
-                        --until 2026-10-01 excludes 1 October (UTC).
-  --max-id N            Only messages with an id below N (exclusive).
-  --max-messages N      At most N messages per channel, newest first.
+# every channel listed in a text file, into a chosen folder
+python main.py collect --batch-file ./channels.txt --output ./output/project-a
 
-update:
-  Add new posts to saved histories instead of replacing them. Not allowed
-  with the history window options or --limit-download-to-channel-metadata.
-
-  --update              For each channel, collect only posts newer than the
-                        newest one in its saved <channel>_messages.json and
-                        merge them into that file (fetched copies win). A
-                        channel without a saved history is collected in full.
-                        Posts deleted or edited on Telegram since the earlier
-                        run are not reflected, and build-dataset appends the
-                        merged history again, duplicating earlier rows.
-
-request controls:
-  Shared by every Telegram request of the run, including metadata lookups.
-  These are project limits, not a safe rate guaranteed by Telegram. The
-  earlier `python main.py --batch-file ...` form uses the defaults.
-
-  --concurrency N       Channels collected at once, 1-10; also the most
-                        requests in flight (default: 3 for --batch-file;
-                        --telegram-channel always runs at 1). Use 1 to collect
-                        one channel at a time.
-  --request-interval SECONDS
-                        Minimum gap between Telegram requests, 0.1-60
-                        (default: 0.25).
-  --max-flood-wait SECONDS
-                        Longest server flood wait to sit out, 0-3600; a longer
-                        one stops the whole run, keeping completed channels. 0
-                        stops on any flood wait (default: 60).
-  --max-retries N       Additional attempts per request after a flood wait or
-                        a transient error, 0-10 (default: 3).
+# profile metadata only, without posts
+python main.py collect --batch-file ./channels.txt --limit-download-to-channel-metadata
 ```
 
-### Collecting part of a history
+`--output` (or `-o`) chooses the folder; it is created if needed. A channel is given by its username, `@username`, a public link (`https://t.me/username`, `t.me/s/username`), or a numeric id. Links and `@` are reduced to the username, which also names the channel's folder: `@Example_Channel` and `https://t.me/Example_Channel` are both saved under `Example_Channel/`.
 
-`--min-id`, `--max-id`, `--since`, `--until`, and `--max-messages` combine as AND.
+Each requested channel is collected separately. A channel that does not exist, is private, or cannot be accessed fails only that channel: it is listed in `_exceptions-channels-not-found.txt`, the other channels are still collected, and the exit code is 1. At the end, the run prints a summary of the targets and requests, and names the failed channels on stderr.
 
-- ID bounds are exclusive.
-- `--since` is inclusive and `--until` is exclusive.
-- Dates are ISO 8601 (`2026-10-01`, `2026-10-01T12:00`, `2026-10-01T12:00:00Z`, `2026-10-01T14:00+02:00`). A value without an offset is UTC.
+**Metadata only** saves `<channel>.json` and the aggregate files, but no new `<channel>_messages.json`. A messages file from an earlier run stays in place; the summary and `collection-status.json` (`stale_history`) name those channels.
+
+## Collecting part of a history
+
+`collect` accepts five history window options. They combine as AND:
+
+| Option | Selects |
+|---|---|
+| `--min-id N` | messages with an id above N (exclusive) |
+| `--max-id N` | messages with an id below N (exclusive) |
+| `--since DATE` | messages dated at or after DATE (inclusive) |
+| `--until DATE` | messages dated before DATE (exclusive) |
+| `--max-messages N` | at most N messages per channel, newest first |
+
+Dates are ISO 8601: `2026-10-01`, `2026-10-01T12:00`, `2026-10-01T12:00:00Z`, or `2026-10-01T14:00+02:00`. A value without an offset is UTC, and a date alone means midnight UTC. The earlier collection form accepts only `--min-id`.
 
 ```
 # September 2026 only, into a fresh folder
-python main.py collect --telegram-channel channelname --since 2026-09-01 --until 2026-10-01 -o ./output/sep-2026
+python main.py collect --telegram-channel example_channel --since 2026-09-01 --until 2026-10-01 -o ./output/sep-2026
 
 # the newest 500 messages of each channel in a batch
 python main.py collect --batch-file ./channels.txt --max-messages 500 -o ./output/sample
 
-# messages after id 12345 (the earlier "update" use of --min-id)
-python main.py collect --telegram-channel channelname --min-id 12345 -o ./output/new-posts
+# messages after id 12345
+python main.py collect --telegram-channel example_channel --min-id 12345 -o ./output/new-posts
 ```
 
-**A filtered run replaces `<channel>_messages.json` with the selected messages only.** It does not merge them into the saved history. Before connecting, the command warns on stderr when a channel already has a saved history in the output folder. Write filtered runs to a fresh `--output` to keep earlier histories. The run header prints the active window.
+**A filtered run replaces `<channel>_messages.json` with the selected messages only.** It does not merge them into the saved history. Before connecting, the command warns on stderr when a channel already has a saved history in the output folder, naming up to 10 channels. To keep earlier histories, write filtered runs to a fresh `--output`, or use `--update` to add new posts. The run header prints the active window. Window options cannot be combined with `--limit-download-to-channel-metadata` in `collect`.
 
 Known limits:
-- Pages are counted whole, so the chats and users of the page that crosses a bound may include some referenced only by excluded messages.
-- `--since` stops paging at the first page older than the date. This assumes message dates follow id order, which imported or forwarded-in-bulk histories can break.
+
+- Pages are kept whole, so the `chats` and `users` of the page that crosses a bound can include entries referenced only by excluded messages.
+- `--since` stops paging at the first page older than the date. This assumes message dates follow id order, which imported histories can break.
 - `count` in the saved JSON (`collected_actions` in the dataset) is Telegram's total for the channel, not the number of messages saved.
 
-### Batch targets and concurrency
-
-A batch file holds one target per line: a username, `@username`, a public link (`https://t.me/username`, `t.me/s/username`), or a numeric id. Links and `@` are reduced to the username, which also names the output folder. Blank lines are skipped. Repeated targets are dropped case-insensitively, keeping the first. Anything else (paths, invite or post links, spaces) stops the command with exit 2 and the line number, before connecting. Two targets that turn out to be the same channel (for example an old and a new username) are collected once; the later one is reported as a duplicate.
-
-`--batch-file` collects up to 3 channels at once by default (`--concurrency 1` to `10`). The pages of one channel are still fetched in order. Every request of the run, including metadata lookups of discovered chats, goes through one shared policy:
-
-- at most `--concurrency` requests in flight, and at least `--request-interval` seconds (0.25) between any two;
-- a flood wait from Telegram pauses every channel until it ends, then the request is retried. A wait longer than `--max-flood-wait` (60 s), or one more flood wait after `--max-retries` (3) retries, stops the whole run: completed channels are kept, the rest are reported as not collected, and the exit code is 1;
-- server errors, timeouts (60 s per attempt), and dropped connections are retried after 1, 2, 4 ... seconds (at most 30) within `--max-retries`; when they keep failing, only that channel fails;
-- a missing or private channel fails only that channel; a rejected session stops the run.
-
-The summary prints the counts (given, after removing duplicates, succeeded, failed, duplicates, cancelled) and, per kind of request (`resolve`, `channel`, `history`, `enrichment`), the requests sent, retries, flood waits, and flood-wait seconds. `collection-status.json` records the same numbers.
-
-More concurrency does not raise Telegram's limits for an account: the request gap applies to the whole run, and flood waits pause everything. Only run one collection per account session at a time. On simulated 1-second requests, 3 workers took about 40% of the serial time and 10 workers were limited by the 0.25 s gap (see `docs/compatibility.md`); real timings depend on Telegram.
-
-### Updating saved histories (`--update`)
+## Updating saved histories (`--update`)
 
 ```
 python main.py collect --batch-file ./channels.txt --update -o ./output/data
 ```
 
-For each channel, `--update` reads the saved `<channel>/<channel>_messages.json`, collects only posts with a higher id, and merges them in:
+Use the same `--output` as the earlier collection. For each channel, `--update` reads the saved `<channel>/<channel>_messages.json`, collects only posts with a higher id, and merges them in:
 
 - Messages are merged by id. A fetched copy replaces a saved one, saved posts are kept, and the file stays ordered newest first.
 - `chats` and `users` are merged by id, fetched copies first. `count` and the other fields come from the latest response.
-- With no new posts the file is left byte for byte as it was.
+- With no new posts, the file is left byte for byte as it was.
 - A failed request leaves the saved file as it was.
 - A saved file that cannot be read or parsed fails that channel and is left untouched.
 - A channel with no saved file is collected in full; the summary lists those channels.
 
-`--update` cannot be combined with `--since`, `--until`, `--min-id`, `--max-id`, `--max-messages`, or `--limit-download-to-channel-metadata`. The earlier `python main.py --telegram-channel ...` form does not accept it.
+`--update` cannot be combined with the history window options or with `--limit-download-to-channel-metadata`. The earlier collection form does not accept it.
+
+| | History window (`--min-id`, `--since`, ...) | `--update` |
+|---|---|---|
+| Saved `<channel>_messages.json` | Replaced by the selection | Kept; new posts merged in |
+| Where to write | A fresh `--output` | The folder of the earlier collection |
+| Lower bound | Given by you | The highest saved message id of each channel |
 
 Limits:
+
 - Only new posts are fetched, so posts deleted or edited on Telegram since the earlier run are not reflected.
-- Deduplication happens inside the merged file only. `build-dataset` appends to `msgs_dataset.csv`, so building again after an update duplicates the rows of earlier posts.
+- Duplicates are removed inside the merged file only. `build-dataset` appends to `msgs_dataset.csv`, so building again after an update adds the earlier posts a second time. Build into a fresh dataset if you need each post once (see [Building the dataset and the network](#building-the-dataset-and-the-network)).
 
-### Collection status, locking, and reruns
+## Batches, concurrency, and rate limits
 
-Each collection writes `collection-status.json` in the output folder. It records the state, the parameters (full, window with its bounds, update, or metadata only), and each target's outcome (`succeeded`, `failed` with a reason, `cancelled`), with the derived `min_id` and history mode for `--update`. It holds no credentials or message text.
+A batch file holds one target per line, in any of the forms above. Blank lines are skipped. Repeated targets are dropped case-insensitively, keeping the first. Any other line (a path, an invite or post link, text with spaces) stops the command with exit 2 and the line number, before any credentials are read. Two targets that turn out to be the same channel (for example an old and a new username) are collected once; the later one is reported as a duplicate.
+
+`--batch-file` collects up to 3 channels at once by default, in both command forms. The pages of one channel are still fetched in order. A single `--telegram-channel` always runs at 1. Every Telegram request of the run, including the metadata lookups of discovered chats, goes through one shared policy:
+
+| Control | Default | Range | Effect |
+|---|---|---|---|
+| `--concurrency N` | 3 for `--batch-file` | 1–10 | Channels collected at once; also the most requests in flight |
+| `--request-interval SECONDS` | 0.25 | 0.1–60 | Minimum gap between any two requests of the run |
+| `--max-flood-wait SECONDS` | 60 | 0–3600 | Longest Telegram flood wait to sit out |
+| `--max-retries N` | 3 | 0–10 | Additional attempts per request after a flood wait or a transient error |
+
+- **Flood waits.** When Telegram asks the client to wait, every channel pauses until the wait ends, and then the request is retried. A wait longer than `--max-flood-wait`, or another flood wait after `--max-retries` retries, stops the whole run: completed channels are kept, the rest are reported as not collected, `collection-status.json` says `interrupted`, and the exit code is 1. Wait before collecting again.
+- **Transient errors.** Server errors, timeouts (60 seconds per attempt), and dropped connections are retried after 1, 2, 4 ... seconds (at most 30) within `--max-retries`. If they keep failing, only that channel fails.
+- **Access errors.** A missing or private channel fails only that channel. A session that Telegram rejects stops the run; log in again.
+- **Serial fallback.** `--concurrency 1` collects one channel at a time with the same policy. Use it if you prefer the earlier one-by-one behavior, or when an account hits flood waits often.
+
+**Concurrency is not a Telegram quota.** More workers do not raise Telegram's limits for an account: the request gap applies to the whole run, and a flood wait pauses everything. The defaults are project limits, not a rate that Telegram guarantees to be safe. On simulated 1-second requests, 3 workers took about 40% of the serial time, and 10 workers were limited by the 0.25-second gap (see [docs/compatibility.md](docs/compatibility.md)). Real timings depend on Telegram.
+
+The summary prints the counts (given, after removing duplicates, succeeded, failed, duplicates, cancelled) and, per kind of request (`resolve`, `channel`, `history`, `enrichment`), the requests sent, retries, flood waits, and flood-wait seconds. `collection-status.json` records the same numbers.
+
+## Output files
+
+```
+output/data/                          (or the folder given with --output)
+├── <channel>/
+│   ├── <channel>.json                channel profile metadata
+│   └── <channel>_messages.json       posts (not written by metadata-only runs)
+├── chats.txt                         ids of chats found in the collected data
+├── collected_chats.csv               metadata of the chats found in the data (e.g., forwards)
+├── counter.csv                       how often each chat was found in this run
+├── collection-status.json            state and per-target outcome of the last collection
+├── _exceptions-channels-not-found.txt   requested targets that were missing or inaccessible (when any)
+├── _exceptions-users-not-found.txt      discovered chats whose metadata could not be retrieved (when any)
+├── msgs_dataset.csv                  written by build-dataset
+├── collected_chats.xlsx              written by build-dataset
+├── Graph.gexf                        written by build-network
+└── network.png                       written by build-network
+```
+
+What happens when you collect into a folder that already holds data:
+
+| File | On a rerun into the same folder |
+|---|---|
+| `<channel>.json` | Replaced after the channel is collected |
+| `<channel>_messages.json` | Replaced (full or window), merged (`--update`), or kept (metadata only) |
+| `chats.txt` | Keeps the earlier ids; new ids are added in the order found |
+| `collected_chats.csv` | Keeps the earlier rows as they were; this run's rows are appended with this run's counts. No `_x`/`_y` columns are created. A run that adds no rows leaves it untouched |
+| `counter.csv` | Replaced; describes this run only |
+| `collection-status.json` | Replaced; describes this run only |
+| `_exceptions-*.txt` | Appended to |
+
+A channel's two JSON files are written only after the whole channel was collected, so a request failure keeps its earlier files. JSON and CSV files and `chats.txt` are written to a temporary file and then moved into place, so a reader sees either the old or the new version of each file. There is no transaction across files: a crash can leave files from different runs (see below).
+
+## Collection status, locking, and recovery
+
+Each collection writes `collection-status.json` in the output folder. It records the state, the parameters (full, window with its bounds, update, or metadata only), the request controls and statistics, and each target's outcome (`succeeded`, `failed` with a reason, `duplicate`, `cancelled`), with the derived `min_id` and history mode for `--update`. It holds no credentials or message text.
 
 | State | Meaning | Builders |
 |---|---|---|
 | `running` | Collecting, or stopped without finishing (a crash) | Refuse |
 | `complete` | Every target was collected | Run |
 | `partial` | Finished; some targets failed | Run, with a note naming the failed targets |
-| `interrupted` | Stopped early (Ctrl+C, a storage error, or another fatal error); completed channels are saved | Refuse |
+| `interrupted` | Stopped early (Ctrl+C, a flood-wait or session stop, a storage error, or another fatal error); completed channels are saved | Refuse |
 
-`build-dataset` also notes when the last collection used a history window or `--update`. Folders without a status file (earlier versions) are accepted.
+`build-dataset` also notes when the last collection used a history window or `--update`. Folders without a status file (from earlier versions) are accepted.
 
-- **One collection per folder.** A run holds `.collection.lock` in the output folder and removes it when it ends. A second run into the same folder exits 1 before connecting. A lock left by a crash is not removed automatically: if no collection is running, delete the file, or collect into a fresh `--output`. Never run two collections with the same account session, even into different folders.
-- **Files are replaced atomically, one at a time.** Each JSON and CSV file is written to a temporary file and moved into place, so a reader sees the old or the new version. A hard crash can still leave files from different runs, with the status file saying `running`. To recover, keep that folder for inspection and collect into a fresh `--output`; the completed channel JSON files stay readable.
-- **A collection request failure keeps the channel's earlier files.** Its `<channel>.json` and `<channel>_messages.json` are written only after the whole channel was collected. A storage failure between the two replacements can leave them from different runs; the run is then interrupted.
-- **Rerunning into a folder:** `chats.txt` adds new ids, `collected_chats.csv` keeps its earlier rows as they were and appends this run's rows with this run's counts, `counter.csv` describes this run, and the exception logs are appended to. No `_x`/`_y` columns are created.
-- **Metadata only** leaves an earlier `<channel>_messages.json` in place; the summary and the status file (`stale_history`) say which channels have messages from an earlier run.
+**One collection per folder.** A run holds `.collection.lock` in the output folder and removes it when it ends. A second run into the same folder exits 1 before connecting, with `<folder> is in use by another collection (pid ..., started ...)`. The lock protects the folder, not the account: never run two collections with the same session, even into different folders.
 
-## `main.py`
+**Stale lock.** A lock left by a crashed or killed run is not removed automatically. To recover:
 
-This Python script will connect to Telegram's API and handle your API request.
+1. Make sure no collection is running (check the process id named in the message).
+2. Either keep the folder for inspection and collect into a fresh `--output`, or delete `<folder>/.collection.lock` to reuse the folder.
 
-### Options
+**Interrupted or crashed run.** If `collection-status.json` says `interrupted`, or still says `running` after the process ended, the aggregate files may be incomplete or from different runs, and the builders refuse the folder. To recover:
 
-* `--telegram-channel` Specifies Telegram Channel to download data from.
-* `--batch-file` File containing Telegram Channels to download data from, one channel per line.
-* `--limit-download-to-channel-metadata` Will collect channels metadata only, not channel's messages. (default = False)
-* `--output, -o` Specifies a folder to save collected data. If not given, script will generate a default folder called `./output/data`
-* `--min-id` Collect only messages with an id above the given id (exclusive). The saved messages file is replaced with those messages; see below.
+1. Keep that folder as it is, for inspection.
+2. Run the collection again into a fresh `--output`.
+3. Build the dataset and the network from the new folder.
 
-<br />
+The completed `<channel>.json` and `<channel>_messages.json` files in the old folder stay readable. If a run is cancelled while a finished channel is still waiting to be saved, that channel may be reported as not collected; collect it again.
 
-### Structure of output data
+Memory: each channel's history is held in memory until it is saved, and the run keeps the chat observations of every completed channel until the end. Very large batches or histories need correspondingly more memory.
 
-```
-├──🗂 output
-|   └──🗂 data
-|   	└──🗂 <channel_name>
-|   		└──<channel_name>.json
-|   		└──<channel_name>_messages.json
-|   	└──chats.txt // TM channels, groups, or users' IDs found in data.
-|   	└──collected_chats.csv // TM channels or groups found in data (e.g., forwards)
-|   	└──collected_chats.xlsx // TM channels or groups found in data (e.g., forwards)
-|   	└──counter.csv // TM channels, groups or users found in data (e.g., forwards)
-|   	└──collection-status.json // State and per-channel outcome of the last collection
-|   	└──_exceptions-channels-not-found.txt // Missing or inaccessible requested targets (when present)
-|   	└──_exceptions-users-not-found.txt // Discovered chats whose metadata could not be retrieved (when present)
-|   	└──msgs_dataset.csv // Posts and messages from the requested channels
-```
+## Building the dataset and the network
 
-<br />
-
-## **Examples**
-
-<br />
-
-### **Basic request**
+Run the builders after a collection has finished, on the same folder:
 
 ```
-python main.py --telegram-channel channel_name
+python main.py build-dataset --data-path ./output/data
+python main.py build-network --data-path ./output/data
 ```
 
-**Expected output**
+Without `--data-path` (or `-d`), both use `./output/data`. They read local files only, need no credentials or session, and can run without a network connection.
 
-- Files of collected channels:
-	- chats.txt
-	- collected_chats.csv
-	- _exceptions-channels-not-found.txt (if targets were inaccessible)
-	- _exceptions-users-not-found.txt (if discovered chats were inaccessible)
-	- collection-status.json
-	- counter.csv
-- A new folder: *<channel_name>* containing
-	- A JSON file containing channel's profile metadata
-	- A JSON file containing posts from the requested channel
+**`build-dataset`** reads every `<channel>_messages.json` (in sorted path order) and `collected_chats.csv`, and writes:
 
-<br />
+- `msgs_dataset.csv`: one row per post. Rows are **appended** to an existing file, so building twice, or again after `--update`, duplicates rows. To get each post once, delete or move `msgs_dataset.csv` before building, or build from a fresh collection folder.
+- `collected_chats.xlsx`: replaced on every build.
 
-### **Request using a text file containing a set of channels**
+**`build-network`** reads `collected_chats.csv` (`username`, `counter`, `source`) and writes `Graph.gexf`, a directed, unweighted graph from each source channel to the chats found in its data (e.g., forwards), and `network.png`, a preview with Louvain communities. Both are replaced on every build. Open the GEXF file in tools such as [Gephi](https://gephi.org/).
+
+Both builders refuse a folder whose `collection-status.json` says `running` or `interrupted` (exit 1, with the recovery steps above). Missing or malformed input files stop the build with exit 1 before anything is written. With no messages, the dataset has a header only; with no edges, the graph is empty and the image blank.
+
+## Running the tests
+
+The test suite runs offline with synthetic fixtures. It never connects to Telegram, reads `config/config.ini`, or opens a session file. From the repository folder, in the project environment:
 
 ```
-python main.py --batch-file './path/to/channels_text_file.txt'
+python -m unittest discover -s tests
+python -m pip check
 ```
 
-**Expected output**
-
-- Files of collected channels:
-	- chats.txt
-	- collected_chats.csv
-	- _exceptions-channels-not-found.txt (if targets were inaccessible)
-	- _exceptions-users-not-found.txt (if discovered chats were inaccessible)
-	- collection-status.json
-	- counter.csv
-- New folders - based on the number of requested channels: *<channel_name>* containing
-	- A JSON file containing channel's profile metadata
-	- A JSON file containing posts from the requested channel
-
-These examples will retrieve all posts available through the API from the requested channel. If you want to collect channel's information only, without posts, you can run:
-
-<br />
-
-### **Limit download to channel's metadata only**
-
-```
-python main.py --telegram-channel channelname --limit-download-to-channel-metadata
-```
-
-or, using a set of telegram channels via a text file:
-
-```
-python main.py --batch-file './path/to/channels_text_file.txt' --limit-download-to-channel-metadata
-```
-
-<br />
-
-### **Updating channel's data**
-
-To add new posts to a collection you already have, use `--update` with the canonical command and the same `--output`:
-
-```
-python main.py collect --telegram-channel channelname --update --output ./path/to/collection
-```
-
-See [Updating saved histories](#updating-saved-histories---update). To collect only messages after a given id into a separate folder, pass it to `--min-id` (exclusive):
-
-```
-python main.py --telegram-channel channelname --min-id 12345 --output ./path/to/new/directory
-```
-
-The saved `<channel_name>_messages.json` then holds **only** the messages after that id. Rerunning into the folder of an earlier collection replaces its saved history (a warning names the affected channels), so use a fresh `--output`. See [Collecting part of a history](#collecting-part-of-a-history).
-
-**Expected output**
-
-- Files of collected channels:
-	- chats.txt
-	- collected_chats.csv
-	- _exceptions-channels-not-found.txt (if targets were inaccessible)
-	- _exceptions-users-not-found.txt (if discovered chats were inaccessible)
-	- collection-status.json
-	- counter.csv
-- A new folder: *<channel_name>* containing
-	- A JSON file containing channel's profile metadata
-	- A JSON file containing posts from the requested channel
-
-<br />
-
-### **Specify output folder**
-
-Use `--output` to choose where collected data is saved. The script creates the directory if it does not exist.
-
-```
-python main.py --telegram-channel channelname --output ./path/to/chosen/directory
-```
-
-The expected output is the same as described above, saved in the chosen directory.
-
-<br />
-
----
-
-## `build-datasets.py`
-
-This Python script reads the collected files and creates a new dataset containing messages from the requested channels. By default, the dataset is saved as `./output/data/msgs_dataset.csv`.
-
-If you provided a specific directory to save collected data, you need to provide the same path to use this script.
-
-### Options
-
-* `--data-path` Path where data is located. Will use `./output/data` if not given.
-
-If a specific directory was not provided in `main.py`, run:
-
-```
-python build-datasets.py
-```
-
-If you provided a specific directory using the option `--output` in `main.py`, run:
-
-```
-python build-datasets.py --data-path ./path/to/chosen/directory
-```
-
-These options create the above-mentioned dataset: `msgs_dataset.csv`, a file containing posts and messages from the requested channels.
-
-<br />
-
----
-
-## `channels-to-network.py`
-
-This Python script builds a network graph. By default, the graph is saved as `./output/data/Graph.gexf`. The script also saves a preliminary graph: `network.png` using the modules matplotlib, networkx, and python-louvain, which implements community detection. You can import the GEXF graph file using software, including Gephi.
-
-### Options
-
-* `--data-path` Path where data is located. Will use `./output/data` if not given.
-
-If a specific directory was not provided in `main.py`, run:
-
-```
-python channels-to-network.py
-```
-
-If you provided a specific directory using the option `--output` in `main.py`, run:
-
-```
-python channels-to-network.py --data-path ./path/to/chosen/directory
-```
+`python -m pytest` runs the same tests when pytest is installed. [docs/compatibility.md](docs/compatibility.md) describes the tested environment, the CLI contract, and the offline test harness.
