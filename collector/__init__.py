@@ -11,13 +11,14 @@ cancellation.
 
 Boundaries:
 	- network: `Requests` (application RPCs by method class, all admitted
-	  through one `request_policy.RequestPolicy`) and `MetadataCache` (one
-	  full-channel request per chat per run, shared by every channel that
-	  sees the chat);
+	  through one `request_policy.RequestPolicy`) and `MetadataCache`
+	  (shares requests in flight and caches successful responses and
+	  permanent access errors by chat for the run);
 	- collection: `collect_channel` returns a `storage.records.ChannelResult`
 	  and writes nothing;
-	- files: `storage.writer.OutputWriter` alone writes channel JSON,
-	  aggregates, the lock, and collection-status.json.
+	- files: `storage.writer.OutputWriter` writes channel JSON and aggregates;
+	  `storage.writer.OutputLock` guards the output folder, and
+	  `storage.status.StatusFile` writes collection-status.json.
 
 Modules:
 
@@ -34,4 +35,3 @@ connections, or writes. The package exports only what the CLI uses.
 # import local submodules
 from collector.history import HistoryWindow
 from collector.run import run_collection
-
