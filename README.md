@@ -228,23 +228,25 @@ Limits:
 
 A batch file holds one target per line, in any of the forms above. Blank lines are skipped. Repeated targets are dropped case-insensitively, keeping the first. Any other line (a path, an invite or post link, text with spaces) stops the command with exit 2 and the line number, before any credentials are read. Two targets that turn out to be the same channel (for example an old and a new username) are collected once; the later one is reported as a duplicate.
 
-`--batch-file` collects up to 3 channels at once by default, in both command forms. The pages of one channel are still fetched in order. A single `--telegram-channel` always runs at 1. Every Telegram request of the run, including the metadata lookups of discovered chats, goes through one shared policy:
+`--batch-file` collects up to 3 channels at once by default, in both command forms. The pages of one channel are still fetched in order. A single `--telegram-channel` always runs at 1. After login, channel resolution, profile metadata, history pages, and discovered-chat metadata lookups go through one shared request policy:
 
 | Control | Default | Range | Effect |
 |---|---|---|---|
 | `--concurrency N` | 3 for `--batch-file` | 1–10 | Channels collected at once; also the most requests in flight |
-| `--request-interval SECONDS` | 0.25 | 0.1–60 | Minimum gap between any two requests of the run |
+| `--request-interval SECONDS` | 0.25 | 0.1–60 | Minimum gap between request attempts admitted by the shared policy |
 | `--max-flood-wait SECONDS` | 60 | 0–3600 | Longest Telegram flood wait to sit out |
 | `--max-retries N` | 3 | 0–10 | Additional attempts per request after a flood wait or a transient error |
 
-- **Flood waits.** When Telegram asks the client to wait, every channel pauses until the wait ends, and then the request is retried. A wait longer than `--max-flood-wait`, or another flood wait after `--max-retries` retries, stops the whole run: completed channels are kept, the rest are reported as not collected, `collection-status.json` says `interrupted`, and the exit code is 1. Wait before collecting again.
+- **Flood waits.** When Telegram asks the client to wait during collection, the policy pauses new request attempts across all channels until the wait ends, and then retries the request. Requests already in flight can finish. A wait longer than `--max-flood-wait`, or another flood wait after `--max-retries` retries, stops the whole run: completed channels are kept, the rest are reported as not collected, `collection-status.json` says `interrupted`, and the exit code is 1. Wait before collecting again.
 - **Transient errors.** Server errors, timeouts (60 seconds per attempt), and dropped connections are retried after 1, 2, 4 ... seconds (at most 30) within `--max-retries`. If they keep failing, only that channel fails.
 - **Access errors.** A missing or private channel fails only that channel. A session that Telegram rejects stops the run; log in again.
 - **Serial fallback.** `--concurrency 1` collects one channel at a time with the same policy. Use it if you prefer the earlier one-by-one behavior, or when an account hits flood waits often.
 
-**Concurrency is not a Telegram quota.** More workers do not raise Telegram's limits for an account: the request gap applies to the whole run, and a flood wait pauses everything. The defaults are project limits, not a rate that Telegram guarantees to be safe. On simulated 1-second requests, 3 workers took about 40% of the serial time, and 10 workers were limited by the 0.25-second gap (see [docs/compatibility.md](docs/compatibility.md)). Real timings depend on Telegram.
+**Concurrency is not a Telegram quota.** More workers do not raise Telegram's limits for an account: the request gap is shared across all channels, and a flood wait pauses new policy attempts for all of them. The defaults are project limits, not a rate that Telegram guarantees to be safe. On simulated 1-second requests, 3 workers took about 40% of the serial time, and 10 workers were limited by the 0.25-second gap (see [docs/compatibility.md](docs/compatibility.md)). Real timings depend on Telegram.
 
-The summary prints the counts (given, after removing duplicates, succeeded, failed, duplicates, cancelled) and, per kind of request (`resolve`, `channel`, `history`, `enrichment`), the requests sent, retries, flood waits, and flood-wait seconds. `collection-status.json` records the same numbers.
+Login runs before this policy is created and follows the failure rules in [First login](#first-login). Telethon can also retry a server error once inside a policy attempt, so the interval and retry settings do not count every underlying Telegram request.
+
+The summary prints the counts (given, after removing duplicates, succeeded, failed, duplicates, cancelled) and, per kind of request (`resolve`, `channel`, `history`, `enrichment`), the policy attempts sent, retries, flood waits, and flood-wait seconds. `collection-status.json` records the same numbers.
 
 ## Output files
 
@@ -292,7 +294,7 @@ Each collection writes `collection-status.json` in the output folder. It records
 
 `build-dataset` also notes when the last collection used a history window or `--update`. Folders without a status file (from earlier versions) are accepted.
 
-**One collection per folder.** A run holds `.collection.lock` in the output folder and removes it when it ends. A second run into the same folder exits 1 before connecting, with `<folder> is in use by another collection (pid ..., started ...)`. The lock protects the folder, not the account: never run two collections with the same session, even into different folders.
+**One collection per folder.** A run acquires `.collection.lock` in the output folder after login and removes it when it ends. An existing lock is checked before connecting and causes exit 1 with `<folder> is in use by another collection (pid ..., started ...)`. If two runs pass that check before either acquires the lock, both can reach login; only one can hold the lock and write collection output at a time. The lock protects the folder, not the account: never run two collections with the same session, even into different folders.
 
 **Stale lock.** A lock left by a crashed or killed run is not removed automatically. To recover:
 
@@ -327,7 +329,7 @@ Without `--data-path` (or `-d`), both use `./output/data`. They read local files
 
 **`build-network`** reads `collected_chats.csv` (`username`, `counter`, `source`) and writes `Graph.gexf`, a directed, unweighted graph from each source channel to the chats found in its data (e.g., forwards), and `network.png`, a preview with Louvain communities. Both are replaced on every build. Open the GEXF file in tools such as [Gephi](https://gephi.org/).
 
-Both builders refuse a folder whose `collection-status.json` says `running` or `interrupted` (exit 1, with the recovery steps above). Missing or malformed input files stop the build with exit 1 before anything is written. With no messages, the dataset has a header only; with no edges, the graph is empty and the image blank.
+Both builders refuse a folder whose `collection-status.json` says `running` or `interrupted` (exit 1, with the recovery steps above). Missing or malformed input files stop the build with exit 1 before anything is written. With no messages and no existing `msgs_dataset.csv`, the dataset has a header only; an existing dataset keeps its earlier rows. With no edges, the graph is empty and the image blank.
 
 ## Running the tests
 
