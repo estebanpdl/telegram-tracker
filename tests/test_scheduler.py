@@ -278,6 +278,7 @@ class WriteHandleTests(SchedulerTestCase):
 			return 1.0
 
 		with mock.patch('storage.open', tracking_open, create=True), \
+				mock.patch('storage.aggregates.open', tracking_open, create=True), \
 				mock.patch('storage.files.open', tracking_open, create=True):
 			self.collect(3, latency=latency)
 		self.assertTrue(open_files)

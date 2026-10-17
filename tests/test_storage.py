@@ -34,6 +34,7 @@ import collector
 import datasets
 import network
 import storage
+import storage.aggregates
 import storage.files
 import storage.records
 
@@ -194,7 +195,7 @@ class ReducerTests(StorageTestCase):
 			('channel_request', [(101, 'alpha_fx'), (106, 'alpha_chat_fx')]),
 			('from_messages', [(101, 'alpha_fx')])
 		])
-		agg = storage.reduce_results([result], {101: outcome_101, 106: outcome_106})
+		agg = storage.aggregates.reduce_results([result], {101: outcome_101, 106: outcome_106})
 		self.assertEqual(agg.chat_ids, [101, 106, 106, 101])
 		self.assertEqual(agg.counter[101]['counter'], 2)
 		self.assertEqual(agg.counter[106]['counter'], 2)
