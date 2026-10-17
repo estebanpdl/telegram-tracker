@@ -21,13 +21,13 @@ import os
 import tempfile
 import unittest
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 from unittest import mock
 
 import offline_guard
 
 from api.auth import ensure_authorized
-from fakes import FakeTelegramClient, FixtureWorld, load_expected
+from fakes import FakeTelegramClient, load_expected
 
 import cli
 import collector.channel
