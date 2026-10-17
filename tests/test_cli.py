@@ -29,6 +29,7 @@ from builder_data import ROOT, TESTS, collected_data, run_script
 from fakes import FakeTelegramClient, load_expected
 
 import cli
+import cli.collect
 import cli.builders
 import cli.parsers
 import collector
@@ -48,7 +49,7 @@ class CliTestCase(offline_guard.OfflineTestCase):
 		self.tmp = tmp.name
 		self.out = os.path.join(self.tmp, 'data')
 		self.factory_calls = 0
-		virtual = mock.patch.object(cli, 'asyncio_run', virtual_time.run)
+		virtual = mock.patch.object(cli.collect, 'asyncio_run', virtual_time.run)
 		virtual.start()
 		self.addCleanup(virtual.stop)
 		self.client = FakeTelegramClient(page_size=EXPECTED['page_size'])

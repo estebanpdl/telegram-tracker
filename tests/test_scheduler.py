@@ -32,6 +32,7 @@ from fakes import FakeTelegramClient, FixtureWorld
 
 import api
 import cli
+import cli.collect
 import collector
 import storage
 
@@ -375,7 +376,7 @@ class CliRunTests(SchedulerTestCase):
 
 	def run_cli(self, argv, client):
 		stdout, stderr = io.StringIO(), io.StringIO()
-		with mock.patch.object(cli, 'asyncio_run', virtual_time.run), \
+		with mock.patch.object(cli.collect, 'asyncio_run', virtual_time.run), \
 				contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
 			try:
 				code = cli.main(argv, client_factory=lambda: client)
