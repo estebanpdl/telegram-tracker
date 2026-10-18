@@ -8,7 +8,7 @@ forms, normalization, and deduplication.
 import re
 
 # import local submodules
-from utils import cmd_request_type
+from telegram_tracker.utils import cmd_request_type
 
 
 # accepted target forms

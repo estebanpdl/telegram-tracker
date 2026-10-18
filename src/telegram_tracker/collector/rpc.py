@@ -11,9 +11,9 @@ It also holds the chats' enrichment outcomes.
 import asyncio
 
 # import local submodules
-from api import CHANNEL_ACCESS_ERRORS, full_channel_req, get_entity_attrs, get_posts
-from request_policy import RequestPolicy
-from storage.records import EnrichOutcome
+from telegram_tracker.api import CHANNEL_ACCESS_ERRORS, full_channel_req, get_entity_attrs, get_posts
+from telegram_tracker.request_policy import RequestPolicy
+from telegram_tracker.storage.records import EnrichOutcome
 
 
 # method classes of application RPCs

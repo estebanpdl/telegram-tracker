@@ -8,9 +8,9 @@ form reach the collect and builder handlers.
 import sys
 
 # import local submodules
-from cli.builders import run_builder
-from cli.collect import run_collect
-from cli.parsers import COLLECT, build_legacy_parser, build_parser, build_parsers, \
+from telegram_tracker.cli.builders import run_builder
+from telegram_tracker.cli.collect import run_collect
+from telegram_tracker.cli.parsers import COLLECT, build_legacy_parser, build_parser, build_parsers, \
 	is_legacy_collection
 
 

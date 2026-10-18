@@ -11,11 +11,11 @@ import os
 import sys
 
 # import local submodules
-from storage.aggregates import reduce_results, write_aggregates
-from storage.files import history_path, write_json
-from storage.records import LOCK_FILE, OutputLocked, StorageError
-from storage.status import utc_now
-from utils import create_dirs, discard
+from telegram_tracker.storage.aggregates import reduce_results, write_aggregates
+from telegram_tracker.storage.files import history_path, write_json
+from telegram_tracker.storage.records import LOCK_FILE, OutputLocked, StorageError
+from telegram_tracker.storage.status import utc_now
+from telegram_tracker.utils import create_dirs, discard
 
 
 '''

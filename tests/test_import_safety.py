@@ -20,17 +20,25 @@ import offline_guard
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TESTS = os.path.join(ROOT, 'tests')
+SRC = os.path.join(ROOT, 'src')
 
-COLLECTION_MODULES = ['utils', 'api', 'api.auth', 'collector', 'cli', 'main']
-BUILDER_MODULES = ['utils', 'cli', 'datasets', 'network']
-STORAGE_MODULES = [
+PACKAGE = 'telegram_tracker'
+
+
+def qualified(*names):
+	return [f'{PACKAGE}.{name}' for name in names]
+
+
+COLLECTION_MODULES = qualified('utils', 'api', 'api.auth', 'collector', 'cli') + ['main']
+BUILDER_MODULES = qualified('utils', 'cli', 'datasets', 'network')
+STORAGE_MODULES = qualified(
 	'storage', 'storage.records', 'storage.files', 'storage.aggregates',
 	'storage.status', 'storage.writer'
-]
+)
 
 PROBE = '''
 import asyncio, json, sys
-sys.path[:0] = [{tests!r}, {root!r}]
+sys.path[:0] = [{tests!r}, {src!r}, {root!r}]
 sys.argv = ['main.py', '--not-a-real-flag']
 import offline_guard
 report = {{'imported': [], 'error': None, 'loops': []}}
@@ -61,7 +69,7 @@ def import_in_fresh_process(modules):
 	directory; return (report, other_stdout_lines, stderr, cwd_listing).
 	'''
 	with tempfile.TemporaryDirectory() as cwd:
-		code = PROBE.format(tests=TESTS, root=ROOT, modules=list(modules))
+		code = PROBE.format(tests=TESTS, src=SRC, root=ROOT, modules=list(modules))
 		completed = subprocess.run(
 			[sys.executable, '-I', '-c', textwrap.dedent(code)],
 			cwd=cwd,
@@ -104,9 +112,10 @@ class ImportSafetyTests(offline_guard.OfflineTestCase):
 	def test_builders_load_no_telethon_or_heavy_libraries_at_import(self):
 		code = textwrap.dedent(f'''
 			import sys
-			sys.path[:0] = [{TESTS!r}, {ROOT!r}]
-			import datasets, network
-			print(sorted(m for m in ('telethon', 'api', 'collector', 'matplotlib', 'community', 'pandas', 'networkx') if m in sys.modules))
+			sys.path[:0] = [{TESTS!r}, {SRC!r}]
+			from telegram_tracker import datasets, network
+			watched = {['telethon', *qualified('api', 'collector'), 'matplotlib', 'community', 'pandas', 'networkx']!r}
+			print(sorted(m for m in watched if m in sys.modules))
 		''')
 		completed = subprocess.run(
 			[sys.executable, '-I', '-c', code],
@@ -127,9 +136,10 @@ class ImportSafetyTests(offline_guard.OfflineTestCase):
 		modules = ', '.join(STORAGE_MODULES)
 		code = textwrap.dedent(f'''
 			import sys
-			sys.path[:0] = [{TESTS!r}, {ROOT!r}]
+			sys.path[:0] = [{TESTS!r}, {SRC!r}]
 			import {modules}
-			print(sorted(m for m in ('telethon', 'api', 'collector', 'request_policy', 'asyncio', 'pandas') if m in sys.modules))
+			watched = {['telethon', *qualified('api', 'collector', 'request_policy'), 'asyncio', 'pandas']!r}
+			print(sorted(m for m in watched if m in sys.modules))
 		''')
 		completed = subprocess.run(
 			[sys.executable, '-I', '-c', code],
@@ -140,9 +150,10 @@ class ImportSafetyTests(offline_guard.OfflineTestCase):
 	def test_cli_modules_load_no_services_at_import(self):
 		code = textwrap.dedent(f'''
 			import sys
-			sys.path[:0] = [{TESTS!r}, {ROOT!r}]
-			import cli, cli.builders, cli.collect, cli.dispatch, cli.parsers, cli.targets, main
-			print(sorted(m for m in ('telethon', 'api', 'collector', 'storage', 'request_policy', 'datasets', 'network', 'pandas') if m in sys.modules))
+			sys.path[:0] = [{TESTS!r}, {SRC!r}, {ROOT!r}]
+			import {', '.join(qualified('cli', 'cli.builders', 'cli.collect', 'cli.dispatch', 'cli.parsers', 'cli.targets'))}, main
+			watched = {['telethon', *qualified('api', 'collector', 'storage', 'request_policy', 'datasets', 'network'), 'pandas']!r}
+			print(sorted(m for m in watched if m in sys.modules))
 		''')
 		completed = subprocess.run(
 			[sys.executable, '-I', '-c', code],
@@ -153,8 +164,8 @@ class ImportSafetyTests(offline_guard.OfflineTestCase):
 	def test_utils_no_longer_loads_telethon(self):
 		code = textwrap.dedent(f'''
 			import sys
-			sys.path[:0] = [{TESTS!r}, {ROOT!r}]
-			import utils
+			sys.path[:0] = [{TESTS!r}, {SRC!r}]
+			from telegram_tracker import utils
 			print('telethon' in sys.modules, hasattr(utils, 'loop'))
 		''')
 		completed = subprocess.run(

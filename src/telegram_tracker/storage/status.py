@@ -11,9 +11,9 @@ import os
 from datetime import datetime, timezone
 
 # import local submodules
-from storage.files import write_json_pretty
-from storage.records import INTERRUPTED, RUNNING, STATUS_FILE, STATUS_FORMAT
-from utils import DataInputError
+from telegram_tracker.storage.files import write_json_pretty
+from telegram_tracker.storage.records import INTERRUPTED, RUNNING, STATUS_FILE, STATUS_FORMAT
+from telegram_tracker.utils import DataInputError
 
 
 # names listed in builder notes before "and N more"

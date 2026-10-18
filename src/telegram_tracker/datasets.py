@@ -27,8 +27,8 @@ import sys
 from dataclasses import dataclass, field
 
 # import local submodules
-from storage import check_collection_status
-from utils import (
+from telegram_tracker.storage import check_collection_status
+from telegram_tracker.utils import (
 	DataInputError, chats_dataset_columns, clean_msg, discard, msg_attrs,
 	temp_path_for,
 	get_forward_attrs, get_reply_attrs, get_url_attrs, get_document_attrs,

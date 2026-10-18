@@ -11,13 +11,13 @@ import json
 import os
 
 # import local submodules
-from api import CHANNEL_ACCESS_ERRORS
-from collector.history import HistoryWindow, fetch_history
-from collector.outcomes import TargetUnavailable
-from collector.rpc import CHANNEL
-from storage.files import history_path, merge_histories, newest_id, read_history
-from storage.records import ChannelResult
-from utils import JSONEncoder
+from telegram_tracker.api import CHANNEL_ACCESS_ERRORS
+from telegram_tracker.collector.history import HistoryWindow, fetch_history
+from telegram_tracker.collector.outcomes import TargetUnavailable
+from telegram_tracker.collector.rpc import CHANNEL
+from telegram_tracker.storage.files import history_path, merge_histories, newest_id, read_history
+from telegram_tracker.storage.records import ChannelResult
+from telegram_tracker.utils import JSONEncoder
 
 
 def to_json_safe(data):

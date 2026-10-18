@@ -33,5 +33,5 @@ connections, or writes. The package exports only what the CLI uses.
 '''
 
 # import local submodules
-from collector.history import HistoryWindow
-from collector.run import run_collection
+from telegram_tracker.collector.history import HistoryWindow
+from telegram_tracker.collector.run import run_collection

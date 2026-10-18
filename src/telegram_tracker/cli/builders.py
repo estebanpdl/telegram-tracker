@@ -11,8 +11,8 @@ import time
 import warnings
 
 # import local submodules
-from cli.parsers import BUILD_DATASET, DEFAULT_OUTPUT, build_builder_parser
-from utils import DataInputError, data_folder_from
+from telegram_tracker.cli.parsers import BUILD_DATASET, DEFAULT_OUTPUT, build_builder_parser
+from telegram_tracker.utils import DataInputError, data_folder_from
 
 
 def run_builder(command, args):
@@ -26,7 +26,7 @@ def run_builder(command, args):
 		with warnings.catch_warnings():
 			warnings.simplefilter('ignore')
 			if command == BUILD_DATASET:
-				from datasets import build_dataset
+				from telegram_tracker.datasets import build_dataset
 
 				summary = build_dataset(data_path)
 				outcome = (
@@ -34,7 +34,7 @@ def run_builder(command, args):
 					f'and {summary.chats_xlsx}'
 				)
 			else:
-				from network import build_network
+				from telegram_tracker.network import build_network
 
 				summary = build_network(data_path)
 				outcome = (

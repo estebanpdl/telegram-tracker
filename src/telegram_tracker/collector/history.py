@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 # import local submodules
-from collector.outcomes import PaginationStalled
+from telegram_tracker.collector.outcomes import PaginationStalled
 
 
 @dataclass(frozen=True)

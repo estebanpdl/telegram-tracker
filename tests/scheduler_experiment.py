@@ -20,10 +20,10 @@ import tempfile
 
 from datetime import datetime, timedelta, timezone
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import offline_guard  # noqa: F401  (blocks network, config, and session access)
+import source_path  # noqa: F401  (imports telegram_tracker from src)
 import virtual_time
 
 from fakes import FakeTelegramClient, FixtureWorld, load_world_raw
@@ -100,9 +100,8 @@ def collect(concurrency, out, *, raw=None, latency=LATENCY, targets=None, client
 	Run one collection on the virtual-time loop. Returns (summary, client,
 	virtual seconds elapsed).
 	'''
-	from api.auth import ensure_authorized
-
-	import collector.run
+	from telegram_tracker import collector
+	from telegram_tracker.api.auth import ensure_authorized
 
 	client = client or FakeTelegramClient(
 		FixtureWorld(raw=raw or scheduler_world()), page_size=PAGE_SIZE, latency=latency

@@ -20,5 +20,5 @@ missing dependency, 2 argument errors, 130 interrupted.
 '''
 
 # import local submodules
-from cli.builders import builder_main
-from cli.dispatch import main
+from telegram_tracker.cli.builders import builder_main
+from telegram_tracker.cli.dispatch import main

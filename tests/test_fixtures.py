@@ -35,9 +35,9 @@ BUILDER_STAT_COLUMNS = (
 
 def static_list(function_name):
 	'''
-	Return the literal list returned by a function in utils/__init__.py.
+	Return the literal list returned by a function in telegram_tracker/utils/__init__.py.
 	'''
-	with open(os.path.join(ROOT, 'utils', '__init__.py'), encoding='utf-8') as fh:
+	with open(os.path.join(ROOT, 'src', 'telegram_tracker', 'utils', '__init__.py'), encoding='utf-8') as fh:
 		tree = ast.parse(fh.read())
 	for node in tree.body:
 		if isinstance(node, ast.FunctionDef) and node.name == function_name:

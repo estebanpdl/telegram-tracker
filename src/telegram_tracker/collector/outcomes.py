@@ -12,8 +12,8 @@ from dataclasses import dataclass, field
 # import local submodules
 from telethon import errors
 
-from request_policy import AccountStopped
-from storage.records import StorageError
+from telegram_tracker.request_policy import AccountStopped
+from telegram_tracker.storage.records import StorageError
 
 
 class PaginationStalled(Exception):

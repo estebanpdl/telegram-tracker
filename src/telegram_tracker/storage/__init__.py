@@ -35,5 +35,5 @@ only what the CLI and the builders use.
 '''
 
 # import local submodules
-from storage.records import OutputLocked, StorageError
-from storage.status import check_collection_status
+from telegram_tracker.storage.records import OutputLocked, StorageError
+from telegram_tracker.storage.status import check_collection_status

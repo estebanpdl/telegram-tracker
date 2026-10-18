@@ -16,14 +16,13 @@ import unittest
 from unittest import mock
 
 import offline_guard
+import source_path  # noqa: F401  (imports telegram_tracker from src)
 import virtual_time
 
-from api.auth import ensure_authorized
 from fakes import FIXTURE_CODE, FIXTURE_PHONE, FakeTelegramClient, ScriptedPrompt
 
-import cli
-import cli.collect
-import cli.parsers
+from telegram_tracker import cli
+from telegram_tracker.api.auth import ensure_authorized
 import main
 
 

@@ -13,10 +13,10 @@ import time
 import warnings
 
 # import local submodules
-from cli.builders import missing_dependency
-from cli.parsers import COLLECT, DEFAULT_OUTPUT
-from cli.targets import read_targets
-from utils import data_folder_from
+from telegram_tracker.cli.builders import missing_dependency
+from telegram_tracker.cli.parsers import COLLECT, DEFAULT_OUTPUT
+from telegram_tracker.cli.targets import read_targets
+from telegram_tracker.utils import data_folder_from
 
 
 SESSION_FILE = 'session_file'
@@ -119,9 +119,9 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 	}
 
 	try:
-		from api.auth import AuthenticationError, ensure_authorized
-		from collector import HistoryWindow, run_collection
-		from storage import OutputLocked, StorageError
+		from telegram_tracker.api.auth import AuthenticationError, ensure_authorized
+		from telegram_tracker.collector import HistoryWindow, run_collection
+		from telegram_tracker.storage import OutputLocked, StorageError
 	except ModuleNotFoundError as exc:
 		return missing_dependency(COLLECT, exc)
 
@@ -129,8 +129,8 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 
 	phone = None
 	if client_factory is None:
-		from api import create_client
-		from utils import get_config_attrs
+		from telegram_tracker.api import create_client
+		from telegram_tracker.utils import get_config_attrs
 
 		config_attrs = get_config_attrs()
 		phone = config_attrs['phone']

@@ -26,8 +26,8 @@ import sys
 from dataclasses import dataclass
 
 # import local submodules
-from storage import check_collection_status
-from utils import DataInputError, discard, normalize_values, temp_path_for
+from telegram_tracker.storage import check_collection_status
+from telegram_tracker.utils import DataInputError, discard, normalize_values, temp_path_for
 
 
 COLLECTED_CHATS = 'collected_chats.csv'

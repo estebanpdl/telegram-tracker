@@ -16,13 +16,14 @@ import tempfile
 import unittest
 
 import offline_guard
+import source_path  # noqa: F401  (imports telegram_tracker from src)
 
 from builder_data import collected_data, run_script
 from fakes import load_expected
 
-import datasets
+from telegram_tracker import datasets
 
-from utils import DataInputError, chats_dataset_columns, msgs_dataset_columns
+from telegram_tracker.utils import DataInputError, chats_dataset_columns, msgs_dataset_columns
 
 
 EXPECTED = load_expected('dataset.json')

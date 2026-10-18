@@ -11,10 +11,11 @@ import asyncio
 import unittest
 
 import offline_guard
+import source_path  # noqa: F401  (imports telegram_tracker from src)
 
 from telethon import errors
 
-from request_policy import AccountStopped, RequestFailed, RequestPolicy
+from telegram_tracker.request_policy import AccountStopped, RequestFailed, RequestPolicy
 
 
 def flood(seconds):

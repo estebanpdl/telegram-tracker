@@ -17,7 +17,7 @@ from telethon.tl.functions.photos import GetUserPhotosRequest
 from telethon.tl.functions.stats import GetBroadcastStatsRequest
 
 # import local submodules
-from api.auth import ensure_authorized
+from telegram_tracker.api.auth import ensure_authorized
 
 
 # Entity lookup errors that make a single target uncollectable

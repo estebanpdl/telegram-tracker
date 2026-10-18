@@ -15,19 +15,19 @@ import os
 import sys
 
 # import local submodules
-from collector.channel import collect_channel
-from collector.history import HistoryWindow
-from collector.outcomes import SESSION_ERRORS, CollectionSummary, \
+from telegram_tracker.collector.channel import collect_channel
+from telegram_tracker.collector.history import HistoryWindow
+from telegram_tracker.collector.outcomes import SESSION_ERRORS, CollectionSummary, \
 	DuplicateTarget, PaginationStalled, SessionRejected, TargetUnavailable, \
 	stop_reason_for
-from collector.rpc import MetadataCache, Requests
-from request_policy import AccountStopped, RequestFailed, RequestPolicy
-from storage.files import history_path
-from storage.records import COMPLETE, INTERRUPTED, PARTIAL, \
+from telegram_tracker.collector.rpc import MetadataCache, Requests
+from telegram_tracker.request_policy import AccountStopped, RequestFailed, RequestPolicy
+from telegram_tracker.storage.files import history_path
+from telegram_tracker.storage.records import COMPLETE, INTERRUPTED, PARTIAL, \
 	HistoryUnreadable, StorageError
-from storage.status import StatusFile
-from storage.writer import OutputLock, OutputWriter, check_unlocked
-from utils import create_dirs
+from telegram_tracker.storage.status import StatusFile
+from telegram_tracker.storage.writer import OutputLock, OutputWriter, check_unlocked
+from telegram_tracker.utils import create_dirs
 
 
 NOT_FOUND_REASON = 'not found or not accessible'

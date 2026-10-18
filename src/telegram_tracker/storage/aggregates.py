@@ -12,10 +12,10 @@ import os
 from dataclasses import dataclass, field
 
 # import local submodules
-from storage.files import append_lines, replace_file, write_text
-from storage.records import CHANNELS_NOT_FOUND, COUNTER_COLUMNS, \
+from telegram_tracker.storage.files import append_lines, replace_file, write_text
+from telegram_tracker.storage.records import CHANNELS_NOT_FOUND, COUNTER_COLUMNS, \
 	DATASET_STAT_COLUMNS, USERS_NOT_FOUND, StorageError
-from utils import chats_dataset_columns
+from telegram_tracker.utils import chats_dataset_columns
 
 
 '''

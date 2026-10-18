@@ -11,8 +11,8 @@ import json
 import os
 
 # import local submodules
-from storage.records import HistoryUnreadable, StorageError
-from utils import discard, temp_path_for
+from telegram_tracker.storage.records import HistoryUnreadable, StorageError
+from telegram_tracker.utils import discard, temp_path_for
 
 
 def to_json_text(data):
