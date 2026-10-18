@@ -7,6 +7,7 @@
 | Interpreter | Python 3.14.7 (conda-forge), conda env `telegram-tracker` |
 | Run tests | `conda run -n telegram-tracker python -m unittest discover -s tests -v` (from the repo root) |
 | Dependency check | `conda run -n telegram-tracker python -m pip check` |
+| Installed command | 2026-10-18: wheel built with build 1.6.1 and setuptools 84.0.0, installed with pip 26.2.1 into a fresh Python 3.14.7 virtual environment with the pinned requirements. From an empty directory, `tgtracker` and `python -m telegram_tracker` matched `python main.py` in help, argument errors, exit codes, and builder outputs. |
 
 Direct dependencies are pinned in `requirements.txt`:
 
@@ -30,8 +31,11 @@ or an account-specific safe request rate. The README contains option examples.
 
 ## CLI contract
 
-`python main.py <command>` (the `cli` package) is the canonical interface. Legacy forms
-reach the same handlers:
+`python main.py <command>` (the `telegram_tracker.cli` package) is the canonical
+interface. The installed `tgtracker` command and `python -m telegram_tracker` parse the
+same arguments and reach the same handlers; only the program name in help and errors
+differs. The repository scripts import the package from `src/` without installation.
+Legacy forms reach the same handlers:
 
 | Legacy invocation | Inputs | Outputs | Canonical form |
 |---|---|---|---|

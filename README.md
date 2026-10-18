@@ -79,6 +79,14 @@ Replace each `<...>` value, without the angle brackets. Keep these values privat
 
 **4. Run commands from the repository folder.** `config/config.ini` and the session file `session_file.session` are looked up in the current working directory. Output goes to `./output/data` unless you pass `--output`.
 
+**5. Optional: install the `tgtracker` command.** The scripts above work without installing the project. To also get a `tgtracker` command, install the project into the activated environment from the repository folder:
+
+```
+python -m pip install .
+```
+
+`tgtracker` (and `python -m telegram_tracker`) take the same arguments as `python main.py` and look up `config/config.ini`, `session_file.session`, and `./output/data` in the working directory in the same way, so run them from the folder that holds your `config/` and session file. The installed command is a copy of the code: after updating the repository, run `python -m pip install .` again.
+
 ## First login
 
 The first `collect` run logs in to Telegram and creates `session_file.session` in the working directory. Later runs reuse that session and skip every prompt. Both the canonical command (`python main.py collect ...`) and the earlier form (`python main.py --telegram-channel ...`) log in the same way.
@@ -103,7 +111,7 @@ Rules and failure cases:
 
 ## Commands
 
-`main.py` is the single entry point, with one subcommand per step:
+`main.py` is the entry point, with one subcommand per step:
 
 ```
 python main.py collect --telegram-channel NAME [options]
@@ -113,6 +121,8 @@ python main.py build-network [--data-path DIR]
 ```
 
 Run `python main.py --help` or `python main.py <command> --help` for the options. Help never needs credentials, a session, or the service libraries. `python main.py` without arguments prints the overview and exits 2.
+
+With the project installed (step 5 above), `tgtracker` and `python -m telegram_tracker` can replace `python main.py` in every example in this README, including the earlier collection form: arguments, outputs, and exit codes are the same. Only the program name shown in help and error messages differs.
 
 ### Earlier commands
 
@@ -340,4 +350,4 @@ python -m unittest discover -s tests
 python -m pip check
 ```
 
-`python -m pytest` runs the same tests when pytest is installed. [docs/compatibility.md](docs/compatibility.md) describes the tested environment, the CLI contract, and the offline test harness.
+The tests import the `telegram_tracker` package from `src/` in this checkout, so the project does not need to be installed to run them, and an installed copy is not used. `python -m pytest` runs the same tests when pytest is installed. [docs/compatibility.md](docs/compatibility.md) describes the tested environment, the CLI contract, and the offline test harness.
