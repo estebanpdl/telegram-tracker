@@ -17,13 +17,13 @@ import unittest
 from datetime import datetime, timezone
 
 import offline_guard
+import source_path  # noqa: F401  (imports telegram_tracker from src)
 
-from api.auth import ensure_authorized
 from fakes import FakeTelegramClient, load_expected
 
-import collector.run
-
-from collector.history import HistoryWindow
+from telegram_tracker import collector
+from telegram_tracker.api.auth import ensure_authorized
+from telegram_tracker.collector.history import HistoryWindow
 
 
 EXPECTED = load_expected('collection.json')

@@ -23,20 +23,13 @@ from datetime import datetime, timezone
 from unittest import mock
 
 import offline_guard
+import source_path  # noqa: F401  (imports telegram_tracker from src)
 import virtual_time
 
 from builder_data import ROOT, TESTS
 from fakes import FakeTelegramClient, load_expected
 
-import cli
-import cli.collect
-import cli.builders
-import cli.parsers
-import collector
-import collector.history
-import collector.outcomes
-import datasets
-import network
+from telegram_tracker import cli, collector, datasets, network
 
 
 EXPECTED = load_expected('collection.json')

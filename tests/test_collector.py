@@ -16,12 +16,14 @@ import tempfile
 import unittest
 
 import offline_guard
+import source_path  # noqa: F401  (imports telegram_tracker from src)
 
-from api.auth import AuthenticationError, ensure_authorized
 from fakes import FakeTelegramClient, FakeTL, load_expected
 
-import collector.run
-import storage.aggregates
+import telegram_tracker.storage.aggregates
+
+from telegram_tracker import collector
+from telegram_tracker.api.auth import AuthenticationError, ensure_authorized
 
 
 EXPECTED = load_expected('collection.json')
@@ -381,9 +383,9 @@ class ObservationTests(offline_guard.OfflineTestCase):
 
 	def test_observe_chat(self):
 		counter = {}
-		self.assertTrue(storage.aggregates.observe_chat(counter, 1, 'a_fx', 'src_fx', 'channel_request'))
-		self.assertFalse(storage.aggregates.observe_chat(counter, 1, 'a_fx', 'other_fx', 'from_messages'))
-		self.assertFalse(storage.aggregates.observe_chat(counter, 1, 'a_fx', 'other_fx', 'from_messages'))
+		self.assertTrue(telegram_tracker.storage.aggregates.observe_chat(counter, 1, 'a_fx', 'src_fx', 'channel_request'))
+		self.assertFalse(telegram_tracker.storage.aggregates.observe_chat(counter, 1, 'a_fx', 'other_fx', 'from_messages'))
+		self.assertFalse(telegram_tracker.storage.aggregates.observe_chat(counter, 1, 'a_fx', 'other_fx', 'from_messages'))
 		self.assertEqual(counter[1], {
 			'username': 'a_fx', 'counter': 3, 'from_messages': 2, 'channel_request': 1,
 			'channel_req_targeted_by': {'channels': ['self']},
@@ -392,8 +394,8 @@ class ObservationTests(offline_guard.OfflineTestCase):
 
 	def test_observe_linked_chat(self):
 		counter = {}
-		storage.aggregates.observe_linked_chat(counter, 2, 'b_fx', 'src_fx', 'parent_fx')
-		storage.aggregates.observe_linked_chat(counter, 2, 'b_fx', 'other_fx', 'second_fx')
+		telegram_tracker.storage.aggregates.observe_linked_chat(counter, 2, 'b_fx', 'src_fx', 'parent_fx')
+		telegram_tracker.storage.aggregates.observe_linked_chat(counter, 2, 'b_fx', 'other_fx', 'second_fx')
 		self.assertEqual(counter[2], {
 			'username': 'b_fx', 'counter': 2, 'from_messages': 0, 'channel_request': 2,
 			'channel_req_targeted_by': {'channels': ['parent_fx', 'second_fx']},

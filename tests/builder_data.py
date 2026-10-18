@@ -25,9 +25,8 @@ def _collect(targets, out):
 	'''
 	Run the sequential collector with the fake client into `out`.
 	'''
-	from api.auth import ensure_authorized
-
-	import collector.run
+	from telegram_tracker import collector
+	from telegram_tracker.api.auth import ensure_authorized
 
 	expected = load_expected('collection.json')
 	client = FakeTelegramClient(page_size=expected['page_size'])
@@ -85,9 +84,9 @@ try:
 	runpy.run_path({script!r}, run_name='__main__')
 except SystemExit as exc:
 	code = exc.code
-watched = ('telethon', 'api', 'collector', 'matplotlib')
-loaded = {{m.split('.')[0] for m in set(sys.modules) - before}}
-modules = [m for m in watched if m in loaded]
+watched = ('telethon', 'telegram_tracker.api', 'telegram_tracker.collector', 'matplotlib')
+loaded = set(sys.modules) - before
+modules = [w for w in watched if any(m == w or m.startswith(w + '.') for m in loaded)]
 print('REPORT ' + json.dumps({{'code': code, 'modules': modules, 'violations': offline_guard.VIOLATIONS}}))
 '''
 
@@ -96,9 +95,10 @@ def run_script(script, argv, cwd):
 	'''
 	Run a repository script as __main__ in a fresh interpreter with the
 	offline guard installed. Returns (report, stdout_without_report, stderr);
-	report holds the exit code, which of telethon/api/collector/matplotlib
-	gained modules after the guard was installed (the guard itself imports
-	telethon), and guard violations.
+	report holds the exit code, which of telethon, telegram_tracker.api,
+	telegram_tracker.collector, and matplotlib gained modules after the
+	guard was installed (the guard itself imports telethon), and guard
+	violations.
 	'''
 	import json
 	import subprocess

@@ -19,14 +19,15 @@ import warnings
 from unittest import mock
 
 import offline_guard
+import source_path  # noqa: F401  (imports telegram_tracker from src)
 
 from telethon import errors
 
-from api import auth
-from api.auth import AuthenticationError, ensure_authorized
 from fakes import FIXTURE_CODE, FIXTURE_PHONE, FakeTelegramClient, ScriptedPrompt
 
-import collector.run
+from telegram_tracker import collector
+from telegram_tracker.api import auth
+from telegram_tracker.api.auth import AuthenticationError, ensure_authorized
 
 
 PASSWORD = 'S3NTINEL-cloud-password'

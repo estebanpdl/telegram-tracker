@@ -15,13 +15,14 @@ import tempfile
 import unittest
 
 import offline_guard
+import source_path  # noqa: F401  (imports telegram_tracker from src)
 
 from builder_data import collected_data, network_fixture, run_script
 from fakes import load_expected
 
-import network
+from telegram_tracker import network
 
-from utils import EQUAL_DEGREE_NODE_SIZE, DataInputError, normalize_values
+from telegram_tracker.utils import EQUAL_DEGREE_NODE_SIZE, DataInputError, normalize_values
 
 
 EXPECTED = load_expected('network.json')

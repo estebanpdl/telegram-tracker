@@ -66,7 +66,13 @@ python -m pip check
 
 Any other Python 3.14 virtual environment works the same way: activate it, then run the two `python -m pip` commands. `pip check` should report `No broken requirements found.` Always install with `python -m pip` from the activated environment, so packages go into that environment.
 
-**3. Add your API credentials.** Once you have an API ID and API hash from my.telegram.org, fill in `config/config.ini`:
+**3. Log in once.** Get an API ID and API hash at my.telegram.org, then run:
+
+```
+python main.py auth login
+```
+
+It asks for the API ID, the API hash (not shown while you type), and your phone number, logs in to Telegram, and saves the three values so that you never type them again (see [Logging in and saved credentials](#logging-in-and-saved-credentials)). If you prefer, fill in `config/config.ini` instead, as earlier versions required:
 
 ```ini
 [Telegram API credentials]
@@ -77,13 +83,78 @@ phone = <your phone number, international format, e.g. +<country code><number>>
 
 Replace each `<...>` value, without the angle brackets. Keep these values private and do not commit them.
 
-**4. Run commands from the repository folder.** `config/config.ini` and the session file `session_file.session` are looked up in the current working directory. Output goes to `./output/data` unless you pass `--output`.
+**4. Where files go.** The saved credentials and the Telegram session live in the application home, `~/.telegram_tracker` (on Windows `%USERPROFILE%\.telegram_tracker`), so after logging in you can run commands from any folder. `config/config.ini` is read from the working directory when nothing is saved. Output goes to `./output/data` in the working directory unless you pass `--output`.
+
+**5. Optional: install the `tgtracker` command.** The scripts above work without installing the project. To also get a `tgtracker` command, install the project into the activated environment from the repository folder:
+
+```
+python -m pip install .
+```
+
+`tgtracker` (and `python -m telegram_tracker`) take the same arguments as `python main.py` and use the same application home, saved credentials, and session. `./config/config.ini` and `./output/data` are relative to the folder you run them from. The installed command is a copy of the code: after updating the repository, run `python -m pip install .` again.
+
+## Logging in and saved credentials
+
+### `auth login`
+
+`auth login` logs in to Telegram without collecting anything. It uses the session described under [Which session is used](#which-session-is-used) and the app credentials described under [Where the app credentials come from](#where-the-app-credentials-come-from), and asks for any that are missing. Before asking, it says where typed values will be saved. If the session is already logged in, Telegram asks for no code or password; the app credentials are still needed to connect.
+
+After a successful login:
+
+- Values you typed are saved to `credentials.json` in the application home. `--no-save` skips saving.
+- Values from the environment or an INI file are saved only if you answer `y` (default no). Without a terminal they are not saved; `--save` saves them without asking.
+- Different values already saved are replaced only if you agree, or with `--save`.
+- A failed or interrupted login saves nothing. If the login succeeds but saving fails, the command exits 1 and says so; the session stays logged in.
+
+While a complete set is saved, `auth login` asks for nothing. To change the saved values, run `auth clear-credentials` and then `auth login`, or run `auth login` with the new values in the environment or in `--config` and agree to replace the saved ones. The complete new set is saved.
+
+### Where the app credentials come from
+
+The first source that provides a value wins:
+
+| Order | Source | Notes |
+|---|---|---|
+| 1 | `TELEGRAM_TRACKER_API_ID`, `TELEGRAM_TRACKER_API_HASH`, `TELEGRAM_TRACKER_PHONE` | Each variable overrides one value. |
+| 2 | `--config PATH` | An INI file with the `[Telegram API credentials]` section. A missing file is an error. |
+| 3 | `credentials.json` in the application home | Saved by `auth login`. |
+| 4 | `./config/config.ini` in the working directory | The earlier setup. |
+| 5 | Prompts | `auth login` only. |
+
+Only one file source (2, 3, or 4) is used, as a whole: the first one present. A value missing from it is not taken from another file. Template values (`api_id = api_id`, `<your api_id>`, or empty) count as missing, so the placeholder `config/config.ini` in the repository never hides saved credentials. An invalid value (for example an `api_id` that is not a positive number) stops the command with exit 2; it never falls back to another source. There are no command-line options for the API ID, hash, or phone, and none for the login code or password.
+
+`collect` uses the same sources but never asks: with values missing it exits 2 and names the ways to provide them.
+
+### Which session is used
+
+The first match wins:
+
+1. `--session PATH` (`collect` and `auth`).
+2. `TELEGRAM_TRACKER_SESSION`.
+3. `session_file.session` in the application home, if it exists.
+4. `./session_file.session` in the working directory, if it exists. Earlier versions created the session there. The command prints a one-line notice when it uses it.
+5. Otherwise `session_file.session` in the application home, created by the first login.
+
+Nothing is moved or copied automatically. Once a session exists in the application home, it is used even when an older `./session_file.session` exists. A path without the `.session` suffix gets it, and links in the path are resolved, so every route to one session file shares its lock. The session file must not be inside the `--output` folder, and the `--output` folder must be outside the application home.
+
+### Checking, logging out, and removing saved credentials
+
+- `auth status` shows the application home, the selected session, the saved credentials file, and where each value comes from: source names only, never values. It works offline and creates nothing, so a present session file does not prove that it is still logged in. `auth status --check` connects to Telegram to find out (exit 0 logged in, 1 not); it never asks for a code and never creates a session. Telethon may update the session file while checking.
+- `auth logout` asks for confirmation (`--yes` skips it), then logs the session out on Telegram. That revokes it and deletes the session file. Saved credentials stay. A session that is not logged in, or no session at all, is left as it is.
+- `auth clear-credentials` asks for confirmation (`--yes` skips it), then deletes `credentials.json` only. It does not log the session out or touch environment variables, INI files, or collected data, and it removes a damaged file without reading it.
+
+### How saved credentials are protected
+
+`credentials.json` holds exactly `schema_version`, `api_id`, `api_hash`, and `phone`. It is plain text protected by file permissions, not encryption: the application home and its files are readable only by your account (mode 0700/0600 on Linux and macOS; on Windows an access list that grants only your account, with inheritance from the parent folder disabled). Administrators of the computer can still read them. A session created in the application home gets the same protection. The login code, the two-step verification password, and session keys are never saved.
+
+Saving writes a new file next to the old one and replaces it in one step, so a failure leaves the earlier file intact. If the application home cannot be created or protected, `auth login` and `collect` stop with exit 1 before connecting; set `TELEGRAM_TRACKER_HOME` to another absolute folder, or pass `--session`. A `credentials.json` that is damaged, of another version, or readable by other accounts stops every command that needs it with exit 2; remove it with `auth clear-credentials` and log in again.
+
+`TELEGRAM_TRACKER_HOME` replaces the application home for all of this (it must be an absolute path).
 
 ## First login
 
-The first `collect` run logs in to Telegram and creates `session_file.session` in the working directory. Later runs reuse that session and skip every prompt. Both the canonical command (`python main.py collect ...`) and the earlier form (`python main.py --telegram-channel ...`) log in the same way.
+The first login creates `session_file.session` in the application home. Later runs reuse that session and skip every prompt. `auth login`, the canonical `collect`, and the earlier form (`python main.py --telegram-channel ...`) log in the same way.
 
-1. Run any collection, for example `python main.py collect --telegram-channel example_channel`.
+1. Run `python main.py auth login`, or any collection, for example `python main.py collect --telegram-channel example_channel`.
 2. The tool prints `> Not Authorized! Sending code request...` and Telegram sends a login code to your Telegram app.
 3. At `Enter the code: `, type the code.
 4. If the account has two-step verification, the tool prints `> Two-step verification is enabled.` and asks `Enter your two-step verification password: `. The password is not shown while you type.
@@ -97,22 +168,25 @@ Rules and failure cases:
 - **Other refusals.** Exit 1 with the Telegram error name. Messages never include the phone number, code, or password.
 - **Interrupting.** Ctrl+C at a prompt exits 130. In every case the connection to Telegram is closed once before the program exits.
 - **Password handling.** The password is never a command-line option. The tool does not write it to a file or log, and keeps it only for the sign-in request. Never put it in `config.ini`, a script, or your shell history.
-- **A real terminal is required.** The prompts read from the terminal. If input is unavailable, the run exits 1 with `No login code was entered because input is unavailable; run collection from an interactive terminal.` The password prompt refuses to fall back to visible input. Activate the environment (`conda activate telegram-tracker`) and run `python main.py ...` directly. `conda run` does not attach the terminal's input by default, so do not use it for the first login.
+- **A real terminal is required.** The prompts read from the terminal. If input is unavailable, the run exits 1 with `No login code was entered because input is unavailable; run the command from an interactive terminal.` The password prompt refuses to fall back to visible input. Activate the environment (`conda activate telegram-tracker`) and run `python main.py ...` directly. `conda run` does not attach the terminal's input by default, so do not use it for the first login.
 
-**Protect the session file.** `session_file.session` gives full access to your Telegram account. Do not share, copy, or commit it (it is listed in `.gitignore`). Use one collection process at a time per session: never run two collections with the same session, even into different output folders.
+**Protect the session file.** `session_file.session` gives full access to your Telegram account. Do not share, copy, or commit it (it is listed in `.gitignore`). One command at a time uses a session: while `collect` or an `auth` command holds it, another one stops at once (exit 1) with `The session is in use by another process`, even from another output folder. If no other command is running, an interrupted one left `session_file.session.lock` behind; delete that file and run the command again.
 
 ## Commands
 
-`main.py` is the single entry point, with one subcommand per step:
+`main.py` is the entry point, with one subcommand per step:
 
 ```
 python main.py collect --telegram-channel NAME [options]
 python main.py collect --batch-file FILE [options]
 python main.py build-dataset [--data-path DIR]
 python main.py build-network [--data-path DIR]
+python main.py auth login | status | logout | clear-credentials
 ```
 
 Run `python main.py --help` or `python main.py <command> --help` for the options. Help never needs credentials, a session, or the service libraries. `python main.py` without arguments prints the overview and exits 2.
+
+With the project installed (step 5 above), `tgtracker` and `python -m telegram_tracker` can replace `python main.py` in every example in this README, including the earlier collection form: arguments, outputs, and exit codes are the same. Only the program name shown in help and error messages differs.
 
 ### Earlier commands
 
@@ -139,9 +213,9 @@ The same for every form:
 
 | Code | Meaning |
 |---|---|
-| `0` | Every requested target was collected, or the build succeeded. Empty channels and empty inputs count as success. |
-| `1` | A target failed, the login failed, the run stopped early (flood wait or rejected session), the output folder is locked, writing an output failed, the input data of a build is missing or malformed, or a library is missing. |
-| `2` | Invalid arguments, including an unreadable batch file or an unsupported line in it. Reported before any credentials are read. |
+| `0` | Every requested target was collected, the build succeeded, or the `auth` action completed (including "nothing to do"). Empty channels and empty inputs count as success. |
+| `1` | A target failed, the login failed, the run stopped early (flood wait or rejected session), the output folder or the session is in use, writing an output or the credentials failed, the application home cannot be created, an `auth` confirmation was declined, `auth status --check` found the session logged out, the input data of a build is missing or malformed, or a library is missing. |
+| `2` | Invalid arguments, including an unreadable batch file or an unsupported line in it, and missing or invalid app credentials (before any connection). |
 | `130` | Interrupted with Ctrl+C. |
 
 ## Collecting channels
@@ -333,11 +407,11 @@ Both builders refuse a folder whose `collection-status.json` says `running` or `
 
 ## Running the tests
 
-The test suite runs offline with synthetic fixtures. It never connects to Telegram, reads `config/config.ini`, or opens a session file. From the repository folder, in the project environment:
+The test suite runs offline with synthetic fixtures. It never connects to Telegram, reads `config/config.ini`, opens a session file, or touches your application home: every test process uses a temporary `TELEGRAM_TRACKER_HOME`. From the repository folder, in the project environment:
 
 ```
 python -m unittest discover -s tests
 python -m pip check
 ```
 
-`python -m pytest` runs the same tests when pytest is installed. [docs/compatibility.md](docs/compatibility.md) describes the tested environment, the CLI contract, and the offline test harness.
+The tests import the `telegram_tracker` package from `src/` in this checkout, so the project does not need to be installed to run them, and an installed copy is not used. `python -m pytest` runs the same tests when pytest is installed. [docs/compatibility.md](docs/compatibility.md) describes the tested environment, the CLI contract, and the offline test harness.
