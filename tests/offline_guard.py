@@ -6,7 +6,18 @@ Importing this module installs the guard once. It blocks, and records:
 	- outbound socket connections (sync and asyncio) and DNS lookups;
 	- construction of a real Telethon client and its auth/connect methods;
 	- any open of `config.ini` or Telethon `.session` files, through
-	  `open`, `io.open`, `os.open`, and `sqlite3.connect`.
+	  `open`, `io.open`, `os.open`, and `sqlite3.connect`;
+	- any access to the user's real application home
+	  (`~/.telegram_tracker`) or anything below it, also through relative,
+	  case, `..`, `file:` URI, and symlink/junction aliases: opens, stat
+	  and existence checks, listing, directory creation and removal,
+	  renames, permission changes, and SQLite connections.
+
+The real application home is captured from `~` when the guard is
+installed, before any test changes the environment. The guard then points
+TELEGRAM_TRACKER_HOME (inherited by subprocesses) at a temporary directory
+and TELEGRAM_TRACKER_SESSION at a session path inside it, so code under
+test never resolves the real home or a session in the working directory.
 
 Loopback connections made inside `socket.socketpair()` stay allowed: on
 Windows, asyncio builds its event-loop self-pipe that way.
@@ -20,14 +31,19 @@ import asyncio
 import asyncio.base_events
 import asyncio.proactor_events
 import asyncio.selector_events
+import atexit
 import builtins
 import contextlib
 import io
 import os
+import shutil
 import socket
 import sqlite3
+import tempfile
 import threading
 import unittest
+
+from urllib.parse import unquote
 
 from virtual_time import VirtualTimeLoop
 
@@ -43,9 +59,25 @@ VIOLATIONS = []
 _PROTECTED_NAMES = ('config.ini',)
 _PROTECTED_SUFFIXES = ('.session', '.session-journal')
 
+HOME_ENV = 'TELEGRAM_TRACKER_HOME'
+SESSION_ENV = 'TELEGRAM_TRACKER_SESSION'
+APP_DIR = '.telegram_tracker'
+
 _state = threading.local()
 _installed = False
 _guards = {}
+
+# originals used by the home check itself (never the wrapped versions)
+_abspath = os.path.abspath
+_normcase = os.path.normcase
+_lstat = os.lstat
+_readlink = os.readlink
+
+# link hops followed when resolving an alias
+_MAX_HOPS = 40
+
+# normalized identities of the real application home, set by install()
+_home_identities = ()
 
 
 def _violation(kind, detail):
@@ -73,17 +105,176 @@ def _is_protected(path):
 	return name in _PROTECTED_NAMES or name.endswith(_PROTECTED_SUFFIXES)
 
 
+def _identities(path):
+	'''
+	Normalized absolute forms of `path`: lexical, and with Windows short
+	names expanded (looked up in each parent directory). Links are not
+	followed, so `path` itself is never opened.
+	'''
+	lexical = _normcase(_abspath(path))
+	drive, rest = os.path.splitdrive(lexical)
+	expanded = drive + os.sep
+	for part in (p for p in rest.split(os.sep) if p):
+		expanded = _normcase(_long_name(os.path.join(expanded, part)))
+	return {lexical, expanded}
+
+
+def _long_name(path):
+	'''
+	Expand a Windows 8.3 short name in the last component of `path`. This
+	looks the name up in its parent directory; `path` itself is not opened.
+	'''
+	if os.name != 'nt' or '~' not in os.path.basename(path):
+		return path
+	import ctypes
+
+	buffer = ctypes.create_unicode_buffer(32768)
+	if ctypes.windll.kernel32.GetLongPathNameW(path, buffer, len(buffer)):
+		return buffer.value
+	return path
+
+
+def _is_link(info):
+	import stat
+
+	if stat.S_ISLNK(info.st_mode):
+		return True
+	tag = getattr(info, 'st_reparse_tag', 0)
+	return tag == getattr(stat, 'IO_REPARSE_TAG_MOUNT_POINT', 0xA0000003)
+
+
+def _inside_home(form):
+	return any(
+		form == home or form.startswith(home.rstrip(os.sep) + os.sep)
+		for home in _home_identities
+	)
+
+
+def _resolves_into_home(value, hops=0):
+	'''
+	Walk `value` one component at a time: check each prefix lexically
+	before touching it, expand short names, and follow symlinks/junctions
+	by reading the link itself. A prefix inside the home is never opened.
+	'''
+	path = _normcase(_abspath(value))
+	if _inside_home(path):
+		return True
+	if hops > _MAX_HOPS:
+		return False
+
+	drive, rest = os.path.splitdrive(path)
+	parts = [p for p in rest.split(os.sep) if p]
+	current = drive + os.sep
+	for index, part in enumerate(parts):
+		candidate = _normcase(_long_name(os.path.join(current, part)))
+		if _inside_home(candidate):
+			return True
+		try:
+			info = _lstat(candidate)
+		except (OSError, ValueError):
+			current = candidate
+			continue
+		if _is_link(info):
+			try:
+				target = _readlink(candidate)
+			except (OSError, ValueError):
+				return False
+			if target.startswith('\\\\?\\'):
+				target = target[4:]
+			resolved = os.path.join(current, target, *parts[index + 1:])
+			return _resolves_into_home(resolved, hops + 1)
+		current = candidate
+	return False
+
+
+def _path_text(path):
+	'''
+	`path` as text, or None for file descriptors and non-paths. A SQLite
+	`file:` URI becomes its file path.
+	'''
+	if isinstance(path, int):
+		return None
+	try:
+		value = os.fspath(path)
+	except TypeError:
+		return None
+	if isinstance(value, bytes):
+		value = os.fsdecode(value)
+	if value.startswith('file:'):
+		value = unquote(value[len('file:'):].split('?', 1)[0])
+		if value.startswith('///'):
+			value = value[2:]
+		if len(value) > 2 and value[0] == '/' and value[2] == ':':
+			value = value[1:]
+	return value or None
+
+
+def in_real_home(path):
+	'''
+	True when `path` is the real application home or below it, under any
+	alias the guard can resolve.
+	'''
+	if getattr(_state, 'checking_home', False):
+		return False
+	value = _path_text(path)
+	if value is None or value == ':memory:':
+		return False
+
+	_state.checking_home = True
+	try:
+		return _resolves_into_home(value)
+	finally:
+		_state.checking_home = False
+
+
+@contextlib.contextmanager
+def pretend_real_home(path):
+	'''
+	Treat `path` (a temporary directory) as the real application home inside
+	the block, so tests can exercise alias detection without the real one.
+	'''
+	global _home_identities
+	saved = _home_identities
+	_home_identities = tuple(_identities(path))
+	try:
+		yield
+	finally:
+		_home_identities = saved
+
+
+def _check_home(label, *paths):
+	for path in paths:
+		if in_real_home(path):
+			_violation('home', f'{label} inside the real application home')
+
+
 def _wrap_file_opener(real, label):
 	'''
-	Return an opener that refuses protected paths.
+	Return an opener that refuses protected paths and the real home.
 	'''
 	def guarded(file, *args, **kwargs):
 		if _is_protected(file):
 			_violation('file', f'{label} of protected file {os.path.basename(os.fspath(file))!r}')
+		_check_home(label, file)
 		return real(file, *args, **kwargs)
 
 	guarded.__wrapped__ = real
 	return guarded
+
+
+def _wrap_path_call(owner, name, path_args=1):
+	'''
+	Replace owner.name with a version that refuses the real home in its
+	first `path_args` positional arguments.
+	'''
+	real = getattr(owner, name)
+
+	def guarded(*args, **kwargs):
+		_check_home(f'{owner.__name__}.{name}', *args[:path_args])
+		return real(*args, **kwargs)
+
+	guarded.__wrapped__ = real
+	setattr(owner, name, guarded)
 
 
 def _blocked(label):
@@ -186,6 +377,37 @@ def _install_file_guards():
 	_guards['open'] = guarded_open
 
 
+def _install_home_guards():
+	'''
+	Capture the real application home, refuse filesystem calls on it, and
+	give this process (and its subprocesses) a temporary home and session.
+	'''
+	global _home_identities
+	real_home = os.path.join(os.path.expanduser('~'), APP_DIR)
+	_home_identities = tuple(_identities(real_home))
+
+	for name in (
+		'stat', 'lstat', 'listdir', 'scandir', 'mkdir', 'rmdir', 'remove',
+		'unlink', 'chmod', 'access', 'utime', 'readlink'
+	):
+		_wrap_path_call(os, name)
+	for name in ('rename', 'replace', 'link', 'symlink'):
+		_wrap_path_call(os, name, path_args=2)
+	for name in ('exists', 'lexists', 'isfile', 'isdir', 'islink', 'isjunction'):
+		if hasattr(os.path, name):
+			_wrap_path_call(os.path, name)
+	_guards['os.stat'] = os.stat
+
+	home = os.environ.get(HOME_ENV)
+	if not home or not os.path.isabs(home) or in_real_home(home):
+		home = tempfile.mkdtemp(prefix='tgtracker-home-')
+		atexit.register(shutil.rmtree, home, ignore_errors=True)
+		os.environ[HOME_ENV] = home
+	session = os.environ.get(SESSION_ENV)
+	if not session or in_real_home(session):
+		os.environ[SESSION_ENV] = os.path.join(home, 'session_file.session')
+
+
 def install():
 	'''
 	Install all guards once per process.
@@ -198,6 +420,7 @@ def install():
 	_install_asyncio_guards()
 	_install_telethon_guards()
 	_install_file_guards()
+	_install_home_guards()
 	_installed = True
 
 
@@ -214,6 +437,8 @@ def is_installed():
 			is _guards['asyncio.create_connection']
 		and TelegramClient.__init__ is _guards['telethon.init']
 		and builtins.open is _guards['open']
+		and os.stat is _guards['os.stat']
+		and bool(_home_identities)
 	)
 
 
