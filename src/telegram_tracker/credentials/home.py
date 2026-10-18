@@ -14,9 +14,11 @@ Session selection, first match wins:
 	4. ./session_file.session in the working directory, when it exists
 	   (earlier versions created it there), with a notice
 	5. <home>/session_file.session, created by the first login
-Relative paths resolve against the working directory and links are
-resolved, so one file always has one path (and one lease); a path without
-the `.session` suffix gets it, as Telethon would add it.
+Relative paths resolve against the working directory, and symlink and
+junction aliases resolve to one path (and one lease). Hard links are not
+identified as aliases. A path without the exact lowercase `.session`
+suffix gets it, as Telethon would add it. A link target whose resolved
+filename lacks that suffix is refused before a client is created.
 '''
 
 # import modules
@@ -62,16 +64,19 @@ def app_home(environ=None):
 def session_file(path, cwd=None):
 	'''
 	The session's canonical path: absolute, links and short names
-	resolved (so every alias of one file gets the same lease), with the
-	`.session` suffix.
+	resolved (so symlink and junction aliases get the same lease), with
+	the exact lowercase `.session` suffix that Telethon expects.
 	'''
 	path = os.fspath(path).strip()
 	if not path:
 		raise HomeError('the session path is empty')
 	path = os.path.join(cwd or os.getcwd(), path)
-	if not path.lower().endswith(SESSION_SUFFIX):
+	if not path.endswith(SESSION_SUFFIX):
 		path += SESSION_SUFFIX
-	return os.path.realpath(path)
+	canonical = os.path.realpath(path)
+	if not canonical.endswith(SESSION_SUFFIX):
+		raise HomeError('the resolved session filename must end with lowercase .session')
+	return canonical
 
 
 @dataclass(frozen=True)
@@ -102,11 +107,11 @@ def select_session(flag=None, environ=None, cwd=None, isfile=None):
 		return SessionChoice(session_file(value, cwd), SESSION_ENV)
 
 	home, _ = app_home(environ)
-	default = os.path.realpath(os.path.join(home, SESSION_NAME))
+	default = session_file(os.path.join(home, SESSION_NAME))
 	if isfile(default):
 		return SessionChoice(default, HOME, in_home=True)
 
-	legacy = os.path.realpath(os.path.join(cwd or os.getcwd(), SESSION_NAME))
+	legacy = session_file(os.path.join(cwd or os.getcwd(), SESSION_NAME))
 	if isfile(legacy):
 		return SessionChoice(
 			legacy,

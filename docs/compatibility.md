@@ -66,9 +66,12 @@ defaults without the `--session`/`--config` options.
   created (owner-only) only when a session or credentials are written there.
 - Session: `--session` > `TELEGRAM_TRACKER_SESSION` > existing home session > existing
   `./session_file.session` (with a notice) > home session created by the first login.
-  Paths are canonical (links resolved). No automatic move or copy. One `<session>.lock`
-  lease is taken before the client exists and released after its one disconnect. The
-  session must be outside `--output`, and `--output` outside the application home.
+  Paths resolve symlinks/junctions and use Telethon's exact lowercase `.session`
+  suffix; resolved filenames without that suffix are refused. Hard links are
+  not identified as aliases. No automatic move or copy.
+  One `<session>.lock` lease is taken before the client exists and released after
+  its one disconnect. The session must be outside `--output`; `--output` must
+  neither be inside the application home nor contain it.
 - App credentials: environment variables per value > `--config` INI > home
   `credentials.json` > `./config/config.ini` > `auth login` prompts. One file source,
   used whole; template placeholders count as missing; invalid values are errors.

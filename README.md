@@ -101,12 +101,12 @@ python -m pip install .
 
 After a successful login:
 
-- Values you typed are saved to `credentials.json` in the application home. `--no-save` skips saving.
+- When all three values were typed and nothing was saved before, they are saved to `credentials.json` in the application home. `--no-save` skips saving.
 - Values from the environment or an INI file are saved only if you answer `y` (default no). Without a terminal they are not saved; `--save` saves them without asking.
 - Different values already saved are replaced only if you agree, or with `--save`.
 - A failed or interrupted login saves nothing. If the login succeeds but saving fails, the command exits 1 and says so; the session stays logged in.
 
-While a complete set is saved, `auth login` asks for nothing. To change the saved values, run `auth clear-credentials` and then `auth login`, or run `auth login` with the new values in the environment or in `--config` and agree to replace the saved ones. The complete new set is saved.
+While a complete set is saved, `auth login` does not ask for app credentials. A login code or two-step verification password may still be needed if the selected session is not authorized. To change the saved values, run `auth clear-credentials` and then `auth login`, or run `auth login` with the new values in the environment or in `--config` and agree to replace the saved ones. The complete new set is saved.
 
 ### Where the app credentials come from
 
@@ -122,7 +122,7 @@ The first source that provides a value wins:
 
 Only one file source (2, 3, or 4) is used, as a whole: the first one present. A value missing from it is not taken from another file. Template values (`api_id = api_id`, `<your api_id>`, or empty) count as missing, so the placeholder `config/config.ini` in the repository never hides saved credentials. An invalid value (for example an `api_id` that is not a positive number) stops the command with exit 2; it never falls back to another source. There are no command-line options for the API ID, hash, or phone, and none for the login code or password.
 
-`collect` uses the same sources but never asks: with values missing it exits 2 and names the ways to provide them.
+`collect` uses the same sources but never asks for app credentials: with values missing it exits 2 and names the ways to provide them.
 
 ### Which session is used
 
@@ -134,7 +134,7 @@ The first match wins:
 4. `./session_file.session` in the working directory, if it exists. Earlier versions created the session there. The command prints a one-line notice when it uses it.
 5. Otherwise `session_file.session` in the application home, created by the first login.
 
-Nothing is moved or copied automatically. Once a session exists in the application home, it is used even when an older `./session_file.session` exists. A path without the `.session` suffix gets it, and links in the path are resolved, so every route to one session file shares its lock. The session file must not be inside the `--output` folder, and the `--output` folder must be outside the application home.
+Nothing is moved or copied automatically. Once a session exists in the application home, it is used even when an older `./session_file.session` exists. A path without the exact lowercase `.session` suffix gets it, matching Telethon. Symlinks and directory junctions in the path are resolved so those aliases share a lock; a resolved filename without that exact suffix is refused before connecting. Hard links are not identified as aliases. The session file must not be inside the `--output` folder. The `--output` folder must neither be inside the application home nor contain it.
 
 ### Checking, logging out, and removing saved credentials
 
@@ -144,9 +144,9 @@ Nothing is moved or copied automatically. Once a session exists in the applicati
 
 ### How saved credentials are protected
 
-`credentials.json` holds exactly `schema_version`, `api_id`, `api_hash`, and `phone`. It is plain text protected by file permissions, not encryption: the application home and its files are readable only by your account (mode 0700/0600 on Linux and macOS; on Windows an access list that grants only your account, with inheritance from the parent folder disabled). Administrators of the computer can still read them. A session created in the application home gets the same protection. The login code, the two-step verification password, and session keys are never saved.
+`credentials.json` holds exactly `schema_version`, `api_id`, `api_hash`, and `phone`. It is plain text protected by file permissions, not encryption: the application home and its files are readable only by your account (mode 0700/0600 on Linux and macOS; on Windows an access list that grants only your account, with inheritance from the parent folder disabled). Administrators of the computer can still read them. A session created in the application home gets the same protection. The login code and two-step verification password are never saved. The session's authorization key is stored in the session file, separate from `credentials.json`.
 
-Saving writes a new file next to the old one and replaces it in one step, so a failure leaves the earlier file intact. If the application home cannot be created or protected, `auth login` and `collect` stop with exit 1 before connecting; set `TELEGRAM_TRACKER_HOME` to another absolute folder, or pass `--session`. A `credentials.json` that is damaged, of another version, or readable by other accounts stops every command that needs it with exit 2; remove it with `auth clear-credentials` and log in again.
+Saving writes a protected new file next to the old one and replaces it in one step. Failures before replacement leave the earlier file intact; a failed protection check after replacement reports an error with the new file already in place. If the application home cannot be created or protected, `auth login` and `collect` stop with exit 1 before connecting; set `TELEGRAM_TRACKER_HOME` to another absolute folder, or pass `--session`. A `credentials.json` that is damaged, of another version, or readable by other accounts stops every command that needs it with exit 2; remove it with `auth clear-credentials` and log in again.
 
 `TELEGRAM_TRACKER_HOME` replaces the application home for all of this (it must be an absolute path).
 

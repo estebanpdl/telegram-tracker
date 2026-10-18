@@ -102,7 +102,14 @@ class StoreTests(TempHomeCase):
 				with self.assertRaises(store.StoreError) as ctx:
 					store.read_store(self.home)
 				self.assert_no_secrets(ctx.exception)
-		self.assertIn('schema version 2', str(self._error({'schema_version': 2, **VALID})))
+		self.assertIn('schema version', str(self._error({'schema_version': 2, **VALID})))
+
+	def test_schema_version_errors_never_echo_stored_values(self):
+		for version in (API_HASH, VALID, API_ID, True, 1.0):
+			with self.subTest(value_type=type(version).__name__):
+				error = self._error({'schema_version': version, **VALID})
+				self.assertIsInstance(error, store.StoreError)
+				self.assert_no_secrets(error)
 
 	def _error(self, data):
 		self.write_raw(data)
@@ -247,12 +254,43 @@ class SessionSelectionTests(offline_guard.OfflineTestCase):
 
 	def test_paths_are_absolute_with_one_session_suffix(self):
 		for given, expected in (
-				('a', 'a.session'), ('a.session', 'a.session'), ('A.SESSION', 'A.SESSION'),
+				('a', 'a.session'), ('a.session', 'a.session'), ('A.SESSION', 'A.SESSION.session'),
 				(os.path.join('sub', '..', 'b'), 'b.session')):
 			with self.subTest(given=given):
 				self.assertEqual(home.session_file(given, self.cwd), os.path.join(self.cwd, expected))
 		with self.assertRaises(home.HomeError):
 			home.session_file('  ', self.cwd)
+
+	def test_selected_path_matches_the_telethon_database_path(self):
+		from telethon.sessions import SQLiteSession
+
+		for name in ('a', 'a.session', 'a.SESSION', 'a.Session'):
+			with self.subTest(name=name):
+				selected = home.session_file(name, self.cwd)
+				with mock.patch('sqlite3.connect', side_effect=RuntimeError('synthetic open blocked')) as connect:
+					with self.assertRaisesRegex(RuntimeError, 'synthetic open blocked'):
+						SQLiteSession(selected)
+				self.assertEqual(connect.call_count, 1)
+				self.assertEqual(connect.call_args.args[0], selected)
+
+	def test_uppercase_suffix_uses_the_actual_database_lease(self):
+		self.assertEqual(
+			home.session_file('a.SESSION', self.cwd),
+			home.session_file('a.SESSION.session', self.cwd)
+		)
+
+	def test_link_targets_without_a_telethon_suffix_are_refused(self):
+		for target in ('actual.sqlite', 'actual.SESSION'):
+			with self.subTest(target=target):
+				with mock.patch.object(home.os.path, 'realpath', return_value=os.path.join(self.cwd, target)):
+					with self.assertRaises(home.HomeError):
+						home.session_file('alias.session', self.cwd)
+					with self.assertRaises(home.HomeError):
+						self.select(flag='alias.session')
+					with self.assertRaises(home.HomeError):
+						self.select(env={**self.env, home.SESSION_ENV: 'alias.session'})
+					with self.assertRaises(home.HomeError):
+						self.select(self.home_session)
 
 	def test_paths_through_links_are_canonical(self):
 		os.makedirs(self.home)

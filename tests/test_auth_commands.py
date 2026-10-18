@@ -27,6 +27,22 @@ from telegram_tracker.credentials.lease import Lease
 
 class LoginTests(CredentialCase):
 
+	def test_missing_telethon_returns_a_dependency_error(self):
+		self.save()
+		real_import = __import__
+
+		def without_telethon(name, *args, **kwargs):
+			if name == 'telegram_tracker.api.auth':
+				raise ModuleNotFoundError("No module named 'telethon'", name='telethon')
+			return real_import(name, *args, **kwargs)
+
+		with unittest.mock.patch('builtins.__import__', side_effect=without_telethon):
+			code, _, err = self.run_main(['auth', 'login', '--no-save'])
+		self.assertEqual(code, 1)
+		self.assertIn("missing dependency 'telethon'", err)
+		self.assertEqual(self.created, [])
+		self.assert_no_secrets()
+
 	def type_credentials(self):
 		self.text_prompt.answers += [str(API_ID), PHONE]
 		self.secret_prompt.answers += [API_HASH]
