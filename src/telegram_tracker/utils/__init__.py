@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 '''
-Pure helpers shared by the collector and the offline builders: config
-loading, JSON encoding, directories, message/chat transforms, dataset
-columns, and graph sizing. Importing this module has no side effects and
-does not load Telethon; network enrichment lives in collector/rpc.py.
+Pure helpers shared by the collector and the offline builders: JSON
+encoding, directories, message/chat transforms, dataset columns, and graph
+sizing. Importing this module has no side effects and does not load
+Telethon; network enrichment lives in collector/rpc.py, and credentials in
+telegram_tracker.credentials.
 '''
 
 # Import modules (pandas loads lazily, in the date helpers)
@@ -11,7 +12,6 @@ import json
 import os
 
 # import submodules
-from configparser import ConfigParser
 from urllib.parse import urlparse
 from datetime import datetime
 
@@ -50,25 +50,6 @@ def discard(path):
 		os.remove(path)
 	except FileNotFoundError:
 		pass
-
-
-'''
-Creating functions
-'''
-
-# Get config attrs
-def get_config_attrs():
-	'''
-	'''
-	path = './config/config.ini'
-	
-	# config parser
-	config = ConfigParser()
-	config.read(path)
-
-	# Telegram API credentials
-	attrs = config['Telegram API credentials']
-	return dict(attrs)
 
 
 '''

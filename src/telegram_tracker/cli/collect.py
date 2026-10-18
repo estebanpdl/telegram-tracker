@@ -3,6 +3,9 @@
 `collect`: validation of the history window, --update, and request
 controls, then one collection run and its summary. Telethon, the
 collector, and credentials are loaded only after the arguments are valid.
+The session and app credentials are resolved as for `auth` (see
+telegram_tracker.credentials), and the session lease is held from before
+the client exists until the run ends.
 '''
 
 # import modules
@@ -16,10 +19,12 @@ import warnings
 from telegram_tracker.cli.builders import missing_dependency
 from telegram_tracker.cli.parsers import COLLECT, DEFAULT_OUTPUT
 from telegram_tracker.cli.targets import read_targets
+from telegram_tracker.credentials import home as homes
+from telegram_tracker.credentials import sources
+from telegram_tracker.credentials.lease import Lease, LeaseError
+from telegram_tracker.credentials.store import StoreError, prepare_home
 from telegram_tracker.utils import data_folder_from
 
-
-SESSION_FILE = 'session_file'
 
 # names listed by the existing-history warning before "and N more"
 WARN_LIST_LIMIT = 10
@@ -127,19 +132,41 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 
 	window = HistoryWindow(**bounds)
 
-	phone = None
-	if client_factory is None:
-		from telegram_tracker.api import create_client
-		from telegram_tracker.utils import get_config_attrs
+	try:
+		home, _ = homes.app_home()
+		session = homes.select_session(args.get('session'))
+		if homes.is_within(session.path, output_folder):
+			parser.error('the session file must not be inside the --output folder')
+		phone = None
+		if client_factory is None:
+			from telegram_tracker.api import create_client
 
-		config_attrs = get_config_attrs()
-		phone = config_attrs['phone']
-		client_factory = functools.partial(
-			create_client,
-			SESSION_FILE,
-			config_attrs['api_id'],
-			config_attrs['api_hash']
-		)
+			resolution = sources.resolve(config=args.get('config'), home=home)
+			if resolution.missing:
+				return missing_credentials(resolution)
+			phone = resolution.values['phone']
+			client_factory = functools.partial(
+				create_client,
+				session.path,
+				resolution.values['api_id'],
+				resolution.values['api_hash']
+			)
+	except (homes.HomeError, sources.CredentialError) as exc:
+		print(f'> {exc}', file=sys.stderr)
+		return 2
+
+	if session.notice:
+		print(session.notice, file=sys.stderr)
+	if session.in_home and not os.path.isfile(session.path):
+		try:
+			prepare_home(home)
+		except StoreError as exc:
+			print(
+				f'> Cannot create the session in {home}: {exc}. Set '
+				'TELEGRAM_TRACKER_HOME or pass --session.',
+				file=sys.stderr
+			)
+			return 1
 
 	if authorize is None:
 		authorize = functools.partial(ensure_authorized, phone=phone)
@@ -160,7 +187,7 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 	print('')
 
 	try:
-		with warnings.catch_warnings():
+		with warnings.catch_warnings(), Lease(session.path, 'The session'):
 			warnings.simplefilter('ignore')
 			summary = asyncio_run(
 				run_collection(
@@ -177,7 +204,7 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 	except AuthenticationError as exc:
 		print(f'> Login failed: {exc}', file=sys.stderr)
 		return 1
-	except (OutputLocked, StorageError) as exc:
+	except (OutputLocked, StorageError, LeaseError) as exc:
 		print(f'> {exc}', file=sys.stderr)
 		return 1
 	except KeyboardInterrupt:
@@ -221,6 +248,25 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 		return 1
 
 	return 0
+
+
+def missing_credentials(resolution):
+	'''
+	Explain which app credentials are missing and how to provide them
+	(stderr, exit 2). Names sources only, never values.
+	'''
+	found = [label for label in resolution.labels() if not label.endswith(': missing')]
+	print(
+		f'> Missing app credentials: {", ".join(resolution.missing)}'
+		+ (f' (found {"; ".join(found)})' if found else '')
+		+ '. Run `auth login` to enter and save them, set '
+		+ ', '.join(sources.ENV_VARS.values())
+		+ ', or fill in config/config.ini.',
+		file=sys.stderr
+	)
+	for note in resolution.notes:
+		print(f'> Note: {note}', file=sys.stderr)
+	return 2
 
 
 def list_names(names):

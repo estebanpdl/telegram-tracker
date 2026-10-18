@@ -356,6 +356,13 @@ def add_collect_arguments(parser, prog=SCRIPT_PROG):
 			'error, 0-10 (default: 3).'
 	)
 
+	login = parser.add_argument_group(
+		'session and credentials',
+		f'Which Telegram session and app credentials to use; '
+		f'`{invocation(prog)} auth status` shows the current choice.'
+	)
+	add_session_arguments(login)
+
 
 def add_builder_arguments(parser):
 	parser.add_argument(

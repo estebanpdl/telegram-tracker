@@ -103,9 +103,9 @@ def neutral(text, prog):
 	Output text with the program name and start/end times replaced and
 	whitespace collapsed (a longer name wraps lines differently).
 	'''
+	text = ' '.join(text.split())
 	text = text.replace(parsers.invocation(prog), '<prog>').replace(prog, '<prog>')
-	text = TIMES.sub(r'\1 program at <time>', text)
-	return ' '.join(text.split())
+	return TIMES.sub(r'\1 program at <time>', text)
 
 
 def run_entry(argv, cwd, *, script=None):
