@@ -1,8 +1,11 @@
 # -*- coding: utf-8 -*-
 '''
-Argument types and parsers: `main.py <command>`, the legacy collection
-form, and the legacy builder scripts. Building or using a parser reads no
-credentials and imports no services.
+Argument types and parsers: `<prog> <command>`, the legacy collection
+form, and the legacy builder scripts. `prog` is how the program was
+started (`main.py`, the `tgtracker` command, or `python -m
+telegram_tracker`); it only changes the program name shown in help and
+errors. Building or using a parser reads no credentials and imports no
+services.
 '''
 
 # import modules
@@ -14,19 +17,35 @@ from datetime import datetime, timezone
 
 DEFAULT_OUTPUT = './output/data'
 
+SCRIPT_PROG = 'main.py'
+COMMAND_PROG = 'tgtracker'
+MODULE_PROG = 'python -m telegram_tracker'
+
 COLLECT = 'collect'
 BUILD_DATASET = 'build-dataset'
 BUILD_NETWORK = 'build-network'
 
-LEGACY_FORMS = '''\
-legacy forms (still supported):
-  python main.py --telegram-channel NAME [--limit-download-to-channel-metadata]
-                 [--output DIR] [--min-id N]
-  python main.py --batch-file FILE [same options]
-  python build-datasets.py [--data-path DIR]
-  python channels-to-network.py [--data-path DIR]
 
-Run `python main.py <command> --help` for a command's options.'''
+def invocation(prog):
+	'''
+	What a user types to run `prog`: scripts run through `python`.
+	'''
+	return f'python {prog}' if prog.endswith('.py') else prog
+
+
+def legacy_forms(prog):
+	run = invocation(prog)
+	indent = ' ' * (len(run) + 3)
+	return (
+		'legacy forms (still supported):\n'
+		f'  {run} --telegram-channel NAME [--limit-download-to-channel-metadata]\n'
+		f'{indent}[--output DIR] [--min-id N]\n'
+		f'  {run} --batch-file FILE [same options]\n'
+		'  python build-datasets.py [--data-path DIR]\n'
+		'  python channels-to-network.py [--data-path DIR]\n'
+		'\n'
+		f'Run `{run} <command> --help` for a command\'s options.'
+	)
 
 
 '''
@@ -138,7 +157,7 @@ def add_min_id_argument(group):
 	)
 
 
-def add_collect_arguments(parser):
+def add_collect_arguments(parser, prog=SCRIPT_PROG):
 	'''
 	`collect`: the legacy arguments plus history window and request
 	controls.
@@ -201,7 +220,7 @@ def add_collect_arguments(parser):
 		'request controls',
 		'Shared by every Telegram request of the run, including metadata '
 		'lookups. These are project limits, not a safe rate guaranteed by '
-		'Telegram. The earlier `python main.py --batch-file ...` form uses the '
+		f'Telegram. The earlier `{invocation(prog)} --batch-file ...` form uses the '
 		'defaults.'
 	)
 	controls.add_argument(
@@ -248,22 +267,22 @@ def add_builder_arguments(parser):
 	)
 
 
-def build_parser():
+def build_parser(prog=SCRIPT_PROG):
 	'''
-	The canonical parser: `main.py <command> ...`.
+	The canonical parser: `<prog> <command> ...`.
 	'''
-	return build_parsers()[0]
+	return build_parsers(prog)[0]
 
 
-def build_parsers():
+def build_parsers(prog=SCRIPT_PROG):
 	'''
 	The canonical parser and its subcommand parsers by name.
 	'''
 	parser = argparse.ArgumentParser(
-		prog='main.py',
+		prog=prog,
 		description='Collect Telegram channel data, then build a messages '
 			'dataset and a channel network from it.',
-		epilog=LEGACY_FORMS,
+		epilog=legacy_forms(prog),
 		formatter_class=argparse.RawDescriptionHelpFormatter
 	)
 	commands = parser.add_subparsers(dest='command', metavar='<command>', required=True)
@@ -289,20 +308,21 @@ def build_parsers():
 		description='Build Graph.gexf and network.png from collected_chats.csv. Offline.'
 	)
 
-	add_collect_arguments(subparsers[COLLECT])
+	add_collect_arguments(subparsers[COLLECT], prog)
 	add_builder_arguments(subparsers[BUILD_DATASET])
 	add_builder_arguments(subparsers[BUILD_NETWORK])
 	return parser, subparsers
 
 
-def build_legacy_parser():
+def build_legacy_parser(prog=SCRIPT_PROG):
 	'''
-	`main.py --telegram-channel ... | --batch-file ...`: the legacy
+	`<prog> --telegram-channel ... | --batch-file ...`: the legacy
 	collection arguments only.
 	'''
+	run = invocation(prog)
 	parser = argparse.ArgumentParser(
-		prog='main.py',
-		description='Arguments. (Legacy form of `python main.py collect`.)'
+		prog=prog,
+		description=f'Arguments. (Legacy form of `{run} collect`.)'
 	)
 	add_target_arguments(parser)
 	window = parser.add_argument_group(
@@ -310,7 +330,7 @@ def build_legacy_parser():
 		'Select which messages to collect. A run with --min-id replaces each '
 		'channel\'s saved messages with the selection, so write it to a fresh '
 		'--output to keep earlier histories. The other history window options '
-		'and --update need `python main.py collect`.'
+		f'and --update need `{run} collect`.'
 	)
 	add_min_id_argument(window)
 	return parser

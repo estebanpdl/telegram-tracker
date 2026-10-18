@@ -2,12 +2,14 @@
 '''
 Command-line interface for Telegram Tracker.
 
-	python main.py collect --telegram-channel NAME [options]
-	python main.py collect --batch-file FILE [options]
-	python main.py build-dataset [--data-path DIR]
-	python main.py build-network [--data-path DIR]
+	tgtracker collect --telegram-channel NAME [options]
+	tgtracker collect --batch-file FILE [options]
+	tgtracker build-dataset [--data-path DIR]
+	tgtracker build-network [--data-path DIR]
 
-Legacy forms keep working and reach the same handlers:
+`python -m telegram_tracker` and, from a source checkout, `python main.py`
+take the same arguments. Legacy forms keep working and reach the same
+handlers:
 
 	python main.py --telegram-channel NAME | --batch-file FILE [...]
 	python build-datasets.py [--data-path DIR]
@@ -21,4 +23,4 @@ missing dependency, 2 argument errors, 130 interrupted.
 
 # import local submodules
 from telegram_tracker.cli.builders import builder_main
-from telegram_tracker.cli.dispatch import main
+from telegram_tracker.cli.dispatch import command_main, main
