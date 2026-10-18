@@ -17,7 +17,13 @@ from datetime import datetime, timezone
 LEASE_SUFFIX = '.lock'
 
 
-class LeaseHeld(Exception):
+class LeaseError(Exception):
+	'''
+	The lease could not be taken.
+	'''
+
+
+class LeaseHeld(LeaseError):
 	'''
 	Another process holds the lease, or a crashed one left it behind.
 	'''
@@ -59,6 +65,11 @@ class Lease:
 				+ (f' ({detail})' if detail else '')
 				+ f'. If none is running, an earlier run was interrupted: delete '
 				f'{self.path} and try again.'
+			) from None
+		except OSError as exc:
+			raise LeaseError(
+				f'cannot lock {self.what.lower()} ({self.path}: '
+				f'{exc.strerror or type(exc).__name__})'
 			) from None
 		with os.fdopen(fd, 'w', encoding='utf-8') as writer:
 			json.dump({

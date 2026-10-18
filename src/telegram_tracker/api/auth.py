@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 '''
-Interactive login for the collector.
+Interactive login, shared by `collect` and `auth login`.
 
 An authorized session skips every prompt. Otherwise the client requests a
 login code, prompts for it, and signs in. When the account has two-step
@@ -56,7 +56,7 @@ def prompt_password(prompt):
 		except getpass.GetPassWarning:
 			raise AuthenticationError(
 				'Cannot read the two-step verification password without echo; '
-				'run collection from an interactive terminal.'
+				'run the command from an interactive terminal.'
 			) from None
 
 
@@ -90,7 +90,7 @@ def _ask(prompt_func, prompt, what):
 		except EOFError:
 			raise AuthenticationError(
 				f'No {what} was entered because input is unavailable; '
-				'run collection from an interactive terminal.'
+				'run the command from an interactive terminal.'
 			) from None
 
 
@@ -114,7 +114,7 @@ async def _sign_in_with_code(client, phone, code_prompt):
 			print(f'> Invalid code ({attempt}/{MAX_ATTEMPTS}).')
 		except errors.PhoneCodeExpiredError:
 			raise AuthenticationError(
-				'The login code expired; run collection again to request a new code.'
+				'The login code expired; run the command again to request a new code.'
 			) from None
 
 	raise AuthenticationError(f'The login code was not accepted after {MAX_ATTEMPTS} attempts.')

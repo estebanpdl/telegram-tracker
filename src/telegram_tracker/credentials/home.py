@@ -85,12 +85,13 @@ class SessionChoice:
 	notice: str = None
 
 
-def select_session(flag=None, environ=None, cwd=None, isfile=os.path.isfile):
+def select_session(flag=None, environ=None, cwd=None, isfile=None):
 	'''
 	The session a command uses (see the module docstring). `isfile`
 	replaces the existence check (tests).
 	'''
 	environ = os.environ if environ is None else environ
+	isfile = isfile or os.path.isfile
 	if flag is not None:
 		return SessionChoice(session_file(flag, cwd), FLAG)
 	value = environ.get(SESSION_ENV)

@@ -24,6 +24,13 @@ MODULE_PROG = 'python -m telegram_tracker'
 COLLECT = 'collect'
 BUILD_DATASET = 'build-dataset'
 BUILD_NETWORK = 'build-network'
+AUTH = 'auth'
+
+# auth actions
+LOGIN = 'login'
+STATUS = 'status'
+LOGOUT = 'logout'
+CLEAR_CREDENTIALS = 'clear-credentials'
 
 
 def invocation(prog):
@@ -142,6 +149,99 @@ def add_target_arguments(parser):
 		required=False,
 		help=f'Folder to save collected data. Default: `{DEFAULT_OUTPUT}`'
 	)
+
+
+def add_session_arguments(group):
+	'''
+	--session and --config, shared by `collect` and `auth`.
+	'''
+	group.add_argument(
+		'--session',
+		metavar='PATH',
+		help='Telegram session file. Default: TELEGRAM_TRACKER_SESSION if set, '
+			'else session_file.session in the application home '
+			'(~/.telegram_tracker, or TELEGRAM_TRACKER_HOME); an existing '
+			'./session_file.session is used while the home has none.'
+	)
+	group.add_argument(
+		'--config',
+		metavar='PATH',
+		help='INI file with a [Telegram API credentials] section, used instead of '
+			'the saved credentials and ./config/config.ini. '
+			'TELEGRAM_TRACKER_API_ID, TELEGRAM_TRACKER_API_HASH, and '
+			'TELEGRAM_TRACKER_PHONE override single values.'
+	)
+
+
+def add_auth_parsers(commands):
+	'''
+	`auth <action>`. Returns the auth parser and its action parsers by
+	name.
+	'''
+	auth = commands.add_parser(
+		AUTH,
+		help='Log in to Telegram, check or revoke the session, and manage saved credentials.',
+		description='Log in to Telegram, check or revoke the session, and manage '
+			'the app credentials saved in the application home.'
+	)
+	actions = auth.add_subparsers(dest='auth_command', metavar='<action>', required=True)
+
+	login = actions.add_parser(
+		LOGIN,
+		help='Log in and save the app credentials.',
+		description='Log in to Telegram with the selected session. Missing app '
+			'credentials (api_id, api_hash, phone) are asked for; after a '
+			'successful login, values you typed are saved to credentials.json '
+			'in the application home (plaintext, readable only by your account). '
+			'Values from the environment or an INI file are saved only if you '
+			'agree. An authorized session asks for nothing.'
+	)
+	add_session_arguments(login)
+	save = login.add_mutually_exclusive_group()
+	save.add_argument(
+		'--save',
+		action='store_true',
+		help='Save the credentials used without asking, replacing saved ones.'
+	)
+	save.add_argument(
+		'--no-save',
+		action='store_true',
+		help='Do not save credentials.'
+	)
+
+	status = actions.add_parser(
+		STATUS,
+		help='Show which session and credential sources are used.',
+		description='Show the application home, the selected session, and where '
+			'each app credential comes from. Values are never shown. Offline: a '
+			'session file does not prove that it is logged in.'
+	)
+	add_session_arguments(status)
+	status.add_argument(
+		'--check',
+		action='store_true',
+		help='Connect to Telegram to check that the session is logged in. Never '
+			'asks for a code; Telethon may update the session file.'
+	)
+
+	logout = actions.add_parser(
+		LOGOUT,
+		help='Revoke the session on Telegram.',
+		description='Log the selected session out on Telegram, which revokes it '
+			'and deletes the session file. Saved credentials stay.'
+	)
+	add_session_arguments(logout)
+	logout.add_argument('--yes', action='store_true', help='Do not ask for confirmation.')
+
+	clear = actions.add_parser(
+		CLEAR_CREDENTIALS,
+		help='Delete the saved credentials.',
+		description='Delete credentials.json from the application home. The '
+			'session, environment variables, and INI files are not touched.'
+	)
+	clear.add_argument('--yes', action='store_true', help='Do not ask for confirmation.')
+
+	return auth, {LOGIN: login, STATUS: status, LOGOUT: logout, CLEAR_CREDENTIALS: clear}
 
 
 def add_min_id_argument(group):
@@ -307,6 +407,9 @@ def build_parsers(prog=SCRIPT_PROG):
 		help='Build Graph.gexf and network.png from collected_chats.csv.',
 		description='Build Graph.gexf and network.png from collected_chats.csv. Offline.'
 	)
+
+	subparsers[AUTH], actions = add_auth_parsers(commands)
+	subparsers.update({f'{AUTH} {name}': action for name, action in actions.items()})
 
 	add_collect_arguments(subparsers[COLLECT], prog)
 	add_builder_arguments(subparsers[BUILD_DATASET])

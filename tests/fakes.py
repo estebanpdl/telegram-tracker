@@ -333,6 +333,20 @@ class FakeTelegramClient:
 		await self._apply_script('is_user_authorized')
 		return self.authorized
 
+	async def log_out(self):
+		'''
+		Like Telethon: revoke the authorization, disconnect, and return
+		True; a script result of False (via an async callable) reports
+		an unconfirmed logout and leaves the client connected.
+		'''
+		self._record('log_out')
+		result = await self._apply_script('log_out')
+		if result is False:
+			return False
+		self.authorized = False
+		await self.disconnect()
+		return True
+
 	async def send_code_request(self, phone, *, force_sms=False):
 		self._record(
 			'send_code_request',

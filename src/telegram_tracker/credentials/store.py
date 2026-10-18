@@ -22,7 +22,7 @@ import json
 import os
 
 # import local submodules
-from telegram_tracker.credentials.lease import Lease, LeaseHeld
+from telegram_tracker.credentials.lease import Lease, LeaseError
 from telegram_tracker.credentials.protection import ProtectionError, check, \
 	ensure_private_dir, protect, reject_link
 
@@ -165,10 +165,8 @@ def _store_lease(path):
 	lease = Lease(path, 'The credentials file')
 	try:
 		lease.__enter__()
-	except LeaseHeld as exc:
+	except LeaseError as exc:
 		raise StoreError(str(exc)) from None
-	except OSError as exc:
-		raise StoreError(f'cannot lock {path} ({exc.strerror or type(exc).__name__})') from None
 	try:
 		yield lease
 	finally:

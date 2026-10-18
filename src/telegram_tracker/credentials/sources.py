@@ -132,9 +132,9 @@ def resolve(
 		environ=None,
 		home=None,
 		cwd=None,
-		ini_reader=read_ini,
-		store_reader=read_store,
-		isfile=os.path.isfile
+		ini_reader=None,
+		store_reader=None,
+		isfile=None
 	):
 	'''
 	Resolve the credentials for one command.
@@ -149,6 +149,9 @@ def resolve(
 	'''
 	environ = os.environ if environ is None else environ
 	cwd = cwd or os.getcwd()
+	isfile = isfile or os.path.isfile
+	ini_reader = ini_reader or read_ini
+	store_reader = store_reader or read_store
 	result = Resolution()
 
 	for f, variable in ENV_VARS.items():
