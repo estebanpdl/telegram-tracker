@@ -66,8 +66,9 @@ defaults without the `--session`/`--config` options.
   created (owner-only) only when a session or credentials are written there.
 - Session: `--session` > `TELEGRAM_TRACKER_SESSION` > existing home session > existing
   `./session_file.session` (with a notice) > home session created by the first login.
-  No automatic move or copy. One `<session>.lock` lease is taken before the client
-  exists and released after its one disconnect.
+  Paths are canonical (links resolved). No automatic move or copy. One `<session>.lock`
+  lease is taken before the client exists and released after its one disconnect. The
+  session must be outside `--output`, and `--output` outside the application home.
 - App credentials: environment variables per value > `--config` INI > home
   `credentials.json` > `./config/config.ini` > `auth login` prompts. One file source,
   used whole; template placeholders count as missing; invalid values are errors.

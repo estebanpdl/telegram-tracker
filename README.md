@@ -134,7 +134,7 @@ The first match wins:
 4. `./session_file.session` in the working directory, if it exists. Earlier versions created the session there. The command prints a one-line notice when it uses it.
 5. Otherwise `session_file.session` in the application home, created by the first login.
 
-Nothing is moved or copied automatically. Once a session exists in the application home, it is used even when an older `./session_file.session` exists. A path without the `.session` suffix gets it. The session file must not be inside the `--output` folder.
+Nothing is moved or copied automatically. Once a session exists in the application home, it is used even when an older `./session_file.session` exists. A path without the `.session` suffix gets it, and links in the path are resolved, so every route to one session file shares its lock. The session file must not be inside the `--output` folder, and the `--output` folder must be outside the application home.
 
 ### Checking, logging out, and removing saved credentials
 
