@@ -25,7 +25,7 @@ from unittest import mock
 import offline_guard
 import virtual_time
 
-from builder_data import ROOT, TESTS, collected_data, run_script
+from builder_data import ROOT, TESTS
 from fakes import FakeTelegramClient, load_expected
 
 import cli

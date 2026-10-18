@@ -24,7 +24,6 @@ from fakes import FIXTURE_CODE, FIXTURE_PHONE, FakeTelegramClient, ScriptedPromp
 import cli
 import cli.collect
 import cli.parsers
-import collector
 import main
 
 
