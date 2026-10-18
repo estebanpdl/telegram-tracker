@@ -53,7 +53,7 @@ class CredentialCase(offline_guard.OfflineTestCase):
 		super().setUp()
 		tmp = tempfile.TemporaryDirectory()
 		self.addCleanup(tmp.cleanup)
-		self.tmp = tmp.name
+		self.tmp = os.path.realpath(tmp.name)
 		self.home = os.path.join(self.tmp, 'home')
 		self.cwd = os.path.join(self.tmp, 'work')
 		os.mkdir(self.cwd)

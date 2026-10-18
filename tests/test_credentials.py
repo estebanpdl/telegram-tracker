@@ -45,7 +45,7 @@ class TempHomeCase(SecretsMixin, offline_guard.OfflineTestCase):
 		super().setUp()
 		tmp = tempfile.TemporaryDirectory()
 		self.addCleanup(tmp.cleanup)
-		self.tmp = tmp.name
+		self.tmp = os.path.realpath(tmp.name)
 		self.home = os.path.join(self.tmp, 'home')
 
 	def store_file(self):
@@ -213,8 +213,8 @@ class SessionSelectionTests(offline_guard.OfflineTestCase):
 		super().setUp()
 		tmp = tempfile.TemporaryDirectory()
 		self.addCleanup(tmp.cleanup)
-		self.cwd = os.path.join(tmp.name, 'work')
-		self.home = os.path.join(tmp.name, 'home')
+		self.cwd = os.path.join(os.path.realpath(tmp.name), 'work')
+		self.home = os.path.join(os.path.realpath(tmp.name), 'home')
 		self.env = {home.HOME_ENV: self.home}
 		self.home_session = os.path.join(self.home, 'session_file.session')
 		self.legacy = os.path.join(self.cwd, 'session_file.session')
@@ -253,6 +253,24 @@ class SessionSelectionTests(offline_guard.OfflineTestCase):
 				self.assertEqual(home.session_file(given, self.cwd), os.path.join(self.cwd, expected))
 		with self.assertRaises(home.HomeError):
 			home.session_file('  ', self.cwd)
+
+	def test_paths_through_links_are_canonical(self):
+		os.makedirs(self.home)
+		alias = os.path.join(os.path.dirname(self.home), 'alias')
+		if os.name == 'nt':
+			import _winapi
+
+			_winapi.CreateJunction(self.home, alias)
+		else:
+			os.symlink(self.home, alias)
+		try:
+			self.assertEqual(
+				home.session_file(os.path.join(alias, 'session_file'), self.cwd),
+				self.home_session
+			)
+			self.assertTrue(home.is_within(os.path.join(alias, 'x'), self.home))
+		finally:
+			os.rmdir(alias) if os.name == 'nt' else os.remove(alias)
 
 	def test_is_within(self):
 		self.assertTrue(home.is_within(os.path.join(self.cwd, 'out', 'x'), os.path.join(self.cwd, 'out')))

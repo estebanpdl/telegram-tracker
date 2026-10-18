@@ -95,6 +95,10 @@ class LoginTests(CredentialCase):
 		self.assertEqual(self.run_main(['auth', 'login'])[0], 0)
 		self.assertEqual(self.stored(), OTHER)
 		self.assertIn('Replace the credentials saved', self.outputs[-3])
+		self.assertIn(
+			'Changed: api_id (from environment), api_hash (from environment), phone (from environment).',
+			self.outputs[-3]
+		)
 		self.answers.append(True)
 		self.assertEqual(self.run_main(['auth', 'login'])[0], 0)
 		self.assertEqual(self.stored(), VALID)

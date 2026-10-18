@@ -137,6 +137,8 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 		session = homes.select_session(args.get('session'))
 		if homes.is_within(session.path, output_folder):
 			parser.error('the session file must not be inside the --output folder')
+		if homes.is_within(output_folder, home) or homes.is_within(home, output_folder):
+			parser.error(f'the --output folder must be outside the application home ({home})')
 		phone = None
 		if client_factory is None:
 			from telegram_tracker.api import create_client

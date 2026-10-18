@@ -14,8 +14,9 @@ Session selection, first match wins:
 	4. ./session_file.session in the working directory, when it exists
 	   (earlier versions created it there), with a notice
 	5. <home>/session_file.session, created by the first login
-Relative paths resolve against the working directory; a path without the
-`.session` suffix gets it, as Telethon would add it.
+Relative paths resolve against the working directory and links are
+resolved, so one file always has one path (and one lease); a path without
+the `.session` suffix gets it, as Telethon would add it.
 '''
 
 # import modules
@@ -60,15 +61,17 @@ def app_home(environ=None):
 
 def session_file(path, cwd=None):
 	'''
-	Absolute session path with the `.session` suffix.
+	The session's canonical path: absolute, links and short names
+	resolved (so every alias of one file gets the same lease), with the
+	`.session` suffix.
 	'''
 	path = os.fspath(path).strip()
 	if not path:
 		raise HomeError('the session path is empty')
-	path = os.path.normpath(os.path.join(cwd or os.getcwd(), path))
+	path = os.path.join(cwd or os.getcwd(), path)
 	if not path.lower().endswith(SESSION_SUFFIX):
 		path += SESSION_SUFFIX
-	return path
+	return os.path.realpath(path)
 
 
 @dataclass(frozen=True)
@@ -99,14 +102,14 @@ def select_session(flag=None, environ=None, cwd=None, isfile=None):
 		return SessionChoice(session_file(value, cwd), SESSION_ENV)
 
 	home, _ = app_home(environ)
-	default = os.path.join(home, SESSION_NAME)
+	default = os.path.realpath(os.path.join(home, SESSION_NAME))
 	if isfile(default):
 		return SessionChoice(default, HOME, in_home=True)
 
-	legacy = os.path.join(cwd or os.getcwd(), SESSION_NAME)
+	legacy = os.path.realpath(os.path.join(cwd or os.getcwd(), SESSION_NAME))
 	if isfile(legacy):
 		return SessionChoice(
-			os.path.abspath(legacy),
+			legacy,
 			WORKING_DIRECTORY,
 			notice=(
 				f'> Using {SESSION_NAME} from the working directory (there is none '
@@ -118,9 +121,9 @@ def select_session(flag=None, environ=None, cwd=None, isfile=None):
 
 def is_within(path, folder):
 	'''
-	True when `path` is `folder` or inside it (case-insensitive where the
-	file system is).
+	True when `path` is `folder` or inside it, comparing canonical paths
+	(links resolved; case-insensitive where the file system is).
 	'''
-	path = os.path.normcase(os.path.abspath(path))
-	folder = os.path.normcase(os.path.abspath(folder))
+	path = os.path.normcase(os.path.realpath(path))
+	folder = os.path.normcase(os.path.realpath(folder))
 	return path == folder or path.startswith(folder.rstrip(os.sep) + os.sep)

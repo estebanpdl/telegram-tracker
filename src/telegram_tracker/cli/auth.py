@@ -228,7 +228,7 @@ def login(args, *, client_factory=None, authorize=None):
 	if code is not None:
 		return code
 	print(f'> Session: {session.path}')
-	return finish_save(plan, home, resolution.values, existing)
+	return finish_save(plan, home, resolution, existing)
 
 
 def ask_missing(resolution):
@@ -271,7 +271,7 @@ def save_plan(args, resolution, existing):
 	return SAVE if typed and existing is None else ASK
 
 
-def finish_save(plan, home, values, existing):
+def finish_save(plan, home, resolution, existing):
 	path = store_path(home)
 	if plan == SKIP:
 		print('> Credentials not saved (--no-save).')
@@ -279,9 +279,15 @@ def finish_save(plan, home, values, existing):
 	if plan == UNCHANGED:
 		print(f'> Saved credentials unchanged ({path}).')
 		return 0
+	values = resolution.values
 	if plan == ASK:
 		if existing is not None:
-			question = f'Replace the credentials saved in {path} with the ones used now?'
+			changed = [
+				f'{f} (from {resolution.sources[f]})' for f in FIELDS if existing.get(f) != values[f]
+			]
+			question = (
+				f'Replace the credentials saved in {path}? Changed: {", ".join(changed)}.'
+			)
 		else:
 			question = (
 				f'Save the credentials used now to {path} (plaintext, readable only '

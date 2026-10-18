@@ -122,6 +122,59 @@ class CollectCredentialTests(CredentialCase):
 		self.assertIn('must not be inside the --output folder', err)
 		self.assertEqual(self.created, [])
 
+	def test_output_inside_the_application_home_is_refused(self):
+		import tempfile
+
+		os.environ.update(env_values(VALID))
+		os.makedirs(self.home)
+		elsewhere = tempfile.TemporaryDirectory()
+		self.addCleanup(elsewhere.cleanup)
+		session = os.path.join(elsewhere.name, 's')
+		for out in (os.path.join(self.home, 'data'), self.tmp):
+			with self.subTest(out=out):
+				code, _, err = self.run_main(
+					['collect', '--telegram-channel', 'alpha_fx', '-o', out, '--session', session]
+				)
+				self.assertEqual(code, 2)
+				self.assertIn('outside the application home', err)
+		self.assertEqual(self.created, [])
+
+	def test_a_symlink_to_the_session_file_shares_its_lease(self):
+		os.environ.update(env_values(VALID))
+		os.makedirs(self.home)
+		alias = os.path.join(self.tmp, 'alias.session')
+		try:
+			os.symlink(self.home_session, alias)
+		except (OSError, NotImplementedError) as exc:
+			self.skipTest(f'cannot create a file symlink here ({type(exc).__name__})')
+		try:
+			with Lease(self.home_session, 'The session'):
+				code, _, err = self.collect('--session', alias)
+			self.assertEqual(code, 1)
+			self.assertIn('in use by another process', err)
+			self.assertEqual(self.created, [])
+		finally:
+			os.remove(alias)
+
+	def test_an_alias_of_the_session_shares_its_lease(self):
+		os.environ.update(env_values(VALID))
+		os.makedirs(self.home)
+		alias = os.path.join(self.tmp, 'alias')
+		if os.name == 'nt':
+			import _winapi
+
+			_winapi.CreateJunction(self.home, alias)
+		else:
+			os.symlink(self.home, alias)
+		try:
+			with Lease(self.home_session, 'The session'):
+				code, _, err = self.collect('--session', os.path.join(alias, 'SESSION_FILE'))
+			self.assertEqual(code, 1)
+			self.assertIn('in use by another process', err)
+			self.assertEqual(self.created, [])
+		finally:
+			os.rmdir(alias) if os.name == 'nt' else os.remove(alias)
+
 	def test_held_session_lease_blocks_before_any_client(self):
 		os.environ.update(env_values(VALID))
 		os.makedirs(self.home)
