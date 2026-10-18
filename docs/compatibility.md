@@ -51,8 +51,41 @@ Legacy forms reach the same handlers:
   credentials, sessions, Telethon, pandas, or plotting libraries.
 - Validation precedes credential reads: selectors, batch file and target forms,
   numeric bounds, dates, incompatible options, and flags for the wrong command.
-- Exit codes: 0 success; 1 target, login, input, storage, or dependency failure;
-  2 argument errors; 130 interrupted. Missing dependencies are named in the error.
+- Exit codes: 0 success; 1 target, login, input, storage, lease, or dependency
+  failure; 2 argument errors and missing/invalid app credentials; 130 interrupted.
+  Missing dependencies are named in the error.
+
+### Sessions and app credentials
+
+`auth login|status|logout|clear-credentials` (canonical form only) and `collect`
+share one resolution (`telegram_tracker.credentials`); the legacy form uses the same
+defaults without the `--session`/`--config` options.
+
+- Application home: `~/.telegram_tracker`, or the absolute `TELEGRAM_TRACKER_HOME`.
+  Resolved only by `collect` and `auth`, never by help, builders, or imports, and
+  created (owner-only) only when a session or credentials are written there.
+- Session: `--session` > `TELEGRAM_TRACKER_SESSION` > existing home session > existing
+  `./session_file.session` (with a notice) > home session created by the first login.
+  No automatic move or copy. One `<session>.lock` lease is taken before the client
+  exists and released after its one disconnect.
+- App credentials: environment variables per value > `--config` INI > home
+  `credentials.json` > `./config/config.ini` > `auth login` prompts. One file source,
+  used whole; template placeholders count as missing; invalid values are errors.
+- `credentials.json`: `schema_version` 1, `api_id` (positive integer), `api_hash`,
+  `phone`; plaintext with owner-only permissions (POSIX 0700/0600, Windows protected
+  owner-only DACL), staged privately and replaced atomically under a
+  `credentials.json.lock` lease. Never a code, password, or session key.
+- Saving: typed values after a successful login unless `--no-save`; environment/INI
+  values and replacements only on consent or `--save`; never after a failed login.
+- `auth status` prints source labels only and works offline; `--check` connects an
+  existing session without requesting a code. `auth logout` revokes the session and
+  keeps saved credentials; `auth clear-credentials` deletes only `credentials.json`.
+- Earlier versions read `./config/config.ini` unconditionally (a missing file was a
+  traceback) and created `./session_file.session` in the working directory.
+
+Live limits: login, checked status, and logout were validated offline with a fake
+client only. Telegram's responses to `log_out` and `is_user_authorized` on real
+sessions, and Telethon's session-file updates during a check, are unverified.
 
 ### History selection and updates
 
@@ -173,6 +206,10 @@ with no sidecar.
 - `tests/offline_guard.py` blocks and records network/DNS connections, real client
   construction/authentication, and config/session file opens. It permits asyncio's
   Windows loopback `socketpair()`. Base cases fail recorded violations even if caught.
+  It also refuses any file system call on the real `~/.telegram_tracker` tree,
+  including relative, case, `..`, 8.3, `file:` URI, and symlink/junction aliases
+  (resolved component by component without entering the tree), and gives every test
+  process a temporary `TELEGRAM_TRACKER_HOME` and `TELEGRAM_TRACKER_SESSION`.
 - `tests/fakes.py` supplies synthetic responses, pagination, scripted errors/delays,
   a fake client, and scripted prompts. `tests/fixtures/telegram_world.json` covers
   shared chats, empty/missing/private channels, Unicode, forwards, replies, service
