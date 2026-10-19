@@ -9,7 +9,10 @@ The schema is defined in [sqlite-schema.sql](sqlite-schema.sql).
 the synthetic payloads in `tests/fixtures/sqlite/variants.json`.
 
 **Status:** the current `collect` command writes the file outputs only. No command
-creates this database yet. This document is the contract that database writes follow.
+creates this database yet. This document specifies the contract for a future
+database writer. Transaction handling, profile checks and publication blocking
+described below must be implemented by that writer; applying the DDL alone does
+not provide them.
 
 ## What the database contains
 
@@ -53,7 +56,8 @@ as JSON text. Everything else about a message or entity is derived from it.
   literals such as `b'\x01\x02'`; `ast.literal_eval` turns them back into bytes.
   `collection_runs.serializer_version` records this format (`1`).
 - **Validity.** JSON columns must pass `json_valid`, so they hold strict JSON. Text that
-  only parses as JSON5 is refused, even though `json_extract` can read it.
+  only parses as JSON5 is refused, even on SQLite versions where `json_extract`
+  can read it.
 - **Computed columns.** Query columns such as `messages.date`, `messages.fwd_peer_id`
   or `peers.phone` are `GENERATED ALWAYS AS (json_extract(raw, ...)) VIRTUAL`.
   SQLite computes them from `raw` when they are read, so they can't disagree with it.
@@ -164,7 +168,7 @@ Request statistics per run and method class.
 |---|---|
 | `run_id` | Run. |
 | `method_class` | `resolve`, `channel`, `enrichment` or `history`. |
-| `requests`, `retries` | Requests sent and retries made. |
+| `requests`, `retries` | Application request-policy attempts and retries; not a count of wire requests or Telethon-internal retries. |
 | `flood_waits`, `flood_wait_seconds` | Flood waits received and their total length. |
 
 Key: (`run_id`, `method_class`); a `WITHOUT ROWID` table.
@@ -419,8 +423,8 @@ the run, its time, its options and its profile.
   the Telegram account that received them. A `min` object's access hash is also
   valid only in the context it came from. Other values are relative to the
   collecting account, too: `ChannelFull` read counters and `notify_settings`,
-  `Channel.left` and admin rights, `Message.out`, `User.contact`. Their account is the
-  profile of the row's `run_id`:
+  `Channel.left` and admin rights, `Message.out`, `User.contact`. Their collection
+  profile is recorded through the row's `run_id`:
   - for `peers`, the run that supplied `raw`;
   - for `messages`, the run that wrote the message;
   - for `channel_snapshots` and `collected_chat_rows`, the run that wrote the row.
@@ -428,8 +432,11 @@ the run, its time, its options and its profile.
   `peer_access_hashes` and `message_media_references` attach that profile to each
   value. When several profiles write to one database, `peers` and
   `channel_snapshots` keep the last writer's copy, so an entity's access hash can
-  change account between runs. Treat a stored hash as usable only by the profile
-  shown with it. The collector itself resolves targets through its session and
+  change account between runs. A profile name or opaque ID records local provenance;
+  it does not verify the Telegram account currently using that profile. Unknown
+  provenance stays unknown. Before reusing a stored hash, establish that the session
+  belongs to the account that received it and that any required `min` context is
+  available. The collector itself resolves targets through its session and
   doesn't read access hashes from stored outputs.
 
 ## Schema versioning and backups
@@ -484,13 +491,13 @@ WHERE peer_kind = 'user' AND (phone IS NOT NULL OR status_was_online IS NOT NULL
 The same photo or document posted more than once:
 
 ```sql
-SELECT media_id, count(*) AS posts, count(DISTINCT channel_id) AS channels
+SELECT media_type, media_id, count(*) AS posts, count(DISTINCT channel_id) AS channels
 FROM messages
 WHERE media_id IS NOT NULL
-GROUP BY media_id HAVING count(*) > 1;
+GROUP BY media_type, media_id HAVING count(*) > 1;
 ```
 
-Access hashes with the profile that may use them:
+Access hashes with their recorded collection profile:
 
 ```sql
 SELECT peer_kind, peer_id, is_min, access_hash, profile_name, profile_id
@@ -498,7 +505,8 @@ FROM peer_access_hashes
 WHERE peer_kind = 'channel';
 ```
 
-Users who commented on a channel's posts (from `replies.recent_repliers`):
+Recent reply authors referenced by channel posts (`replies.recent_repliers`);
+this is not a complete list of commenters or a count of their comments:
 
 ```sql
 SELECT json_extract(r.value, '$.user_id') AS user_id, count(*) AS posts
