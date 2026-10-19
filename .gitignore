@@ -1,8 +1,9 @@
 # Ignore Cache
-__pycache__/
 .ipynb_checkpoints/
-.vscode/
+.pytest_cache/
+__pycache__/
 *.egg-info
+.vscode/
 build/
 dist/
 
