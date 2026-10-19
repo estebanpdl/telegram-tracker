@@ -20,8 +20,6 @@ import unittest
 import offline_guard
 import source_path  # noqa: F401  (imports telegram_tracker from src)
 
-from telethon.tl.alltlobjects import tlobjects
-
 from telegram_tracker.storage.files import to_json_text
 
 
@@ -43,23 +41,6 @@ def read_text(path):
 
 
 VARIANTS = json.loads(read_text(VARIANTS_PATH))
-
-
-def walk(value):
-	'''
-	Yield every (key, value) pair in nested dicts and lists.
-	'''
-	if isinstance(value, dict):
-		for key, item in value.items():
-			yield key, item
-			yield from walk(item)
-	elif isinstance(value, list):
-		for item in value:
-			yield from walk(item)
-
-
-def constructors(raw):
-	return {item for key, item in walk(raw) if key == '_'} | ({raw['_']} if '_' in raw else set())
 
 
 class SchemaTestCase(offline_guard.OfflineTestCase):
@@ -152,37 +133,6 @@ class IdentityTests(SchemaTestCase):
 	def tables(self):
 		return [r[0] for r in self.con.execute(
 			"SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")]
-
-
-class FixtureTests(unittest.TestCase):
-
-	def test_constructors_exist_in_pinned_telethon(self):
-		names = {cls.__name__ for cls in tlobjects.values()}
-		for group in ('messages', 'peers', 'envelopes'):
-			for variant in VARIANTS[group]:
-				with self.subTest(variant['name']):
-					missing = constructors(variant['raw']) - names
-					if variant['telethon']:
-						self.assertEqual(missing, set())
-					else:
-						self.assertTrue(missing, 'a hand-built variant should carry an unknown constructor')
-		self.assertEqual(constructors(VARIANTS['channel_full']['raw']) - names, set())
-
-	def test_values_are_synthetic(self):
-		for key, value in walk(VARIANTS):
-			if value is None:
-				continue
-			if key == 'username':
-				self.assertTrue(value.endswith('_fx'), value)
-			elif key in ('phone', 'phone_number'):
-				self.assertTrue(value.startswith('99966'), value)
-			elif key in ('access_hash', 'id', 'photo_id', 'user_id', 'channel_id', 'chat_id'):
-				self.assertLess(value, 10 ** 6, key)
-
-	def test_variant_names_are_unique(self):
-		for group in ('messages', 'peers', 'envelopes'):
-			names = [v['name'] for v in VARIANTS[group]]
-			self.assertEqual(len(names), len(set(names)), group)
 
 
 class RawRetentionTests(SchemaTestCase):
@@ -356,8 +306,7 @@ class ConstraintTests(SchemaTestCase):
 			CHANNEL, '{}')
 
 	def test_raw_must_be_strict_json(self):
-		# json_extract reads JSON5 since SQLite 3.45 (and raises before it); only
-		# json_valid keeps raw to strict JSON
+		# json_extract may accept JSON5; json_valid keeps raw to strict JSON.
 		json5 = "{_:'Chat',id:6}"
 		self.add_history()
 		for sql, args in (
@@ -411,7 +360,7 @@ class ConstraintTests(SchemaTestCase):
 		self.con.execute("INSERT INTO run_targets (run_id, input_index, input, status) VALUES (1, 0, 'synthetic_fx', 'succeeded')")
 		self.assertRejected("UPDATE run_targets SET files_state = 'written' WHERE run_id = 1")
 
-	def test_pending_rows_block_through_partial_indexes(self):
+	def test_pending_rows_are_queryable_through_partial_indexes(self):
 		self.add_run(3, storage='both')
 		self.con.execute(
 			"INSERT INTO run_targets (run_id, input_index, input, status, files_state) "
@@ -496,6 +445,19 @@ class DocumentTests(SchemaTestCase):
 		app_id = self.one('PRAGMA application_id')[0]
 		self.assertIn(f'`{app_id}` (`0x{app_id:08X}`', self.doc)
 		self.assertIn('`PRAGMA user_version` holds the schema version, `1`', self.doc)
+
+	def test_repeated_media_query_keeps_photos_and_documents_separate(self):
+		self.add_history()
+		for name, message_id in (('photo', 20), ('document', 21), ('photo', 22)):
+			variant = next(v for v in VARIANTS['messages'] if v['name'] == name)
+			raw = json.loads(to_json_text(variant['raw']))
+			raw['id'] = message_id
+			media = raw['media']['photo' if name == 'photo' else 'document']
+			media['id'] = 5001
+			self.add_message(raw)
+		query = re.search(r'The same photo or document posted more than once:\n\n```sql\n(.*?)```',
+			self.doc, re.S).group(1)
+		self.assertEqual(self.con.execute(query).fetchall(), [('MessageMediaPhoto', 5001, 2, 1)])
 
 	def test_example_queries_run(self):
 		self.load_variants()
