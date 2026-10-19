@@ -24,11 +24,36 @@ Writer
 
 '''
 
+def drop_own_phone(payload):
+	'''
+	Set `phone` to None in every User object of `payload` (nested
+	dicts and lists, changed in place) that is the collecting account
+	itself (`is_self`). The rest of that object and every other user stay
+	as collected. Returns the number of phone numbers removed.
+
+	A User whose phone the API did not return has `phone: None` too, so a
+	redacted object keeps the usual shape.
+	'''
+	removed = 0
+	pending = [payload]
+	while pending:
+		item = pending.pop()
+		if isinstance(item, dict):
+			if item.get('_') == 'User' and item.get('is_self') is True and item.get('phone') is not None:
+				item['phone'] = None
+				removed += 1
+			pending.extend(item.values())
+		elif isinstance(item, list):
+			pending.extend(item)
+	return removed
+
+
 class OutputWriter:
 	'''
 	Single owner of channel JSON and aggregate output. `commit` writes one
 	channel's JSON files; `finalize` writes the aggregates from every
-	committed channel.
+	committed channel. Channel files never keep the collecting account's
+	own phone number (see drop_own_phone).
 	'''
 	def __init__(self, output_folder):
 		self.output_folder = output_folder
@@ -48,8 +73,10 @@ class OutputWriter:
 		except OSError as exc:
 			raise StorageError(f'cannot create {self.output_folder}/{target}: {exc}') from exc
 
+		drop_own_phone(result.channel_data)
 		write_json(f'{self.output_folder}/{target}/{target}.json', result.channel_data)
 		if result.history is not None:
+			drop_own_phone(result.history)
 			write_json(history_path(self.output_folder, target), result.history)
 
 		self.committed.append(result)

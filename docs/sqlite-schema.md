@@ -550,8 +550,8 @@ it holds personal data about Telegram users who appear in that content:
 
 The run tables don't store the collecting account's phone number, API ID or hash,
 session, or login codes. If the collecting account itself appears in collected
-content, for example as a commenter, its `User` object is stored like any other,
-with `is_self` set in `raw`.
+content, for example as a commenter, its `User` object (`is_self` set in `raw`) is
+stored like any other except for its phone number: the writer sets `phone` to null.
 
 The file outputs (`<target>_messages.json`, `<target>.json`, `collected_chats.csv`)
 contain the same personal data. Handle the database file accordingly: keep it in a

@@ -353,6 +353,8 @@ What happens when you collect into a folder that already holds data:
 | `collection-status.json` | Replaced; describes this run only |
 | `_exceptions-*.txt` | Appended to |
 
+The channel files hold collected Telegram data unfiltered, including the names, usernames, and phone numbers (when Telegram returns them) of users who appear in it, for example as commenters. The one exception is the collecting account itself: when it appears, its `User` object is kept with `phone` set to null.
+
 A channel's two JSON files are written only after the whole channel was collected, so a request failure keeps its earlier files. JSON and CSV files and `chats.txt` are written to a temporary file and then moved into place, so a reader sees either the old or the new version of each file. There is no transaction across files: a crash can leave files from different runs (see below).
 
 ## Collection status, locking, and recovery
