@@ -42,6 +42,15 @@ class TempHomeCase(offline_guard.OfflineTestCase):
 		source = profiles.DEFAULT_SOURCE if name == profiles.DEFAULT else profiles.FLAG
 		return profiles.Profile(name, source, self.home)
 
+	def link(self, target, link):
+		if os.name == 'nt':
+			import _winapi
+
+			_winapi.CreateJunction(target, link)
+		else:
+			os.symlink(target, link)
+		self.addCleanup(lambda: os.rmdir(link) if os.name == 'nt' else os.remove(link))
+
 
 class NameTests(offline_guard.OfflineTestCase):
 
@@ -128,15 +137,6 @@ class FolderTests(TempHomeCase):
 			profiles.exists(self.profile())
 		self.assertIn('only in case', str(caught.exception))
 
-	def link(self, target, link):
-		if os.name == 'nt':
-			import _winapi
-
-			_winapi.CreateJunction(target, link)
-		else:
-			os.symlink(target, link)
-		self.addCleanup(lambda: os.rmdir(link) if os.name == 'nt' else os.remove(link))
-
 	def test_linked_profile_folder_is_refused(self):
 		elsewhere = os.path.join(self.tmp, 'elsewhere')
 		os.makedirs(elsewhere)
@@ -185,6 +185,16 @@ class SessionTests(TempHomeCase):
 
 
 class ListingTests(TempHomeCase):
+
+	def test_linked_profiles_parent_is_not_traversed(self):
+		elsewhere = os.path.join(self.tmp, 'elsewhere')
+		os.makedirs(os.path.join(elsewhere, 'alice'))
+		os.makedirs(self.home)
+		self.link(elsewhere, os.path.join(self.home, 'profiles'))
+		with mock.patch.object(profiles.os, 'listdir', side_effect=AssertionError('linked parent traversed')):
+			entries, skipped = profiles.list_profiles(self.home)
+		self.assertEqual([entry.name for entry in entries], ['default'])
+		self.assertEqual(skipped, 0)
 
 	def test_missing_home_lists_the_default_and_creates_nothing(self):
 		entries, skipped = profiles.list_profiles(self.home)

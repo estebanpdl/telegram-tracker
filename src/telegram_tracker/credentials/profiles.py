@@ -258,7 +258,11 @@ def list_profiles(home, isfile=None):
 	entries = [_listing(default, homes.session_file(os.path.join(home, homes.SESSION_NAME)), isfile)]
 	parent = os.path.join(home, PROFILES_DIR)
 	skipped = 0
-	if not os.path.isdir(parent) or os.path.islink(parent):
+	try:
+		reject_link(parent)
+	except ProtectionError:
+		return entries, skipped
+	if not os.path.isdir(parent):
 		return entries, skipped
 	for name in sorted(os.listdir(parent)):
 		profile = Profile(name, DEFAULT_SOURCE, home)

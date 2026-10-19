@@ -126,8 +126,10 @@ sessions, and Telethon's session-file updates during a check, are unverified.
   and `previous_profile_id`. Each written history gets
   `<channel>/<channel>_provenance.json` (format 1). `--update` follows the matching
   rules in the README (ID, then name, then default-only for histories without a
-  record) and refuses before any request for that channel. No output holds an
-  account ID, phone number, API credential, session path, or lease name.
+  record) and refuses before any request for that channel. This provenance does
+  not add a private account ID, phone number, API credential, session path, or
+  lease name. Collected payloads retain user IDs and other users' phone numbers;
+  only `User.phone` on objects marked `is_self` is redacted when written.
 - Not implemented: profile rename/delete/copy, session migration, OS keyring,
   coordination across application homes, multi-profile batches.
 
@@ -166,9 +168,10 @@ observations and logging the parent ID.
 `storage.writer.OutputWriter` writes completed results and replays their chat observations
 in input order for deterministic aggregates:
 
-- Channel JSON/history are written after collection completes. Request failures
-  preserve earlier files. A storage failure between the two replacements can leave
-  files from different runs; replacement is atomic per file, not per channel.
+- Channel JSON/history and the history's provenance are written after collection
+  completes. Request failures preserve earlier files. A storage failure between
+  replacements can leave files from different runs; replacement is atomic per
+  file, not per channel.
 - `chats.txt` retains earlier IDs and adds new IDs in first-occurrence order.
   `counter.csv` describes this run. `collected_chats.csv` preserves earlier rows
   and appends new rows with this run's counts, without `_x`/`_y` columns.
@@ -195,7 +198,7 @@ Pages remain sequential per channel. A bounded result queue feeds one writer.
 Targets normalize public links and `@username`, skip blanks, and deduplicate
 case-insensitively. Resolved aliases are skipped in input order.
 
-Every application RPC uses `request_policy.RequestPolicy`: at most N in flight,
+Channel collection RPCs use `request_policy.RequestPolicy`: at most N in flight,
 at least `--request-interval` (default 0.25 s, range 0.1–60) between admissions,
 and a 60 s timeout per attempt. Flood waits pause admissions across workers.
 Waits above `--max-flood-wait` (default 60 s, range 0–3600) or exhausted flood
@@ -211,7 +214,8 @@ Telethon uses `flood_sleep_threshold=0`, `request_retries=1`,
 permits DC migration and can retry a server error inside a policy attempt.
 Statistics count policy attempts by `resolve`, `channel`, `history`, and
 `enrichment`; a shared cache response belongs to its first requesting class.
-Login precedes workers, and all workers finish before disconnect.
+Login and the subsequent account check precede this policy and its workers;
+neither is paced or retried by it. All workers finish before disconnect.
 
 **Fake-latency experiment** (`python tests/scheduler_experiment.py`, virtual clock):
 10 generated channels × 3 pages plus an alias, a missing and a private target;

@@ -192,10 +192,7 @@ def add_session_arguments(group):
 
 
 def add_auth_parsers(commands):
-	'''
-	`auth <action>`. Returns the auth parser and its action parsers by
-	name.
-	'''
+	'''Return the `auth` parser and its action parsers by name.'''
 	auth = commands.add_parser(
 		AUTH,
 		help='Log in to Telegram, check or revoke the session, and manage saved credentials.',
@@ -354,8 +351,9 @@ def add_collect_arguments(parser, prog=SCRIPT_PROG):
 
 	controls = parser.add_argument_group(
 		'request controls',
-		'Shared by application requests after login, including metadata '
-		'lookups; Telethon may retry inside an attempt. These are project '
+		'Shared by channel collection requests after the account check, '
+		'including metadata lookups. Login and the account check are outside '
+		'these controls; Telethon may retry inside an attempt. These are project '
 		'limits, not a safe rate guaranteed by '
 		f'Telegram. The earlier `{invocation(prog)} --batch-file ...` form uses the '
 		'defaults.'

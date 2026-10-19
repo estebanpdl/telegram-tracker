@@ -53,8 +53,8 @@ class OutputWriter:
 	'''
 	Single owner of channel JSON and aggregate output. `commit` writes one
 	channel's JSON files; `finalize` writes the aggregates from every
-	committed channel. Channel files never keep the collecting account's
-	own phone number (see drop_own_phone).
+	committed channel. Before writing channel payloads, clear `phone` on
+	User objects marked `is_self` (see drop_own_phone).
 
 	profile -> the run's RunProfile; with one, every written history gets
 		its provenance record (see provenance.py), stamped `started_at`
