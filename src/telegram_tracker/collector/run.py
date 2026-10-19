@@ -10,6 +10,7 @@ failure, or cancellation.
 
 # import modules
 import asyncio
+import contextlib
 import functools
 import os
 import sys
@@ -23,6 +24,7 @@ from telegram_tracker.collector.outcomes import SESSION_ERRORS, CollectionSummar
 from telegram_tracker.collector.rpc import MetadataCache, Requests
 from telegram_tracker.request_policy import AccountStopped, RequestFailed, RequestPolicy
 from telegram_tracker.storage.files import history_path
+from telegram_tracker.storage.provenance import HistoryRefused
 from telegram_tracker.storage.records import COMPLETE, INTERRUPTED, PARTIAL, \
 	HistoryUnreadable, StorageError
 from telegram_tracker.storage.status import StatusFile
@@ -72,7 +74,9 @@ async def run_collection(
 		max_retries=3,
 		requested_concurrency=None,
 		targets_given=None,
-		policy=None
+		policy=None,
+		profile=None,
+		identify=None
 	):
 	'''
 	Collect `targets` (normalized, without duplicates) with one client.
@@ -89,10 +93,17 @@ async def run_collection(
 	request_interval / max_flood_wait / max_retries -> the request policy
 		(see request_policy.py); `policy` replaces it (tests)
 	requested_concurrency / targets_given -> recorded in the sidecar only
+	profile -> RunProfile recorded in the sidecar and in the provenance of
+		each history written; None records and checks no provenance
+	identify -> coroutine function awaited once with the authorized
+		client, before the output folder is locked; returns a context
+		manager held until the run ends (the account lease) whose value is
+		the run's RunProfile, replacing `profile`. Raising stops the run
+		before any channel request.
 
 	Missing/inaccessible targets, stalled pagination, unreadable saved
-	histories (--update), and requests that keep failing transiently fail
-	only that target; a target resolving to an earlier target's channel
+	histories (--update), --update into another profile's history, and
+	requests that keep failing transiently fail only that target; a target resolving to an earlier target's channel
 	is skipped as a duplicate. An account stop (flood wait), a rejected
 	session, a storage error, any other exception, or cancellation ends the
 	run: completed channels stay written, aggregates are finalized from
@@ -109,50 +120,59 @@ async def run_collection(
 	try:
 		await client.connect()
 		await authorize(client)
+		account = contextlib.nullcontext(profile)
+		if identify is not None:
+			account = await identify(client)
 
-		try:
-			create_dirs(output_folder)
-		except OSError as exc:
-			raise StorageError(f'cannot create {output_folder}: {exc}') from exc
+		with account as run_profile:
+			summary.profile = run_profile
+			try:
+				create_dirs(output_folder)
+			except OSError as exc:
+				raise StorageError(f'cannot create {output_folder}: {exc}') from exc
 
-		policy = policy or RequestPolicy(
-			concurrency=summary.concurrency,
-			interval=request_interval,
-			max_flood_wait=max_flood_wait,
-			max_retries=max_retries
-		)
-		parameters = run_parameters(metadata_only, window, update, {
-			'targets_given': len(summary.requested) if targets_given is None else targets_given,
-			'concurrency': {
-				'requested': requested_concurrency or concurrency,
-				'effective': summary.concurrency
-			},
-			'request_interval': policy.interval,
-			'max_flood_wait': policy.max_flood_wait,
-			'max_retries': policy.max_retries
-		})
-		with OutputLock(output_folder):
-			await _collect_locked(
-				client,
-				summary,
-				policy,
-				parameters,
-				metadata_only=metadata_only,
-				window=window,
-				update=update
+			policy = policy or RequestPolicy(
+				concurrency=summary.concurrency,
+				interval=request_interval,
+				max_flood_wait=max_flood_wait,
+				max_retries=max_retries
 			)
+			parameters = run_parameters(metadata_only, window, update, {
+				'targets_given': len(summary.requested) if targets_given is None else targets_given,
+				'concurrency': {
+					'requested': requested_concurrency or concurrency,
+					'effective': summary.concurrency
+				},
+				'request_interval': policy.interval,
+				'max_flood_wait': policy.max_flood_wait,
+				'max_retries': policy.max_retries
+			})
+			with OutputLock(output_folder):
+				await _collect_locked(
+					client,
+					summary,
+					policy,
+					parameters,
+					metadata_only=metadata_only,
+					window=window,
+					update=update,
+					account_checks=0 if identify is None else 1
+				)
 	finally:
 		await client.disconnect()
 
 	return summary
 
 
-async def _collect_locked(client, summary, policy, parameters, *, metadata_only, window, update):
+async def _collect_locked(
+		client, summary, policy, parameters, *, metadata_only, window, update, account_checks):
 	targets = summary.requested
-	status = StatusFile(summary.output_folder, targets, parameters)
+	status = StatusFile(
+		summary.output_folder, targets, parameters, summary.profile, account_checks
+	)
 	status.write()
 
-	writer = OutputWriter(summary.output_folder)
+	writer = OutputWriter(summary.output_folder, summary.profile, status.data['started_at'])
 	cache = MetadataCache(Requests(client, policy))
 	queue = asyncio.Queue(maxsize=summary.concurrency)
 	resolved = {}
@@ -186,14 +206,15 @@ async def _collect_locked(client, summary, policy, parameters, *, metadata_only,
 				metadata_only=metadata_only,
 				window=window,
 				update=update,
-				after_resolve=functools.partial(after_resolve, index)
+				after_resolve=functools.partial(after_resolve, index),
+				profile=summary.profile
 			)
 			outcome = ('result', result)
 		except TargetUnavailable:
 			outcome = ('not_found', NOT_FOUND_REASON)
 		except DuplicateTarget as exc:
 			outcome = ('duplicate', exc.alias_of)
-		except (PaginationStalled, HistoryUnreadable, RequestFailed) as exc:
+		except (PaginationStalled, HistoryUnreadable, HistoryRefused, RequestFailed) as exc:
 			print(f'> {target}: {exc}; messages not saved.', file=sys.stderr)
 			outcome = ('failed', str(exc))
 		except SESSION_ERRORS as exc:
@@ -215,7 +236,7 @@ async def _collect_locked(client, summary, policy, parameters, *, metadata_only,
 		target = targets[index]
 		if kind == 'result':
 			try:
-				writer.commit(payload)
+				takeover = writer.commit(payload)
 			except StorageError as exc:
 				entry.update(status='failed', reason=f'storage error: {exc}')
 				raise
@@ -228,6 +249,9 @@ async def _collect_locked(client, summary, policy, parameters, *, metadata_only,
 			)
 			if payload.min_id is not None:
 				entry['min_id'] = payload.min_id
+			if takeover:
+				entry.update(takeover)
+				summary.takeovers.append((target, takeover['previous_profile_name']))
 			if payload.history_mode == 'not_collected' and os.path.isfile(
 					history_path(summary.output_folder, target)):
 				entry['stale_history'] = True

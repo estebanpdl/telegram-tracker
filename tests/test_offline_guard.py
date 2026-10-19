@@ -249,6 +249,94 @@ class RealHomeGuardTests(offline_guard.OfflineTestCase):
 			os.rmdir(link) if os.name == 'nt' else os.remove(link)
 
 
+class ProfileTreeGuardTests(offline_guard.OfflineTestCase):
+	'''
+	Profile folders, profile records, and account leases inside the real
+	application home are refused like the rest of it, also when the
+	application's own profile code reaches for them, and a profile set in
+	the starting environment never applies.
+	'''
+
+	REAL_HOME = RealHomeGuardTests.REAL_HOME
+	assert_refused = RealHomeGuardTests.assert_refused
+
+	PROFILE_PATHS = (
+		('profiles folder', ('profiles',)),
+		('profile folder', ('profiles', 'alice')),
+		('named credentials', ('profiles', 'alice', 'credentials.json')),
+		('named session', ('profiles', 'alice', 'session_file.session')),
+		('named profile record', ('profiles', 'alice', 'profile.json')),
+		('profile record lease', ('profiles', 'alice', 'profile.json.lock')),
+		('default profile record', ('profile.json',)),
+		('account leases', ('account-leases',)),
+		('account lease', ('account-leases', '0123456789abcdef.lock')),
+	)
+
+	def test_profile_paths_are_refused(self):
+		for label, parts in self.PROFILE_PATHS:
+			path = os.path.join(self.REAL_HOME, *parts)
+			for name, call in (('os.stat', os.stat), ('os.path.lexists', os.path.lexists)):
+				with self.subTest(path=label, call=name):
+					self.assert_refused(call, path)
+
+	def test_profile_code_cannot_reach_the_real_home(self):
+		import source_path  # noqa: F401  (imports telegram_tracker from src)
+
+		from telegram_tracker.credentials import accounts, identity, profiles
+
+		alice = profiles.Profile('alice', profiles.FLAG, self.REAL_HOME)
+		default = profiles.Profile(profiles.DEFAULT, profiles.DEFAULT_SOURCE, self.REAL_HOME)
+		for label, call in (
+				('exists', lambda: profiles.exists(alice)),
+				('own session', lambda: profiles.own_session(alice)),
+				('prepare root', lambda: profiles.prepare_root(alice)),
+				('list', lambda: profiles.list_profiles(self.REAL_HOME)),
+				('read record', lambda: identity.read_identity(default.root, default.name)),
+				('account leases', lambda: accounts.prepare(self.REAL_HOME))):
+			with self.subTest(call=label):
+				with expected_violations() as caught:
+					with self.assertRaises(OfflineViolation):
+						call()
+				self.assertTrue(caught and all(c.startswith('home:') for c in caught), caught)
+
+	def test_profile_tree_aliases_are_refused(self):
+		with tempfile.TemporaryDirectory() as tmp:
+			stand_in = os.path.join(tmp, 'apphome')
+			folder = os.path.join(stand_in, 'profiles', 'alice')
+			os.makedirs(folder)
+			link = os.path.join(tmp, 'link')
+			if os.name == 'nt':
+				import _winapi
+
+				_winapi.CreateJunction(folder, link)
+			else:
+				os.symlink(folder, link)
+			with offline_guard.pretend_real_home(stand_in):
+				for label, path in (
+						('upper case', os.path.join(folder, 'profile.json').upper()),
+						('dot-dot', os.path.join(folder, '..', 'bob', 'credentials.json')),
+						('link to a profile folder', os.path.join(link, 'profile.json'))):
+					with self.subTest(alias=label):
+						self.assert_refused(os.stat, path)
+			os.rmdir(link) if os.name == 'nt' else os.remove(link)
+
+	def test_profile_variable_is_removed_here_and_in_subprocesses(self):
+		import subprocess
+		import sys
+
+		self.assertNotIn(offline_guard.PROFILE_ENV, os.environ)
+		env = dict(os.environ, **{offline_guard.PROFILE_ENV: 'alice'})
+		tests = os.path.dirname(os.path.abspath(__file__))
+		code = (
+			f'import sys; sys.path.insert(0, {tests!r}); import os, offline_guard; '
+			f'print({offline_guard.PROFILE_ENV!r} in os.environ)'
+		)
+		completed = subprocess.run(
+			[sys.executable, '-I', '-c', code], env=env, capture_output=True, text=True, timeout=120
+		)
+		self.assertEqual(completed.stdout.strip(), 'False', completed.stderr)
+
+
 def _short_path(path):
 	'''
 	The Windows 8.3 form of an existing path ('' elsewhere or when short

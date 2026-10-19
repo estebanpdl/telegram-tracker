@@ -1,20 +1,28 @@
 # -*- coding: utf-8 -*-
 '''
-`auth login|status|logout|clear-credentials`.
+`auth login|status|logout|clear-credentials|profiles`.
+
+Every action works on one profile (--profile, TELEGRAM_TRACKER_PROFILE,
+or the default; see credentials/profiles.py). Only login creates a named
+profile; the others refuse a profile that does not exist.
 
 login: resolve the session and app credentials, ask for missing ones,
-log in with the shared code/two-step lifecycle, then save credentials
-(see save_plan). status: offline report of the home, session, and
+log in with the shared code/two-step lifecycle, check the logged-in
+account (get_me) against the phone number and the profile's binding,
+record the profile in profile.json, then save credentials (see
+save_plan). status: offline report of the home, profile, session, and
 credential sources by label; --check connects to verify the login.
-logout: revoke the session on Telegram. clear-credentials: delete
-credentials.json only.
+logout: revoke the session on Telegram. clear-credentials: delete the
+profile's credentials.json only. profiles: offline list of profiles.
 
 Telethon is loaded only by the actions that connect (login, status
 --check, logout). Each holds the session lease while its one client
-exists and disconnects it once. Credential values are never printed.
+exists and disconnects it once. Credential values and account IDs are
+never printed.
 '''
 
 # import modules
+import contextlib
 import functools
 import getpass
 import os
@@ -22,13 +30,17 @@ import sys
 import warnings
 
 # import local submodules
+from telegram_tracker.cli import profile_checks
 from telegram_tracker.cli.builders import missing_dependency
-from telegram_tracker.cli.parsers import AUTH, CLEAR_CREDENTIALS, LOGIN, LOGOUT, STATUS
+from telegram_tracker.cli.parsers import AUTH, CLEAR_CREDENTIALS, LOGIN, LOGOUT, PROFILES, STATUS
+from telegram_tracker.credentials import accounts, profiles
 from telegram_tracker.credentials import home as homes
 from telegram_tracker.credentials import sources
+from telegram_tracker.credentials.identity import IdentityError, read_identity
 from telegram_tracker.credentials.lease import Lease, LeaseError
+from telegram_tracker.credentials.protection import ProtectionError
 from telegram_tracker.credentials.store import FIELDS, StoreError, clear_store, \
-	prepare_home, read_store, save_store, store_path
+	read_store, save_store, store_path
 
 
 MAX_ATTEMPTS = 3
@@ -107,7 +119,8 @@ def run_auth(args, *, client_factory=None, authorize=None):
 		LOGIN: login,
 		STATUS: status,
 		LOGOUT: logout,
-		CLEAR_CREDENTIALS: clear_credentials
+		CLEAR_CREDENTIALS: clear_credentials,
+		PROFILES: list_profiles
 	}[action]
 	try:
 		return handler(args, client_factory=client_factory, authorize=authorize)
@@ -148,7 +161,7 @@ def _connect(session, factory, work):
 	try:
 		with Lease(session.path, 'The session'):
 			return None, collect.asyncio_run(run())
-	except LeaseError as exc:
+	except (LeaseError, accounts.AccountError) as exc:
 		return fail(exc, 1), None
 	except AuthenticationError as exc:
 		return fail(f'Login failed: {exc}', 1), None
@@ -183,39 +196,48 @@ login
 
 def login(args, *, client_factory=None, authorize=None):
 	home, _ = homes.app_home()
-	session = homes.select_session(args.get('session'))
+	profile = profiles.select_profile(args.get('profile'), home=home)
+	profiles.check_folder(profile)
+	session = profiles.select_session(profile, args.get('session'))
 	if session.notice:
 		print(session.notice)
-	resolution = sources.resolve(config=args.get('config'), home=home)
+	resolution = _resolve(profile, args)
 
 	existing = None
 	if not args['no_save']:
 		try:
-			existing = read_store(home)
+			existing = read_store(profile.root)
 		except StoreError as exc:
 			return fail(f'{exc}', 2)
 
 	if resolution.missing:
 		if not args['no_save']:
 			print(
-				f'> Values you enter are saved to {store_path(home)} after a '
+				f'> Values you enter are saved to {profile.store_path} after a '
 				'successful login (plaintext, readable only by your account). '
 				'Use --no-save to skip.'
 			)
 		ask_missing(resolution)
+	print(f'> Profile: {profile.label()}')
 	print('> Credentials: ' + '; '.join(resolution.labels()))
 
+	# The default profile's record is optional: a home that cannot be used
+	# only stops a login that has to write there.
 	plan = save_plan(args, resolution, existing)
 	creating_session = session.in_home and not os.path.isfile(session.path)
-	if plan in (SAVE, ASK) or creating_session:
-		try:
-			prepare_home(home)
-		except StoreError as exc:
+	needs_root = plan in (SAVE, ASK) or creating_session or not profile.is_default
+	try:
+		profiles.prepare_root(profile)
+		root_ready = True
+	except ProtectionError as exc:
+		if needs_root:
+			hint = ' or pass --session' if profile.is_default else ''
 			return fail(
-				f'Cannot use {home}: {exc}. Set TELEGRAM_TRACKER_HOME or pass '
-				'--session' + (', or use --no-save' if not creating_session else '') + '.',
+				f'Cannot use {profile.root}: {exc}. Set TELEGRAM_TRACKER_HOME{hint}'
+				+ (', or use --no-save' if not creating_session and profile.is_default else '') + '.',
 				1
 			)
+		root_ready = False
 
 	if authorize is None:
 		from telegram_tracker.api.auth import ensure_authorized
@@ -225,12 +247,32 @@ def login(args, *, client_factory=None, authorize=None):
 
 	async def work(client, closed):
 		await authorize(client)
+		try:
+			return await client.get_me()
+		except Exception as exc:
+			raise accounts.AccountError(
+				f'Logged in, but the account could not be checked ({type(exc).__name__}); '
+				'nothing was saved.'
+			) from None
 
-	code, _ = _connect(session, factory, work)
+	code, me = _connect(session, factory, work)
 	if code is not None:
 		return code
 	print(f'> Session: {session.path}')
-	return finish_save(plan, home, resolution, existing)
+
+	try:
+		profile_checks.record_login(profile, session, resolution, me, root_ready)
+	except accounts.AccountError as exc:
+		return fail(exc, 1)
+	return finish_save(plan, profile.root, resolution, existing)
+
+
+def _resolve(profile, args):
+	return sources.resolve(
+		config=args.get('config'),
+		home=profile.root,
+		discover_legacy=profile.is_default
+	)
 
 
 def ask_missing(resolution):
@@ -316,9 +358,12 @@ status, logout, clear-credentials
 
 def status(args, *, client_factory=None, authorize=None):
 	home, home_label = homes.app_home()
-	session = homes.select_session(args.get('session'))
-	present = os.path.isfile(session.path)
+	profile = profiles.select_profile(args.get('profile'), home=home)
 	print(f'Application home: {home} ({home_label})')
+	print(f'Profile: {profile.label()}')
+	profiles.require(profile)
+	session = profiles.select_session(profile, args.get('session'))
+	present = os.path.isfile(session.path)
 	state = 'present; login not verified (offline)' if present else 'missing'
 	print(f'Session: {session.path} ({session.source}): {state}')
 	if session.notice:
@@ -326,13 +371,18 @@ def status(args, *, client_factory=None, authorize=None):
 
 	errors = 0
 	try:
-		saved = 'present' if read_store(home) is not None else 'absent'
+		record = 'present' if read_identity(profile.root, profile.name) else 'absent'
+	except IdentityError as exc:
+		record, errors = f'invalid: {exc}', 1
+	print(f'Profile record: {profile.identity_path}: {record}')
+	try:
+		saved = 'present' if read_store(profile.root) is not None else 'absent'
 	except StoreError as exc:
 		saved, errors = f'invalid: {exc}', 1
-	print(f'Saved credentials: {store_path(home)}: {saved}')
+	print(f'Saved credentials: {profile.store_path}: {saved}')
 
 	try:
-		resolution = sources.resolve(config=args.get('config'), home=home)
+		resolution = _resolve(profile, args)
 	except sources.CredentialError as exc:
 		print(f'Credentials: error: {exc}')
 		return 2
@@ -360,12 +410,13 @@ def status(args, *, client_factory=None, authorize=None):
 
 
 def logout(args, *, client_factory=None, authorize=None):
-	session = homes.select_session(args.get('session'))
+	profile = profiles.select_profile(args.get('profile'))
+	profiles.require(profile)
+	session = profiles.select_session(profile, args.get('session'))
 	if not os.path.isfile(session.path):
 		print(f'> No session at {session.path}; nothing to log out.')
 		return 0
-	home, _ = homes.app_home()
-	resolution = sources.resolve(config=args.get('config'), home=home)
+	resolution = _resolve(profile, args)
 	_require_app_id(resolution)
 
 	if not args['yes']:
@@ -400,8 +451,10 @@ def logout(args, *, client_factory=None, authorize=None):
 
 
 def clear_credentials(args, *, client_factory=None, authorize=None):
-	home, _ = homes.app_home()
-	path = store_path(home)
+	profile = profiles.select_profile(args.get('profile'))
+	profiles.require(profile)
+	option = '' if profile.is_default else f' --profile {profile.name}'
+	path = store_path(profile.root)
 	if not os.path.lexists(path):
 		print(f'> No saved credentials at {path}; nothing to remove.')
 		return 0
@@ -410,18 +463,29 @@ def clear_credentials(args, *, client_factory=None, authorize=None):
 		if not answer:
 			print('> Nothing removed.')
 			return 1
+
+	# A named profile's own session lease keeps this from running while the
+	# profile collects or logs in.
+	session = None if profile.is_default else profiles.own_session(profile)
 	try:
-		clear_store(home)
-	except StoreError as exc:
+		with Lease(session, 'The session') if session else contextlib.nullcontext():
+			clear_store(profile.root)
+	except (StoreError, LeaseError) as exc:
 		return fail(exc, 1)
 	print(f'> Removed {path}.')
+	if os.path.lexists(profile.identity_path):
+		print(f'> The profile record {profile.identity_path} stays.')
 
 	variables = [v for v in sources.ENV_VARS.values() if os.environ.get(v, '').strip()]
 	if variables:
 		print(f'> Still set in the environment: {", ".join(variables)}.')
-	if os.path.isfile(sources.LEGACY_INI):
+	if profile.is_default and os.path.isfile(sources.LEGACY_INI):
 		print(f'> {sources.LEGACY_CONFIG} in the working directory is not touched.')
-	session = homes.select_session(None)
-	if os.path.isfile(session.path):
-		print(f'> The session {session.path} stays logged in; `auth logout` revokes it.')
+	session = session or homes.select_session(None).path
+	if os.path.isfile(session):
+		print(f'> The session {session} stays logged in; `auth logout{option}` revokes it.')
 	return 0
+
+
+def list_profiles(args, *, client_factory=None, authorize=None):
+	return profile_checks.print_profiles()

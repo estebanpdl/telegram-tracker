@@ -4,8 +4,9 @@ Where the app credentials (api_id, api_hash, phone) come from.
 
 	1. TELEGRAM_TRACKER_API_ID / _API_HASH / _PHONE, field by field
 	2. --config PATH (an INI file)
-	3. credentials.json in the application home
-	4. ./config/config.ini in the working directory
+	3. credentials.json of the selected profile (in the application home
+	   for the default profile)
+	4. ./config/config.ini in the working directory (default profile only)
 	5. prompts (`auth login` only, outside this module)
 
 Sources 2-4 are files and only one of them is used, as a whole: the first
@@ -134,7 +135,8 @@ def resolve(
 		cwd=None,
 		ini_reader=None,
 		store_reader=None,
-		isfile=None
+		isfile=None,
+		discover_legacy=True
 	):
 	'''
 	Resolve the credentials for one command.
@@ -142,6 +144,7 @@ def resolve(
 	config -> --config path or None
 	home -> application home (for credentials.json)
 	cwd -> working directory (for ./config/config.ini)
+	discover_legacy -> False skips ./config/config.ini (named profiles)
 	ini_reader / store_reader / isfile -> replace the file access (tests)
 
 	Returns a Resolution, possibly incomplete. Raises CredentialError when
@@ -179,7 +182,7 @@ def resolve(
 		return result
 
 	legacy = os.path.join(cwd, LEGACY_INI)
-	if isfile(legacy):
+	if discover_legacy and isfile(legacy):
 		values = ini_reader(legacy, LEGACY_CONFIG)
 		if all(is_placeholder(f, values.get(f)) for f in FIELDS):
 			result.notes.append(f'{LEGACY_CONFIG} holds only placeholder values; ignored')

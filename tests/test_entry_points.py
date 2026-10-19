@@ -49,6 +49,11 @@ CASES = [
 	['collect', '--telegram-channel', 'a', '--concurrency', '11'],
 	['--telegram-channel', 'a', '--update'],
 	['build-network', '-d', 'nowhere'],
+	['auth', 'profiles'],
+	['auth', 'status', '--profile', 'nobody'],
+	['auth', 'login', '--profile', 'con'],
+	['collect', '--telegram-channel', 'a', '--profile', 'Bad'],
+	['--telegram-channel', 'a', '--profile', 'alice'],
 ]
 
 # a fresh interpreter (-I: no user site, no PYTHONPATH, no cwd on sys.path)

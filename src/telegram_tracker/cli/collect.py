@@ -3,9 +3,11 @@
 `collect`: validation of the history window, --update, and request
 controls, then one collection run and its summary. Telethon, the
 collector, and credentials are loaded only after the arguments are valid.
-The session and app credentials are resolved as for `auth` (see
-telegram_tracker.credentials), and the session lease is held from before
-the client exists until the run ends.
+The profile, session, and app credentials are resolved as for `auth`
+(see telegram_tracker.credentials), and the session lease is held from
+before the client exists until the run ends. After login, one get_me
+request identifies the account; the account lease is then held until the
+run ends, so one Telegram account collects in one process at a time.
 '''
 
 # import modules
@@ -17,12 +19,14 @@ import warnings
 
 # import local submodules
 from telegram_tracker.cli.builders import missing_dependency
+from telegram_tracker.cli.profile_checks import account_check
 from telegram_tracker.cli.parsers import COLLECT, DEFAULT_OUTPUT
 from telegram_tracker.cli.targets import read_targets
+from telegram_tracker.credentials import accounts, profiles
 from telegram_tracker.credentials import home as homes
 from telegram_tracker.credentials import sources
 from telegram_tracker.credentials.lease import Lease, LeaseError
-from telegram_tracker.credentials.store import StoreError, prepare_home
+from telegram_tracker.credentials.protection import ProtectionError
 from telegram_tracker.utils import data_folder_from
 
 
@@ -127,6 +131,7 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 		from telegram_tracker.api.auth import AuthenticationError, ensure_authorized
 		from telegram_tracker.collector import HistoryWindow, run_collection
 		from telegram_tracker.storage import OutputLocked, StorageError
+		from telegram_tracker.storage.provenance import RunProfile
 	except ModuleNotFoundError as exc:
 		return missing_dependency(COLLECT, exc)
 
@@ -134,7 +139,9 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 
 	try:
 		home, _ = homes.app_home()
-		session = homes.select_session(args.get('session'))
+		profile = profiles.select_profile(args.get('profile'), home=home)
+		profiles.require(profile)
+		session = profiles.select_session(profile, args.get('session'))
 		if homes.is_within(session.path, output_folder):
 			parser.error('the session file must not be inside the --output folder')
 		if homes.is_within(output_folder, home) or homes.is_within(home, output_folder):
@@ -143,9 +150,13 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 		if client_factory is None:
 			from telegram_tracker.api import create_client
 
-			resolution = sources.resolve(config=args.get('config'), home=home)
+			resolution = sources.resolve(
+				config=args.get('config'),
+				home=profile.root,
+				discover_legacy=profile.is_default
+			)
 			if resolution.missing:
-				return missing_credentials(resolution)
+				return missing_credentials(resolution, profile)
 			phone = resolution.values['phone']
 			client_factory = functools.partial(
 				create_client,
@@ -161,14 +172,19 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 		print(session.notice, file=sys.stderr)
 	if session.in_home and not os.path.isfile(session.path):
 		try:
-			prepare_home(home)
-		except StoreError as exc:
+			profiles.prepare_root(profile)
+		except ProtectionError as exc:
 			print(
-				f'> Cannot create the session in {home}: {exc}. Set '
-				'TELEGRAM_TRACKER_HOME or pass --session.',
+				f'> Cannot create the session in {profile.root}: {exc}. Set '
+				'TELEGRAM_TRACKER_HOME' + (' or pass --session.' if profile.is_default else '.'),
 				file=sys.stderr
 			)
 			return 1
+	try:
+		accounts.prepare(home)
+	except accounts.AccountError as exc:
+		print(f'> {exc}', file=sys.stderr)
+		return 1
 
 	if authorize is None:
 		authorize = functools.partial(ensure_authorized, phone=phone)
@@ -200,13 +216,14 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 					metadata_only=metadata_only,
 					window=window,
 					update=update,
+					identify=account_check(profile, session, home, RunProfile),
 					**controls
 				)
 			)
 	except AuthenticationError as exc:
 		print(f'> Login failed: {exc}', file=sys.stderr)
 		return 1
-	except (OutputLocked, StorageError, LeaseError) as exc:
+	except (OutputLocked, StorageError, LeaseError, accounts.AccountError) as exc:
 		print(f'> {exc}', file=sys.stderr)
 		return 1
 	except KeyboardInterrupt:
@@ -224,6 +241,14 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 		print(
 			f'> {len(summary.collected_in_full)} channel(s) had no saved history and '
 			'were collected in full: ' + ', '.join(summary.collected_in_full) + '\n'
+		)
+	if summary.takeovers:
+		print(
+			f'> {len(summary.takeovers)} channel(s) replaced a history of another '
+			'profile (recorded as a takeover): ' + ', '.join(
+				f'{target} (was {previous or "without a profile record"})'
+				for target, previous in summary.takeovers
+			) + '\n'
 		)
 	if summary.stale_histories:
 		print(
@@ -252,18 +277,19 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 	return 0
 
 
-def missing_credentials(resolution):
+def missing_credentials(resolution, profile):
 	'''
 	Explain which app credentials are missing and how to provide them
 	(stderr, exit 2). Names sources only, never values.
 	'''
 	found = [label for label in resolution.labels() if not label.endswith(': missing')]
+	login = 'auth login' + ('' if profile.is_default else f' --profile {profile.name}')
 	print(
 		f'> Missing app credentials: {", ".join(resolution.missing)}'
 		+ (f' (found {"; ".join(found)})' if found else '')
-		+ '. Run `auth login` to enter and save them, set '
+		+ f'. Run `{login}` to enter and save them, set '
 		+ ', '.join(sources.ENV_VARS.values())
-		+ ', or fill in config/config.ini.',
+		+ (', or fill in config/config.ini.' if profile.is_default else ', or pass --config.'),
 		file=sys.stderr
 	)
 	for note in resolution.notes:
@@ -288,6 +314,8 @@ def print_summary(summary, given):
 		f'failed, {len(summary.duplicates)} same channel as an earlier target, '
 		f'{len(summary.cancelled)} cancelled. Concurrency {summary.concurrency}.'
 	)
+	if summary.profile is not None:
+		print(f'> Profile: {summary.profile.describe()}; account checked with 1 request (get_me).')
 	for target, alias_of in summary.duplicates:
 		print(f'>   {target}: same channel as {alias_of}, skipped')
 	if summary.requests:

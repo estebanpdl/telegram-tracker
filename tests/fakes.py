@@ -8,7 +8,7 @@ client, opens a socket, or touches credentials or session files.
 - `FakeTL` mimics a Telethon TLObject: attribute access plus `to_dict()`.
 - `FakeTelegramClient` implements the client methods the project awaits
   (`connect`, `is_user_authorized`, `send_code_request`, `sign_in`,
-  `get_entity`, `__call__`, `disconnect`) and records every call. Outcomes
+  `get_me`, `get_entity`, `__call__`, `disconnect`) and records every call. Outcomes
   can be scripted per call (exceptions, delays, gates). An optional
   latency makes data requests take time; requests in flight, their peak,
   and dispatch times (loop clock) are recorded.
@@ -34,6 +34,7 @@ EXPECTED_DIR = os.path.join(FIXTURES, 'expected')
 
 FIXTURE_PHONE = '+10000000000'
 FIXTURE_CODE = '24680'
+FIXTURE_ACCOUNT = 777000111
 
 
 def load_expected(name):
@@ -239,6 +240,8 @@ class FakeTelegramClient:
 	  correct code raises SessionPasswordNeededError.
 	- `honor_bounds`: when False, history requests ignore min_id, max_id,
 	  and offset_date (a server that disregards a bound).
+	- `account_id` / `account_phone`: the logged-in account `get_me`
+	  returns (synthetic values).
 	- `script(kind, *outcomes)`: per-call outcomes for `kind` (a method
 	  name or a request type name such as 'GetHistoryRequest'). An outcome
 	  is None (normal), an exception (raised), or an async callable
@@ -257,13 +260,17 @@ class FakeTelegramClient:
 			code=FIXTURE_CODE,
 			page_size=2,
 			honor_bounds=True,
-			latency=0
+			latency=0,
+			account_id=FIXTURE_ACCOUNT,
+			account_phone=None
 		):
 		self.world = world or FixtureWorld()
 		self.authorized = authorized
 		self.page_size = page_size
 		self.honor_bounds = honor_bounds
 		self.latency = latency
+		self.account_id = account_id
+		self.account_phone = account_phone
 		self.dispatches = []
 		self.active = 0
 		self.peak_active = 0
@@ -346,6 +353,19 @@ class FakeTelegramClient:
 		self.authorized = False
 		await self.disconnect()
 		return True
+
+	async def get_me(self):
+		'''
+		The logged-in account as a User, or None when not authorized (as
+		Telethon does).
+		'''
+		self._record('get_me')
+		await self._apply_script('get_me')
+		if not self.authorized:
+			return None
+		return FakeTL({
+			'_': 'User', 'id': self.account_id, 'is_self': True, 'phone': self.account_phone
+		})
 
 	async def send_code_request(self, phone, *, force_sms=False):
 		self._record(

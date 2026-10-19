@@ -33,14 +33,22 @@ class StatusFile:
 	complete (every target collected), partial (finalized, some targets
 	failed), interrupted (stopped before every target was attempted:
 	cancellation, account stop, or a storage error).
+
+	`profile` (a RunProfile) gives profile_name and profile_id, null when
+	unknown; `account_checks` counts the requests made to identify the
+	account before collecting, which are not part of `requests`. Sidecars
+	of earlier versions have none of these keys: their profile is unknown.
 	'''
-	def __init__(self, output_folder, targets, parameters):
+	def __init__(self, output_folder, targets, parameters, profile=None, account_checks=0):
 		self.path = os.path.join(output_folder, STATUS_FILE)
 		self.data = {
 			'format': STATUS_FORMAT,
 			'state': RUNNING,
 			'started_at': utc_now(),
 			'finished_at': None,
+			'profile_name': profile.name if profile else None,
+			'profile_id': profile.id if profile else None,
+			'account_checks': {'get_me': account_checks},
 			'parameters': parameters,
 			'summary': None,
 			'stop_reason': None,
