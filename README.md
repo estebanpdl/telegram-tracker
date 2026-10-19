@@ -116,8 +116,8 @@ The first source that provides a value wins:
 |---|---|---|
 | 1 | `TELEGRAM_TRACKER_API_ID`, `TELEGRAM_TRACKER_API_HASH`, `TELEGRAM_TRACKER_PHONE` | Each variable overrides one value. |
 | 2 | `--config PATH` | An INI file with the `[Telegram API credentials]` section. A missing file is an error. |
-| 3 | `credentials.json` in the application home | Saved by `auth login`. |
-| 4 | `./config/config.ini` in the working directory | The earlier setup. |
+| 3 | `credentials.json` of the profile (the application home for the default profile) | Saved by `auth login`. |
+| 4 | `./config/config.ini` in the working directory | The earlier setup; default profile only. |
 | 5 | Prompts | `auth login` only. |
 
 Only one file source (2, 3, or 4) is used, as a whole: the first one present. A value missing from it is not taken from another file. Template values (`api_id = api_id`, `<your api_id>`, or empty) count as missing, so the placeholder `config/config.ini` in the repository never hides saved credentials. An invalid value (for example an `api_id` that is not a positive number) stops the command with exit 2; it never falls back to another source. There are no command-line options for the API ID, hash, or phone, and none for the login code or password.
@@ -126,7 +126,7 @@ Only one file source (2, 3, or 4) is used, as a whole: the first one present. A 
 
 ### Which session is used
 
-The first match wins:
+For the default profile, the first match wins (a named profile always uses its own session; see [Account profiles](#account-profiles)):
 
 1. `--session PATH` (`collect` and `auth`).
 2. `TELEGRAM_TRACKER_SESSION`.
@@ -149,6 +149,29 @@ Nothing is moved or copied automatically. Once a session exists in the applicati
 Saving writes a protected new file next to the old one and replaces it in one step. Failures before replacement leave the earlier file intact; a failed protection check after replacement reports an error with the new file already in place. If the application home cannot be created or protected, `auth login` and `collect` stop with exit 1 before connecting; set `TELEGRAM_TRACKER_HOME` to another absolute folder, or pass `--session`. A `credentials.json` that is damaged, of another version, or readable by other accounts stops every command that needs it with exit 2; remove it with `auth clear-credentials` and log in again.
 
 `TELEGRAM_TRACKER_HOME` replaces the application home for all of this (it must be an absolute path).
+
+## Account profiles
+
+A profile is a named set of saved credentials and a session, so one installation can collect with more than one Telegram account. Everything above describes the **default** profile, which is the application home itself: its `credentials.json`, its session (chosen as under [Which session is used](#which-session-is-used)), and nothing else. Existing setups are the default profile without any change or migration.
+
+A **named** profile lives in `<application home>/profiles/<name>/` and holds its own `credentials.json`, `session_file.session`, and `profile.json`. Select it with `--profile NAME` (`collect` and every `auth` action) or the `TELEGRAM_TRACKER_PROFILE` variable; the option wins, and without either the default profile is used. The earlier collection form takes the profile from the variable only. Nothing remembers a selection between commands.
+
+```
+python main.py auth login --profile research     # creates the profile
+python main.py collect --profile research --telegram-channel example_channel -o ./output/research
+python main.py auth profiles                      # lists the profiles
+```
+
+- **Names.** A lowercase letter, then up to 31 lowercase letters, digits, `_`, or `-`. `default` selects the default profile. Windows device names (`con`, `prn`, `aux`, `nul`, `com1`-`com9`, `lpt1`-`lpt9`) are refused, and so is a profile folder that is a link or junction or whose name differs only in case. Invalid names stop with exit 2 before any file is touched.
+- **Creating.** Only `auth login --profile NAME` creates a named profile, after a successful login. A failed login leaves no usable profile. Every other command stops with exit 2 for a profile that does not exist.
+- **Separate sources.** A named profile uses only its own session and refuses `--session` and `TELEGRAM_TRACKER_SESSION` (exit 2; unset the variable or use the default profile). Its credentials come from the `TELEGRAM_TRACKER_API_*` variables, `--config PATH`, or its own `credentials.json`, never from `./config/config.ini`, `./session_file.session`, or another profile's files. A profile name is a local label: it does not prove that two profiles use different Telegram accounts.
+- **`profile.json`.** It holds the profile's name, a random profile ID (created once and never changed), and the Telegram account the profile is bound to. Credentials are not in it. The default profile gets its `profile.json` at its next successful `auth login`; until then its profile ID is unknown. `credentials.json` keeps its format in every profile, so earlier versions still read the default profile's credentials.
+- **Account binding.** After logging in, `auth login` asks Telegram which account the session belongs to and records it in `profile.json` the first time. A later login or collection through the same profile with a session of another account stops with exit 1 (`auth logout --profile NAME`, then log in with the bound account, or create a new profile); the binding is never replaced. `auth login` also stops when the session belongs to another account than the phone number in use. Only the profile's own session binds an account: a default-profile login or collection with `--session` or `TELEGRAM_TRACKER_SESSION` checks the account but leaves the binding as it is, and such a collection with another account is recorded without the profile ID. The account ID is stored only in `profile.json` and never shown or written to collection outputs.
+- **Logout and clear.** `auth logout --profile NAME` revokes only that profile's session. `auth clear-credentials --profile NAME` removes only that profile's `credentials.json`; its `profile.json` and session stay, so a later login keeps the same profile ID and binding. While that profile is collecting or logging in, it stops with exit 1 instead of waiting.
+- **`auth profiles`** lists the default profile and every named profile with whether each has a profile record, saved credentials, and a session file. It reads no values, works offline, and creates nothing.
+- Profile rename, delete, or copy commands do not exist; profile folders are not removed automatically.
+
+**One collection per account.** Before its first channel request, every collection asks Telegram which account it is logged in to (one extra `get_me` request, counted under `account_checks` in `collection-status.json` and outside the request controls) and holds a lease for that account in `<application home>/account-leases/` until it ends. A second collection with the same account, through another profile or another session file, stops before its first channel request with exit 1 and `The Telegram account is in use by another process (pid ..., started ..., profile ...)`. Collections with different accounts can run at the same time, each into its own `--output` folder; each keeps its own request controls, so profiles never add up to more requests for one account. Every collection therefore needs a writable application home, even with credentials and session from elsewhere; otherwise it stops with exit 1 before connecting. The coordination covers one application home: the same account used from a second home or another program at the same time is not detected. A lease left by a crashed run is not removed automatically: make sure no collection is running (check the process ID), then delete the `.lock` file named in the message.
 
 ## First login
 
@@ -181,7 +204,7 @@ python main.py collect --telegram-channel NAME [options]
 python main.py collect --batch-file FILE [options]
 python main.py build-dataset [--data-path DIR]
 python main.py build-network [--data-path DIR]
-python main.py auth login | status | logout | clear-credentials
+python main.py auth login | status | logout | clear-credentials | profiles
 ```
 
 Run `python main.py --help` or `python main.py <command> --help` for the options. Help never needs credentials, a session, or the service libraries. `python main.py` without arguments prints the overview and exits 2.
@@ -214,8 +237,8 @@ The same for every form:
 | Code | Meaning |
 |---|---|
 | `0` | Every requested target was collected, the build succeeded, or the `auth` action completed (including "nothing to do"). Empty channels and empty inputs count as success. |
-| `1` | A target failed, the login failed, the run stopped early (flood wait or rejected session), the output folder or the session is in use, writing an output or the credentials failed, the application home cannot be created, an `auth` confirmation was declined, `auth status --check` found the session logged out, the input data of a build is missing or malformed, or a library is missing. |
-| `2` | Invalid arguments, including an unreadable batch file or an unsupported line in it, and missing or invalid app credentials (before any connection). |
+| `1` | A target failed, the login failed, the run stopped early (flood wait or rejected session), the output folder, the session, or the Telegram account is in use, the session belongs to another account than the profile or the phone number, writing an output or the credentials failed, the application home cannot be created, an `auth` confirmation was declined, `auth status --check` found the session logged out, the input data of a build is missing or malformed, or a library is missing. |
+| `2` | Invalid arguments, including an unreadable batch file or an unsupported line in it, an invalid or unknown profile, `--session` or `TELEGRAM_TRACKER_SESSION` with a named profile, and missing or invalid app credentials (before any connection). |
 | `130` | Interrupted with Ctrl+C. |
 
 ## Collecting channels
@@ -328,7 +351,8 @@ The summary prints the counts (given, after removing duplicates, succeeded, fail
 output/data/                          (or the folder given with --output)
 ├── <channel>/
 │   ├── <channel>.json                channel profile metadata
-│   └── <channel>_messages.json       posts (not written by metadata-only runs)
+│   ├── <channel>_messages.json       posts (not written by metadata-only runs)
+│   └── <channel>_provenance.json     which profile collected those posts
 ├── chats.txt                         ids of chats found in the collected data
 ├── collected_chats.csv               metadata of the chats found in the data (e.g., forwards)
 ├── counter.csv                       how often each chat was found in this run
@@ -347,6 +371,7 @@ What happens when you collect into a folder that already holds data:
 |---|---|
 | `<channel>.json` | Replaced after the channel is collected |
 | `<channel>_messages.json` | Replaced (full or window), merged (`--update`), or kept (metadata only) |
+| `<channel>_provenance.json` | Written with the messages file; see [Profiles and shared folders](#profiles-and-shared-folders) |
 | `chats.txt` | Keeps the earlier ids; new ids are added in the order found |
 | `collected_chats.csv` | Keeps the earlier rows as they were; this run's rows are appended with this run's counts. No `_x`/`_y` columns are created. A run that adds no rows leaves it untouched |
 | `counter.csv` | Replaced; describes this run only |
@@ -357,9 +382,18 @@ The channel files hold collected Telegram data unfiltered, including the names, 
 
 A channel's two JSON files are written only after the whole channel was collected, so a request failure keeps its earlier files. JSON and CSV files and `chats.txt` are written to a temporary file and then moved into place, so a reader sees either the old or the new version of each file. There is no transaction across files: a crash can leave files from different runs (see below).
 
+### Profiles and shared folders
+
+Several profiles can collect into the same `--output` folder, one run at a time (the folder lock serializes them). Each saved history records which profile collected it in `<channel>/<channel>_provenance.json`: the profile name and ID (`profile_name`, `profile_id`, null when unknown), how the history was last written (`replaced`, `created`, or `merged`), the run's start time, its message count and newest message ID, and whether it took over another profile's history. It never holds an account ID, phone number, or credential.
+
+- **`--update` merges only into the same profile's history.** If the record has a profile ID, it must match; if it has only a name, the name must match. A history without a record (collected by an earlier version) can be updated only by the default profile, and it stays without a record. Otherwise that channel fails before any request for it, with guidance, and the other channels continue. A merge keeps the recorded profile. A record whose message count or newest ID no longer matches the messages file (a run stopped between the two files) refuses every `--update` of that channel.
+- **A full or window run replaces any history** and records its own profile. When the previous profile could not have updated it, the record and the channel's entry in `collection-status.json` get `takeover: true` with the previous profile's name and ID, and the run summary lists the channel.
+- Two profile names for the same Telegram account are still different profiles here, and a profile name alone cannot tell apart accounts in different application homes or on different computers. A full run resolves a refused update.
+- Access hashes and file references in the collected data are valid only for the account that collected them; the provenance record and `collection-status.json` name the profile, not the account. Channel metadata files (`<channel>.json`) and the aggregate files hold the last run's view.
+
 ## Collection status, locking, and recovery
 
-Each collection writes `collection-status.json` in the output folder. It records the state, the parameters (full, window with its bounds, update, or metadata only), the request controls and statistics, and each target's outcome (`succeeded`, `failed` with a reason, `duplicate`, `cancelled`), with the derived `min_id` and history mode for `--update`. It holds no credentials or message text.
+Each collection writes `collection-status.json` in the output folder. It records the state, the profile (`profile_name`, `profile_id`), the parameters (full, window with its bounds, update, or metadata only), the request controls and statistics, the account check (`account_checks`), and each target's outcome (`succeeded`, `failed` with a reason, `duplicate`, `cancelled`), with the derived `min_id` and history mode for `--update` and any takeover. It holds no credentials, account IDs, or message text. Status files written by earlier versions have no profile fields: their profile is unknown.
 
 | State | Meaning | Builders |
 |---|---|---|
@@ -370,7 +404,7 @@ Each collection writes `collection-status.json` in the output folder. It records
 
 `build-dataset` also notes when the last collection used a history window or `--update`. Folders without a status file (from earlier versions) are accepted.
 
-**One collection per folder.** A run acquires `.collection.lock` in the output folder after login and removes it when it ends. An existing lock is checked before connecting and causes exit 1 with `<folder> is in use by another collection (pid ..., started ...)`. If two runs pass that check before either acquires the lock, both can reach login; only one can hold the lock and write collection output at a time. The lock protects the folder, not the account: never run two collections with the same session, even into different folders.
+**One collection per folder.** A run acquires `.collection.lock` in the output folder after login and removes it when it ends. An existing lock is checked before connecting and causes exit 1 with `<folder> is in use by another collection (pid ..., started ...)`. If two runs pass that check before either acquires the lock, both can reach login; only one can hold the lock and write collection output at a time. The lock protects the folder; the session lease and the account lease (see [Account profiles](#account-profiles)) keep a second collection off the same session or Telegram account, even into another folder.
 
 **Stale lock.** A lock left by a crashed or killed run is not removed automatically. To recover:
 

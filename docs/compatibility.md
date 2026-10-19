@@ -91,6 +91,51 @@ Live limits: login, checked status, and logout were validated offline with a fak
 client only. Telegram's responses to `log_out` and `is_user_authorized` on real
 sessions, and Telethon's session-file updates during a check, are unverified.
 
+### Account profiles
+
+- Selection: `--profile NAME` (canonical `collect` and `auth` actions) >
+  `TELEGRAM_TRACKER_PROFILE` (also the legacy form) > `default`. Names match
+  `[a-z][a-z0-9_-]{0,31}`; Windows device names, link/junction profile folders, and
+  case-variant folders are refused (exit 2). Nothing is saved as an active profile.
+- `default` is the application home itself, with the session and credential rules
+  above unchanged. A named profile is `<home>/profiles/<name>/` with its own
+  `credentials.json` (same v1 format), `session_file.session`, and `profile.json`;
+  it refuses `--session` and `TELEGRAM_TRACKER_SESSION` and never reads
+  `./config/config.ini`, `./session_file.session`, or another profile's files.
+- `profile.json`: `schema_version` 1, `name`, `profile_id` (random UUID, immutable),
+  `account_id` (nullable; private). Owner-only, atomically replaced under a
+  `profile.json.lock` lease. Created by a successful `auth login` (named profiles
+  exist only once it is there; the default profile gets one at its next login) and
+  kept by `clear-credentials`. An account is bound once, only through the profile's
+  own session, and never replaced; a session of another account stops login and
+  collection with exit 1. `auth login` also refuses a session whose account phone
+  number differs from the one in use.
+- Earlier versions ignore `profiles/`, `profile.json`, and `account-leases/`; the
+  default `credentials.json` and session stay readable by them. There is no
+  format conversion and no backup to restore.
+- `collect` sends one `get_me` after login (recorded as `account_checks`, outside
+  the request controls) and holds `<home>/account-leases/<hash>.lock` until the run
+  ends, before the output lock. Lease order: session, account, output folder. The
+  same account in a second collection is refused; different accounts may run at the
+  same time into different folders, each with its own request controls. Every
+  collection needs a writable application home for the lease. Coordination is per
+  application home. Stale leases are reported, never removed.
+- Provenance: `collection-status.json` gains `profile_name`, `profile_id` (null when
+  unknown; absent in sidecars of earlier versions), and `account_checks`; target
+  entries of replaced foreign histories gain `takeover`, `previous_profile_name`,
+  and `previous_profile_id`. Each written history gets
+  `<channel>/<channel>_provenance.json` (format 1). `--update` follows the matching
+  rules in the README (ID, then name, then default-only for histories without a
+  record) and refuses before any request for that channel. No output holds an
+  account ID, phone number, API credential, session path, or lease name.
+- Not implemented: profile rename/delete/copy, session migration, OS keyring,
+  coordination across application homes, multi-profile batches.
+
+Platform limits: owner-only protection of the new files was exercised on Windows
+(protected DACL) only; the POSIX 0700/0600 branch is unexercised on this host. The
+two-process account-lease test runs on the local file system; network file systems
+are not covered. Profiles were not tested against live Telegram accounts.
+
 ### History selection and updates
 
 `collect` supports exclusive ID bounds, inclusive `--since`, exclusive `--until`,
@@ -132,9 +177,11 @@ in input order for deterministic aggregates:
   directly. There is no transaction spanning all outputs.
 - A folder lock is checked before connecting and acquired after login. Stale
   `.collection.lock` files are reported with recovery steps, never removed automatically.
-- `collection-status.json` records parameters, outcomes, request statistics, and
-  `running`, `complete`, `partial`, or `interrupted` state without credentials or
-  message text. Metadata-only marks histories retained from earlier runs as stale.
+- `collection-status.json` records the profile, parameters, outcomes, request
+  statistics, and `running`, `complete`, `partial`, or `interrupted` state without
+  credentials, account IDs, or message text. Metadata-only marks histories retained from earlier runs as stale.
+- Channel files keep collected users unfiltered, except that a `User` with `is_self`
+  (the collecting account) is written with `phone` set to null.
 - Cancellation/fatal errors retain completed channels and finalize their aggregates
   with interrupted status when storage remains writable.
 
@@ -212,8 +259,10 @@ with no sidecar.
   Windows loopback `socketpair()`. Base cases fail recorded violations even if caught.
   It also refuses any file system call on the real `~/.telegram_tracker` tree,
   including relative, case, `..`, 8.3, `file:` URI, and symlink/junction aliases
-  (resolved component by component without entering the tree), and gives every test
-  process a temporary `TELEGRAM_TRACKER_HOME` and `TELEGRAM_TRACKER_SESSION`.
+  (resolved component by component without entering the tree), including its
+  `profiles/` and `account-leases/` folders, gives every test process a temporary
+  `TELEGRAM_TRACKER_HOME` and `TELEGRAM_TRACKER_SESSION`, and removes
+  `TELEGRAM_TRACKER_PROFILE`.
 - `tests/fakes.py` supplies synthetic responses, pagination, scripted errors/delays,
   a fake client, and scripted prompts. `tests/fixtures/telegram_world.json` covers
   shared chats, empty/missing/private channels, Unicode, forwards, replies, service
