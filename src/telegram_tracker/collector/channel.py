@@ -16,6 +16,7 @@ from telegram_tracker.collector.history import HistoryWindow, fetch_history
 from telegram_tracker.collector.outcomes import TargetUnavailable
 from telegram_tracker.collector.rpc import CHANNEL
 from telegram_tracker.storage.files import history_path, merge_histories, newest_id, read_history
+from telegram_tracker.storage.provenance import check_update
 from telegram_tracker.storage.records import ChannelResult
 from telegram_tracker.utils import JSONEncoder
 
@@ -48,7 +49,8 @@ async def collect_channel(
 		metadata_only=False,
 		window=None,
 		update=False,
-		after_resolve=None
+		after_resolve=None,
+		profile=None
 	):
 	'''
 	Collect one target and return its ChannelResult; nothing is written.
@@ -60,10 +62,13 @@ async def collect_channel(
 	With `update`, an existing <target>_messages.json sets min_id to its
 	newest id (checked before any request) and the fetched posts are merged
 	into it, read again after the fetch; without one the history is
-	collected in full. `after_resolve(entity)` is awaited right after entity
-	resolution (entity is False when missing) and may raise to stop.
-	Raises TargetUnavailable, PaginationStalled, HistoryUnreadable, or
-	RequestFailed for a target that fails on its own.
+	collected in full. With a `profile` (RunProfile), --update into a
+	history another profile collected raises HistoryRefused before any
+	request (see storage.provenance). `after_resolve(entity)` is awaited
+	right after entity resolution (entity is False when missing) and may
+	raise to stop. Raises TargetUnavailable, PaginationStalled,
+	HistoryUnreadable, HistoryRefused, or RequestFailed for a target that
+	fails on its own.
 	'''
 	window = window or HistoryWindow()
 	result = ChannelResult(index=index, target=target)
@@ -73,7 +78,10 @@ async def collect_channel(
 	if update and not metadata_only:
 		if os.path.exists(path):
 			has_history = True
-			window = HistoryWindow(min_id=newest_id(read_history(path)))
+			saved = read_history(path)
+			if profile is not None:
+				check_update(output_folder, target, saved, profile)
+			window = HistoryWindow(min_id=newest_id(saved))
 		result.min_id = window.min_id
 
 	print('')
