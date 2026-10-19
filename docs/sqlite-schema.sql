@@ -67,8 +67,9 @@ CREATE TABLE run_targets (
   -- A full/window replace of a history that this run's profile could not have
   -- updated; the previous profile is kept here.
   takeover           INTEGER NOT NULL DEFAULT 0 CHECK (takeover IN (0, 1)),
-  previous_profile_name TEXT,
-  previous_profile_id   TEXT,
+  previous_profile_name TEXT CHECK (previous_profile_name IS NULL OR (length(previous_profile_name) <= 32
+                       AND previous_profile_name GLOB '[a-z]*' AND previous_profile_name NOT GLOB '*[^a-z0-9_-]*')),
+  previous_profile_id   TEXT CHECK (previous_profile_id IS NULL OR length(previous_profile_id) = 36),
   files_state        TEXT CHECK (files_state IN ('pending', 'written')),
   CHECK (takeover = 1 OR (previous_profile_name IS NULL AND previous_profile_id IS NULL)),
   PRIMARY KEY (run_id, input_index)
@@ -197,7 +198,8 @@ CREATE TABLE channel_snapshots (
 CREATE TABLE histories (
   channel_id    INTEGER PRIMARY KEY,
   run_id        INTEGER NOT NULL REFERENCES collection_runs (run_id),  -- last run that changed it
-  profile_name  TEXT,                       -- NULL = unknown
+  profile_name  TEXT CHECK (profile_name IS NULL OR (length(profile_name) <= 32  -- NULL = unknown
+                  AND profile_name GLOB '[a-z]*' AND profile_name NOT GLOB '*[^a-z0-9_-]*')),
   profile_id    TEXT CHECK (profile_id IS NULL OR length(profile_id) = 36),
   mode          TEXT NOT NULL CHECK (mode IN ('replaced', 'created', 'merged')),
   window_bounds TEXT CHECK (window_bounds IS NULL OR json_valid(window_bounds)),  -- last replace; NULL = full

@@ -276,8 +276,13 @@ class ProvenanceTests(SchemaTestCase):
 		self.assertEqual(self.one(
 			"SELECT access_hash, run_id, profile_name, profile_id FROM peer_access_hashes WHERE peer_id = 2001"),
 			(8001, 1, None, None))
+		# a later sighting that keeps raw (such as a min copy) moves last_seen_run only
+		self.con.execute("UPDATE peers SET last_seen_run = 2 WHERE peer_kind = 'user' AND peer_id = 2001")
+		self.assertEqual(self.one(
+			"SELECT access_hash, run_id, profile_name, profile_id FROM peer_access_hashes WHERE peer_id = 2001"),
+			(8001, 1, None, None))
 		replaced = dict(user, access_hash=8101)
-		self.con.execute("UPDATE peers SET raw = ?, run_id = 2, last_seen_run = 2 WHERE peer_kind = 'user' AND peer_id = 2001",
+		self.con.execute("UPDATE peers SET raw = ?, run_id = 2 WHERE peer_kind = 'user' AND peer_id = 2001",
 			(to_json_text(replaced),))
 		self.assertEqual(self.one(
 			"SELECT access_hash, run_id, profile_name, profile_id FROM peer_access_hashes WHERE peer_id = 2001"),
@@ -302,12 +307,28 @@ class ProvenanceTests(SchemaTestCase):
 				(21, 5002, 6002, "b'\\x04\\x05'", 'work', PROFILE_ID)])
 
 	def test_profile_fields_are_checked(self):
-		for name, profile_id in (('Bad Name', None), ('1abc', None), ('work.2', None), ('w' * 33, None),
-				('default', '12345')):
-			with self.subTest(name=name, profile_id=profile_id):
-				with self.assertRaises(sqlite3.IntegrityError):
-					self.add_run(10, profile_name=name, profile_id=profile_id)
-		self.add_run(11, profile_name='work-2_b', profile_id=OTHER_PROFILE_ID)
+		# runs, histories and takeover records share one profile format
+		def history(key, name, profile_id):
+			self.con.execute(
+				'INSERT INTO histories (channel_id, run_id, profile_name, profile_id, mode, envelope, message_count, '
+				"updated_at) VALUES (?, 1, ?, ?, 'replaced', '{}', 0, 't')", (5000 + key, name, profile_id))
+
+		def takeover(key, name, profile_id):
+			self.con.execute(
+				'INSERT INTO run_targets (run_id, input_index, input, status, takeover, previous_profile_name, '
+				"previous_profile_id) VALUES (1, ?, 'synthetic_fx', 'succeeded', 1, ?, ?)", (key, name, profile_id))
+
+		def run(key, name, profile_id):
+			self.add_run(10 + key, profile_name=name, profile_id=profile_id)
+
+		for place in (run, history, takeover):
+			for key, (name, profile_id) in enumerate((('Bad Name', None), ('1abc', None), ('work.2', None),
+					('w' * 33, None), ('default', '12345'))):
+				with self.subTest(place=place.__name__, name=name, profile_id=profile_id):
+					with self.assertRaises(sqlite3.IntegrityError):
+						place(key, name, profile_id)
+			with self.subTest(place=place.__name__, valid=True):
+				place(9, 'work-2_b', OTHER_PROFILE_ID)
 
 	def test_previous_profile_only_with_a_takeover(self):
 		self.assertRejected(
@@ -334,6 +355,19 @@ class ConstraintTests(SchemaTestCase):
 		self.assertRejected('INSERT INTO messages (channel_id, message_id, run_id, raw) VALUES (?, 0, 1, ?)',
 			CHANNEL, '{}')
 
+	def test_raw_must_be_strict_json(self):
+		# json_extract reads JSON5 since SQLite 3.45 (and raises before it); only
+		# json_valid keeps raw to strict JSON
+		json5 = "{_:'Chat',id:6}"
+		self.add_history()
+		for sql, args in (
+				("INSERT INTO peers (peer_kind, peer_id, constructor, is_min, raw, run_id, first_seen_run, "
+					"last_seen_run) VALUES ('chat', 6, 'Chat', 0, ?, 1, 1, 1)", (json5,)),
+				('INSERT INTO messages (channel_id, message_id, run_id, raw) VALUES (?, 6, 1, ?)', (CHANNEL, json5))):
+			with self.subTest(sql.split(' (')[0]):
+				with self.assertRaises((sqlite3.IntegrityError, sqlite3.OperationalError)):
+					self.con.execute(sql, args)
+
 	def test_message_key_upserts_the_fetched_copy(self):
 		self.add_history()
 		raw = VARIANTS['messages'][1]['raw']
@@ -355,6 +389,11 @@ class ConstraintTests(SchemaTestCase):
 		self.assertRejected(
 			"INSERT INTO peers (peer_kind, peer_id, constructor, is_min, raw, run_id, first_seen_run, last_seen_run) "
 			"VALUES ('chat', 5, 'Chat', 2, '{}', 1, 1, 1)")
+		# indexed generated columns evaluate json_extract before the CHECK runs
+		with self.assertRaises((sqlite3.IntegrityError, sqlite3.OperationalError)):
+			self.con.execute(
+				"INSERT INTO peers (peer_kind, peer_id, constructor, is_min, raw, run_id, first_seen_run, last_seen_run) "
+				"VALUES ('chat', 6, 'Chat', 0, 'not json', 1, 1, 1)")
 
 	def test_history_entities_reference_peers(self):
 		self.add_history()

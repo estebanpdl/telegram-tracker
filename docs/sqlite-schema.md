@@ -52,6 +52,8 @@ as JSON text. Everything else about a message or entity is derived from it.
   `2024-01-02 03:04:05+00:00` (space separator, UTC offset). Bytes read as Python
   literals such as `b'\x01\x02'`; `ast.literal_eval` turns them back into bytes.
   `collection_runs.serializer_version` records this format (`1`).
+- **Validity.** JSON columns must pass `json_valid`, so they hold strict JSON. Text that
+  only parses as JSON5 is refused, even though `json_extract` can read it.
 - **Computed columns.** Query columns such as `messages.date`, `messages.fwd_peer_id`
   or `peers.phone` are `GENERATED ALWAYS AS (json_extract(raw, ...)) VIRTUAL`.
   SQLite computes them from `raw` when they are read, so they can't disagree with it.
@@ -146,7 +148,7 @@ One row per input target of a run, in input order.
 | `participants_count` | Channel size as seen by this run. |
 | `reason` | Sanitized failure reason. |
 | `takeover` | `1` when a full or window run replaced a history that belonged to another profile (see [Runs and provenance](#runs-and-provenance)). |
-| `previous_profile_name`, `previous_profile_id` | That history's previous profile; `NULL` unless `takeover = 1`. |
+| `previous_profile_name`, `previous_profile_id` | That history's previous profile, in the `collection_runs` format; `NULL` unless `takeover = 1`. |
 | `files_state` | In `both` mode: `pending` while the target's files are being published, then `written`. `NULL` in `sqlite` mode. |
 
 Key: (`run_id`, `input_index`). Indexes: `run_targets_by_channel` (`channel_id`,
@@ -283,7 +285,7 @@ One row per channel whose history is stored. No row means no history; a row with
 |---|---|
 | `channel_id` | Channel. |
 | `run_id` | Last run that changed the history. |
-| `profile_name`, `profile_id` | Profile whose view of the channel this history is; `NULL` = unknown. |
+| `profile_name`, `profile_id` | Profile whose view of the channel this history is, in the `collection_runs` format; `NULL` = unknown. |
 | `mode` | How it was last changed: `replaced`, `created` or `merged`. |
 | `window_bounds` | JSON of the window options of the last replace; `NULL` for a full collection. |
 | `envelope` | The response without `messages`, `chats` and `users`. |
