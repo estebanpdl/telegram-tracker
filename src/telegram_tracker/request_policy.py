@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 '''
-One request policy per collection run: every application RPC (entity
+One request policy per collection run: channel collection RPCs (entity
 resolution, channel and enrichment full-channel requests, history pages)
-is admitted through `RequestPolicy.call`.
+are admitted through `RequestPolicy.call`. Login and the account check
+precede this policy.
 
 - At most `concurrency` RPCs are in flight (semaphore). No permit is held
   while a call sleeps for spacing, a flood cooldown, or a retry backoff.

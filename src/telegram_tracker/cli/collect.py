@@ -7,7 +7,8 @@ The profile, session, and app credentials are resolved as for `auth`
 (see telegram_tracker.credentials), and the session lease is held from
 before the client exists until the run ends. After login, one get_me
 request identifies the account; the account lease is then held until the
-run ends, so one Telegram account collects in one process at a time.
+run ends, allowing one collection per verified account within one
+application home.
 '''
 
 # import modules

@@ -2,9 +2,10 @@
 '''
 `auth login|status|logout|clear-credentials|profiles`.
 
-Every action works on one profile (--profile, TELEGRAM_TRACKER_PROFILE,
-or the default; see credentials/profiles.py). Only login creates a named
-profile; the others refuse a profile that does not exist.
+Except for the inventory action `profiles`, each action works on one
+profile (--profile, TELEGRAM_TRACKER_PROFILE, or the default; see
+credentials/profiles.py). Only login creates a named profile; other
+single-profile actions refuse a profile that does not exist.
 
 login: resolve the session and app credentials, ask for missing ones,
 log in with the shared code/two-step lifecycle, check the logged-in

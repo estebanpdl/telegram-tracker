@@ -8,8 +8,9 @@ profile.json: a profile's identity, beside its credentials.json.
 Exactly these keys. `profile_id` is a random UUID, created once and never
 changed; collection outputs record it as the profile's opaque ID.
 `account_id` is the Telegram user ID verified through the profile's own
-session (null until then). It is private: it never appears in outputs or
-messages. Once set it is never replaced, so a profile cannot silently
+session (null until then). This private metadata is not added to collection
+provenance or diagnostics; collected payloads can independently contain
+the same user ID. Once set it is never replaced, so a profile cannot silently
 move to another account. Removing credentials.json leaves profile.json,
 so the profile keeps its ID and binding across `clear-credentials` and a
 later login.

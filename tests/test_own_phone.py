@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 '''
-The collecting account's own phone number is not written: a User object
-with `is_self` keeps every field except `phone`, which becomes null, in
+The collecting account's User.phone is redacted when written: a User
+object with `is_self` keeps every field except `phone`, which becomes null, in
 <channel>.json and <channel>_messages.json. Every other user, including
 one with a phone number, is written unfiltered. Synthetic users only.
 '''
