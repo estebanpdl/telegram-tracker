@@ -2,6 +2,9 @@
 __pycache__/
 .ipynb_checkpoints/
 .vscode/
+*.egg-info
+build/
+dist/
 
 # Collected data
 output/
@@ -16,10 +19,6 @@ nb/*
 credentials.json
 credentials.json.lock
 credentials.json.*.tmp
-
-# files
-test.py
-chatgpt.py
 
 # development plan
 plan/*
