@@ -31,6 +31,7 @@ LOGIN = 'login'
 STATUS = 'status'
 LOGOUT = 'logout'
 CLEAR_CREDENTIALS = 'clear-credentials'
+PROFILES = 'profiles'
 
 
 def invocation(prog):
@@ -151,25 +152,42 @@ def add_target_arguments(parser):
 	)
 
 
+def add_profile_argument(group):
+	'''
+	--profile, shared by `collect` and the `auth` actions.
+	'''
+	group.add_argument(
+		'--profile',
+		metavar='NAME',
+		help='Account profile: its own saved credentials and session '
+			'(created by `auth login --profile NAME`). Default: '
+			'TELEGRAM_TRACKER_PROFILE if set, else the default profile, which '
+			'uses the application home itself.'
+	)
+
+
 def add_session_arguments(group):
 	'''
-	--session and --config, shared by `collect` and `auth`.
+	--profile, --session, and --config, shared by `collect` and `auth`.
 	'''
+	add_profile_argument(group)
 	group.add_argument(
 		'--session',
 		metavar='PATH',
-		help='Telegram session file. Default: TELEGRAM_TRACKER_SESSION if set, '
-			'else session_file.session in the application home '
-			'(~/.telegram_tracker, or TELEGRAM_TRACKER_HOME); an existing '
-			'./session_file.session is used while the home has none.'
+		help='Telegram session file (default profile only). Default: '
+			'TELEGRAM_TRACKER_SESSION if set, else session_file.session in the '
+			'application home (~/.telegram_tracker, or TELEGRAM_TRACKER_HOME); an '
+			'existing ./session_file.session is used while the home has none. A '
+			'named profile always uses its own session.'
 	)
 	group.add_argument(
 		'--config',
 		metavar='PATH',
 		help='INI file with a [Telegram API credentials] section, used instead of '
-			'the saved credentials and ./config/config.ini. '
-			'TELEGRAM_TRACKER_API_ID, TELEGRAM_TRACKER_API_HASH, and '
-			'TELEGRAM_TRACKER_PHONE override single values.'
+			"the profile's saved credentials (and, for the default profile, "
+			'./config/config.ini). TELEGRAM_TRACKER_API_ID, '
+			'TELEGRAM_TRACKER_API_HASH, and TELEGRAM_TRACKER_PHONE override '
+			'single values.'
 	)
 
 
@@ -182,7 +200,7 @@ def add_auth_parsers(commands):
 		AUTH,
 		help='Log in to Telegram, check or revoke the session, and manage saved credentials.',
 		description='Log in to Telegram, check or revoke the session, and manage '
-			'the app credentials saved in the application home.'
+			'the app credentials saved in the application home and its profiles.'
 	)
 	actions = auth.add_subparsers(dest='auth_command', metavar='<action>', required=True)
 
@@ -191,12 +209,14 @@ def add_auth_parsers(commands):
 		help='Log in and save the app credentials.',
 		description='Log in to Telegram with the selected session. Missing app '
 			'credentials (api_id, api_hash, phone) are asked for; after a '
-			'successful login, a complete set you typed is saved to credentials.json '
-			'in the application home when nothing was saved before '
+			'successful login, a complete set you typed is saved to the '
+			"profile's credentials.json when nothing was saved before "
 			'(plaintext, readable only by your account). '
 			'Values from the environment or an INI file are saved only if you '
 			'agree, as are replacements. An authorized session skips the login '
-			'code and two-step verification password prompts.'
+			'code and two-step verification password prompts. The logged-in '
+			'account is checked and recorded in profile.json; --profile NAME '
+			'creates a named profile.'
 	)
 	add_session_arguments(login)
 	save = login.add_mutually_exclusive_group()
@@ -214,8 +234,8 @@ def add_auth_parsers(commands):
 	status = actions.add_parser(
 		STATUS,
 		help='Show which session and credential sources are used.',
-		description='Show the application home, the selected session, and where '
-			'each app credential comes from. Values are never shown. Offline: a '
+		description='Show the application home, the profile, the selected session, '
+			'and where each app credential comes from. Values are never shown. Offline: a '
 			'session file does not prove that it is logged in.'
 	)
 	add_session_arguments(status)
@@ -238,12 +258,26 @@ def add_auth_parsers(commands):
 	clear = actions.add_parser(
 		CLEAR_CREDENTIALS,
 		help='Delete the saved credentials.',
-		description='Delete credentials.json from the application home. The '
-			'session, environment variables, and INI files are not touched.'
+		description="Delete the profile's credentials.json. The session, the "
+			'profile record (profile.json), environment variables, and INI files '
+			'are not touched.'
 	)
+	add_profile_argument(clear)
 	clear.add_argument('--yes', action='store_true', help='Do not ask for confirmation.')
 
-	return auth, {LOGIN: login, STATUS: status, LOGOUT: logout, CLEAR_CREDENTIALS: clear}
+	profiles = actions.add_parser(
+		PROFILES,
+		help='List the account profiles.',
+		description='List the default profile and every named profile in the '
+			'application home, with whether each has a profile record, saved '
+			'credentials, and a session file. Offline; reads no values and '
+			'creates nothing.'
+	)
+
+	return auth, {
+		LOGIN: login, STATUS: status, LOGOUT: logout, CLEAR_CREDENTIALS: clear,
+		PROFILES: profiles
+	}
 
 
 def add_min_id_argument(group):
