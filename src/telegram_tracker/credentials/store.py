@@ -138,7 +138,7 @@ def save_store(home, values):
 			reject_link(path)
 		except ProtectionError as exc:
 			raise StoreError(str(exc)) from None
-		_replace_privately(path, text.encode('utf-8'))
+		replace_privately(path, text.encode('utf-8'))
 
 
 def clear_store(home):
@@ -175,7 +175,7 @@ def _store_lease(path):
 		lease.__exit__(None, None, None)
 
 
-def _replace_privately(path, data):
+def replace_privately(path, data):
 	'''
 	Stage `data` in an exclusive private sibling file, then replace `path`.
 	The staged file is removed on exit. `path` keeps its old content on

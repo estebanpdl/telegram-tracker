@@ -35,12 +35,16 @@ def lease_path(path):
 
 def holder(path):
 	'''
-	"pid N, started T" of the lease on `path`, or '' when unreadable.
+	"pid N, started T[, profile P]" of the lease on `path`, or '' when
+	unreadable.
 	'''
 	try:
 		with open(lease_path(path), encoding='utf-8') as reader:
 			info = json.load(reader)
-		return f'pid {info.get("pid")}, started {info.get("started_at")}'
+		text = f'pid {info.get("pid")}, started {info.get("started_at")}'
+		if isinstance(info.get('profile'), str):
+			text += f', profile {info["profile"]}'
+		return text
 	except (OSError, ValueError, AttributeError):
 		return ''
 
@@ -48,12 +52,15 @@ def holder(path):
 class Lease:
 	'''
 	Context manager holding the lease on `path`. `what` names the guarded
-	file in messages ("the session", "the credentials file").
+	file in messages ("the session", "the credentials file"); `profile`,
+	when given, is recorded so a refused process can name the holder's
+	profile.
 	'''
-	def __init__(self, path, what):
+	def __init__(self, path, what, profile=None):
 		self.path = lease_path(path)
 		self.guarded = path
 		self.what = what
+		self.profile = profile
 
 	def __enter__(self):
 		try:
@@ -71,11 +78,14 @@ class Lease:
 				f'cannot lock {self.what.lower()} ({self.path}: '
 				f'{exc.strerror or type(exc).__name__})'
 			) from None
+		info = {
+			'pid': os.getpid(),
+			'started_at': datetime.now(timezone.utc).isoformat(timespec='seconds')
+		}
+		if self.profile is not None:
+			info['profile'] = self.profile
 		with os.fdopen(fd, 'w', encoding='utf-8') as writer:
-			json.dump({
-				'pid': os.getpid(),
-				'started_at': datetime.now(timezone.utc).isoformat(timespec='seconds')
-			}, writer)
+			json.dump(info, writer)
 		return self
 
 	def __exit__(self, *exc_info):

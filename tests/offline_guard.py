@@ -11,13 +11,17 @@ Importing this module installs the guard once. It blocks, and records:
 	  (`~/.telegram_tracker`) or anything below it, also through relative,
 	  case, `..`, `file:` URI, and symlink/junction aliases: opens, stat
 	  and existence checks, listing, directory creation and removal,
-	  renames, permission changes, and SQLite connections.
+	  renames, permission changes, and SQLite connections. This covers
+	  its profile folders (`profiles/<name>/` with their credentials,
+	  sessions, and profile.json) and `account-leases/`.
 
 The real application home is captured from `~` when the guard is
 installed, before any test changes the environment. The guard then points
 TELEGRAM_TRACKER_HOME (inherited by subprocesses) at a temporary directory
-and TELEGRAM_TRACKER_SESSION at a session path inside it, so code under
-test never resolves the real home or a session in the working directory.
+and TELEGRAM_TRACKER_SESSION at a session path inside it, and removes
+TELEGRAM_TRACKER_PROFILE, so code under test never resolves the real
+home, a session in the working directory, or a profile selected in the
+environment the suite was started from.
 
 Loopback connections made inside `socket.socketpair()` stay allowed: on
 Windows, asyncio builds its event-loop self-pipe that way.
@@ -61,6 +65,7 @@ _PROTECTED_SUFFIXES = ('.session', '.session-journal')
 
 HOME_ENV = 'TELEGRAM_TRACKER_HOME'
 SESSION_ENV = 'TELEGRAM_TRACKER_SESSION'
+PROFILE_ENV = 'TELEGRAM_TRACKER_PROFILE'
 APP_DIR = '.telegram_tracker'
 
 _state = threading.local()
@@ -406,6 +411,7 @@ def _install_home_guards():
 	session = os.environ.get(SESSION_ENV)
 	if not session or in_real_home(session):
 		os.environ[SESSION_ENV] = os.path.join(home, 'session_file.session')
+	os.environ.pop(PROFILE_ENV, None)
 
 
 def install():
