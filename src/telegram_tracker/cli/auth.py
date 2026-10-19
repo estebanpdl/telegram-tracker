@@ -111,6 +111,8 @@ def run_auth(args, *, client_factory=None, authorize=None):
 	}[action]
 	try:
 		return handler(args, client_factory=client_factory, authorize=authorize)
+	except ModuleNotFoundError as exc:
+		return missing_dependency(AUTH, exc)
 	except (homes.HomeError, sources.CredentialError) as exc:
 		return fail(exc, 2)
 	except InputUnavailable as exc:

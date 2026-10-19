@@ -11,9 +11,11 @@ protection.py), not encrypted.
 
 Saving stages the JSON in an exclusive sibling temporary file that is made
 private before any secret byte is written, flushes it to disk, and
-replaces the file atomically; on any failure the previous file stays as it
-was. Saves and removals hold a short lease on the file so concurrent
-updates cannot interleave. Errors never include stored values.
+replaces the file atomically. Failures before replacement preserve the
+previous file; a failed protection check after replacement reports an
+error after the new file is already in place. Saves and removals hold a
+short lease on the file so concurrent updates cannot interleave. Errors
+never include stored values.
 '''
 
 # import modules
@@ -95,9 +97,9 @@ def read_store(home):
 	if not isinstance(data, dict):
 		raise StoreError(f'{path} is not a credentials file')
 	version = data.get('schema_version')
-	if version != SCHEMA_VERSION:
+	if type(version) is not int or version != SCHEMA_VERSION:
 		raise StoreError(
-			f'{path} has schema version {version!r}; this version reads {SCHEMA_VERSION}'
+			f'{path} has an unsupported schema version; this version reads {SCHEMA_VERSION}'
 		)
 	if set(data) != set(KEYS):
 		raise StoreError(f'{path} must hold exactly: {", ".join(KEYS)}')
@@ -176,8 +178,9 @@ def _store_lease(path):
 def _replace_privately(path, data):
 	'''
 	Stage `data` in an exclusive private sibling file, then replace `path`.
-	The staged file never survives; `path` keeps its old content on
-	failure.
+	The staged file is removed on exit. `path` keeps its old content on
+	failures before replacement; the final protection check may fail
+	after the new file is in place.
 	'''
 	tmp = f'{path}.{os.getpid()}.tmp'
 	try:

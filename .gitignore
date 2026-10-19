@@ -9,9 +9,13 @@ output/
 # nbs
 nb/*
 
-# session_file.session
-session_file.session
-session_file.session-journal
+# Local authentication state
+*.session
+*.session-*
+*.session.lock
+credentials.json
+credentials.json.lock
+credentials.json.*.tmp
 
 # files
 test.py

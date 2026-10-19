@@ -191,10 +191,12 @@ def add_auth_parsers(commands):
 		help='Log in and save the app credentials.',
 		description='Log in to Telegram with the selected session. Missing app '
 			'credentials (api_id, api_hash, phone) are asked for; after a '
-			'successful login, values you typed are saved to credentials.json '
-			'in the application home (plaintext, readable only by your account). '
+			'successful login, a complete set you typed is saved to credentials.json '
+			'in the application home when nothing was saved before '
+			'(plaintext, readable only by your account). '
 			'Values from the environment or an INI file are saved only if you '
-			'agree. An authorized session asks for nothing.'
+			'agree, as are replacements. An authorized session skips the login '
+			'code and two-step verification password prompts.'
 	)
 	add_session_arguments(login)
 	save = login.add_mutually_exclusive_group()
@@ -318,8 +320,9 @@ def add_collect_arguments(parser, prog=SCRIPT_PROG):
 
 	controls = parser.add_argument_group(
 		'request controls',
-		'Shared by every Telegram request of the run, including metadata '
-		'lookups. These are project limits, not a safe rate guaranteed by '
+		'Shared by application requests after login, including metadata '
+		'lookups; Telethon may retry inside an attempt. These are project '
+		'limits, not a safe rate guaranteed by '
 		f'Telegram. The earlier `{invocation(prog)} --batch-file ...` form uses the '
 		'defaults.'
 	)
@@ -336,7 +339,7 @@ def add_collect_arguments(parser, prog=SCRIPT_PROG):
 		type=bounded_float(0.1, 60),
 		default=0.25,
 		metavar='SECONDS',
-		help='Minimum gap between Telegram requests, 0.1-60 (default: 0.25).'
+		help='Minimum gap between policy attempts, 0.1-60 (default: 0.25).'
 	)
 	controls.add_argument(
 		'--max-flood-wait',

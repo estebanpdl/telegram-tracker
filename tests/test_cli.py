@@ -112,7 +112,7 @@ class HelpTests(CliTestCase):
 				code, out, _ = self.run_cli([command, '--help'], client_factory=None)
 				self.assertEqual(code, 0)
 				for text in texts:
-					self.assertIn(text, out)
+					self.assertIn(text, ' '.join(out.split()))
 		self.assertEqual(self.factory_calls, 0)
 
 	def test_legacy_collection_help_shows_only_legacy_options(self):
