@@ -12,7 +12,6 @@ failure, or cancellation.
 import asyncio
 import contextlib
 import functools
-import os
 import sys
 
 # import local submodules
@@ -23,12 +22,11 @@ from telegram_tracker.collector.outcomes import SESSION_ERRORS, CollectionSummar
 	stop_reason_for
 from telegram_tracker.collector.rpc import MetadataCache, Requests
 from telegram_tracker.request_policy import AccountStopped, RequestFailed, RequestPolicy
-from telegram_tracker.storage.files import history_path
 from telegram_tracker.storage.provenance import HistoryRefused
 from telegram_tracker.storage.records import COMPLETE, INTERRUPTED, PARTIAL, \
 	HistoryUnreadable, StorageError
 from telegram_tracker.storage.status import StatusFile
-from telegram_tracker.storage.writer import OutputLock, OutputWriter, check_unlocked
+from telegram_tracker.storage.writer import OutputLock, check_unlocked, open_file_writer
 from telegram_tracker.utils import create_dirs
 
 
@@ -76,7 +74,8 @@ async def run_collection(
 		targets_given=None,
 		policy=None,
 		profile=None,
-		identify=None
+		identify=None,
+		writer_factory=None
 	):
 	'''
 	Collect `targets` (normalized, without duplicates) with one client.
@@ -100,6 +99,12 @@ async def run_collection(
 		manager held until the run ends (the account lease) whose value is
 		the run's RunProfile, replacing `profile`. Raising stops the run
 		before any channel request.
+	writer_factory -> opens the run's store once the output folder is
+		locked, before collection-status.json is written (keyword
+		arguments output_folder, profile, started_at, targets, parameters;
+		see storage.writer.OutputWriter for the writer's methods); default:
+		the file outputs. Raising StorageError stops the run before any
+		channel request.
 
 	Missing/inaccessible targets, stalled pagination, unreadable saved
 	histories (--update), --update into another profile's history, and
@@ -156,7 +161,8 @@ async def run_collection(
 					metadata_only=metadata_only,
 					window=window,
 					update=update,
-					account_checks=0 if identify is None else 1
+					account_checks=0 if identify is None else 1,
+					writer_factory=writer_factory or open_file_writer
 				)
 	finally:
 		await client.disconnect()
@@ -165,14 +171,30 @@ async def run_collection(
 
 
 async def _collect_locked(
-		client, summary, policy, parameters, *, metadata_only, window, update, account_checks):
-	targets = summary.requested
+		client, summary, policy, parameters, *, metadata_only, window, update, account_checks,
+		writer_factory):
 	status = StatusFile(
-		summary.output_folder, targets, parameters, summary.profile, account_checks
+		summary.output_folder, summary.requested, parameters, summary.profile, account_checks
 	)
-	status.write()
+	writer = writer_factory(
+		output_folder=summary.output_folder,
+		profile=summary.profile,
+		started_at=status.data['started_at'],
+		targets=summary.requested,
+		parameters=parameters
+	)
+	try:
+		status.write()
+		await _collect_targets(
+			client, summary, policy, status, writer,
+			metadata_only=metadata_only, window=window, update=update
+		)
+	finally:
+		writer.close()
 
-	writer = OutputWriter(summary.output_folder, summary.profile, status.data['started_at'])
+
+async def _collect_targets(client, summary, policy, status, writer, *, metadata_only, window, update):
+	targets = summary.requested
 	cache = MetadataCache(Requests(client, policy))
 	queue = asyncio.Queue(maxsize=summary.concurrency)
 	resolved = {}
@@ -207,7 +229,8 @@ async def _collect_locked(
 				window=window,
 				update=update,
 				after_resolve=functools.partial(after_resolve, index),
-				profile=summary.profile
+				profile=summary.profile,
+				histories=writer.histories
 			)
 			outcome = ('result', result)
 		except TargetUnavailable:
@@ -252,8 +275,8 @@ async def _collect_locked(
 			if takeover:
 				entry.update(takeover)
 				summary.takeovers.append((target, takeover['previous_profile_name']))
-			if payload.history_mode == 'not_collected' and os.path.isfile(
-					history_path(summary.output_folder, target)):
+			if payload.history_mode == 'not_collected' and writer.has_history(
+					target, payload.channel_id):
 				entry['stale_history'] = True
 		elif kind == 'duplicate':
 			entry.update(status='duplicate', alias_of=payload)
@@ -379,17 +402,31 @@ def _finish(writer, cache, status, summary, policy, *, failing):
 	else:
 		state = COMPLETE
 
+	counts = {
+		'given': status.data['parameters'].get('targets_given'),
+		'requested': len(summary.requested),
+		'succeeded': len(summary.succeeded),
+		'failed': len(summary.failed),
+		'duplicates': len(summary.duplicates),
+		'cancelled': len(summary.cancelled)
+	}
+	try:
+		writer.finish(
+			state,
+			summary=counts,
+			stop_reason=summary.stop_reason,
+			requests=summary.requests,
+			targets=status.data['targets']
+		)
+	except StorageError as exc:
+		error = error or exc
+		summary.stop_reason = summary.stop_reason or f'storage error: {exc}'
+		state = INTERRUPTED
+
 	try:
 		status.finish(
 			state,
-			summary={
-				'given': status.data['parameters'].get('targets_given'),
-				'requested': len(summary.requested),
-				'succeeded': len(summary.succeeded),
-				'failed': len(summary.failed),
-				'duplicates': len(summary.duplicates),
-				'cancelled': len(summary.cancelled)
-			},
+			summary=counts,
 			stop_reason=summary.stop_reason,
 			requests=summary.requests
 		)

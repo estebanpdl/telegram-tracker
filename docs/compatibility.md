@@ -191,6 +191,14 @@ in input order for deterministic aggregates:
 Completed channel observations remain in memory until finalization. Each active
 channel holds its history; updates also read earlier history.
 
+The collector reaches storage only through a writer (`run_collection(...,
+writer_factory=...)`) and its history source (`storage.histories`). The default is
+the file writer above. `storage.sqlite.writer.SQLiteWriter` stores the same results in
+the database described in [sqlite-schema.md](sqlite-schema.md), one transaction
+per channel, applying the same `is_self` phone rule; no command option selects it yet,
+and the sidecar and folder lock are unchanged with it. Its `--update` lookup is
+by resolved channel ID, after resolution and before the first history request.
+
 ### Scheduling and request policy
 
 Batch collection defaults to 3 workers (`--concurrency` 1–10); one channel uses 1.

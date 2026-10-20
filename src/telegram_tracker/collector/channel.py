@@ -8,15 +8,13 @@ posts into the saved history with --update). The result is a
 
 # import modules
 import json
-import os
 
 # import local submodules
 from telegram_tracker.api import CHANNEL_ACCESS_ERRORS
 from telegram_tracker.collector.history import HistoryWindow, fetch_history
 from telegram_tracker.collector.outcomes import TargetUnavailable
 from telegram_tracker.collector.rpc import CHANNEL
-from telegram_tracker.storage.files import history_path, merge_histories, newest_id, read_history
-from telegram_tracker.storage.provenance import check_update
+from telegram_tracker.storage.histories import FileHistories
 from telegram_tracker.storage.records import ChannelResult
 from telegram_tracker.utils import JSONEncoder
 
@@ -50,7 +48,8 @@ async def collect_channel(
 		window=None,
 		update=False,
 		after_resolve=None,
-		profile=None
+		profile=None,
+		histories=None
 	):
 	'''
 	Collect one target and return its ChannelResult; nothing is written.
@@ -59,12 +58,14 @@ async def collect_channel(
 	first time this channel sees it, so the writer can replay observations
 	in input order whatever the completion order.
 
-	With `update`, an existing <target>_messages.json sets min_id to its
-	newest id (checked before any request) and the fetched posts are merged
-	into it, read again after the fetch; without one the history is
-	collected in full. With a `profile` (RunProfile), --update into a
+	With `update`, the saved history (looked up through `histories`, see
+	storage.histories; default: the files in `output_folder`) sets min_id
+	to its newest id before the first history request, and the fetched
+	posts are merged into it; without one the history is collected in
+	full. The file source checks before any request and reads the history
+	again after the fetch. With a `profile` (RunProfile), --update into a
 	history another profile collected raises HistoryRefused before any
-	request (see storage.provenance). `after_resolve(entity)` is awaited
+	history request (see storage.provenance). `after_resolve(entity)` is awaited
 	right after entity resolution (entity is False when missing) and may
 	raise to stop. Raises TargetUnavailable, PaginationStalled,
 	HistoryUnreadable, HistoryRefused, or RequestFailed for a target that
@@ -72,17 +73,13 @@ async def collect_channel(
 	'''
 	window = window or HistoryWindow()
 	result = ChannelResult(index=index, target=target)
+	if histories is None:
+		histories = FileHistories(output_folder, profile)
+	updating = update and not metadata_only
 
-	path = history_path(output_folder, target)
-	has_history = False
-	if update and not metadata_only:
-		if os.path.exists(path):
-			has_history = True
-			saved = read_history(path)
-			if profile is not None:
-				check_update(output_folder, target, saved, profile)
-			window = HistoryWindow(min_id=newest_id(saved))
-		result.min_id = window.min_id
+	saved = None
+	if updating:
+		saved = histories.before_requests(target)
 
 	print('')
 	print(f'> Collecting data from Telegram Channel -> {target}')
@@ -96,6 +93,12 @@ async def collect_channel(
 		raise TargetUnavailable(target)
 
 	channel_id = entity_attrs.id
+	if updating:
+		saved = histories.after_resolve(target, channel_id, saved)
+		if saved is not None:
+			window = HistoryWindow(min_id=saved.newest_id)
+		result.min_id = window.min_id
+
 	try:
 		channel_request = await cache.full_channel(channel_id, CHANNEL)
 	except CHANNEL_ACCESS_ERRORS:
@@ -128,15 +131,15 @@ async def collect_channel(
 		await fetch_history(get_page, window=window, on_page=on_page)
 	)
 
-	earlier = None
 	if not update:
 		result.history, result.history_mode = data, 'replaced'
-	elif not has_history:
+	elif saved is None:
 		result.history, result.history_mode = data, 'created'
 	else:
-		earlier = read_history(path)
-		result.history = merge_histories(earlier, data)
-		result.history_mode = 'unchanged' if result.history is None else 'merged'
+		result.history, result.history_mode, result.messages = histories.merge(target, saved, data)
+		if result.history_mode == 'merged':
+			result.fetched = data
+		return result
 
-	result.messages = len((result.history or earlier)['messages'])
+	result.messages = len(data['messages'])
 	return result

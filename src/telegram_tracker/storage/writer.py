@@ -13,6 +13,7 @@ import sys
 # import local submodules
 from telegram_tracker.storage.aggregates import reduce_results, write_aggregates
 from telegram_tracker.storage.files import history_path, write_json
+from telegram_tracker.storage.histories import FileHistories
 from telegram_tracker.storage.provenance import write_provenance
 from telegram_tracker.storage.records import LOCK_FILE, OutputLocked, StorageError
 from telegram_tracker.storage.status import utc_now
@@ -49,12 +50,39 @@ def drop_own_phone(payload):
 	return removed
 
 
+def open_file_writer(*, output_folder, profile, started_at, targets, parameters):
+	'''
+	The run's writer for the file outputs (the default store). The
+	collector opens its writer through such a factory, after locking the
+	output folder; see OutputWriter for the methods it uses.
+	'''
+	return OutputWriter(output_folder, profile, started_at)
+
+
 class OutputWriter:
 	'''
 	Single owner of channel JSON and aggregate output. `commit` writes one
 	channel's JSON files; `finalize` writes the aggregates from every
 	committed channel. Before writing channel payloads, clear `phone` on
 	User objects marked `is_self` (see drop_own_phone).
+
+	The collector's contract with a run's store, which this class
+	implements for the files and storage.sqlite.writer for the database:
+
+		histories                    the history source for --update
+		                             (storage.histories)
+		commit(result)               store one ChannelResult; returns a
+		                             takeover entry or None
+		has_history(target, channel_id)
+		record_not_found(index, target)
+		finalize(outcomes)           replay committed results; returns the
+		                             Aggregates
+		finish(state, *, summary, stop_reason, requests, targets)
+		                             record the run's end (files: nothing,
+		                             the sidecar holds it)
+		close()
+
+	A failed write raises StorageError, which ends the run.
 
 	profile -> the run's RunProfile; with one, every written history gets
 		its provenance record (see provenance.py), stamped `started_at`
@@ -63,6 +91,7 @@ class OutputWriter:
 		self.output_folder = output_folder
 		self.profile = profile
 		self.started_at = started_at
+		self.histories = FileHistories(output_folder, profile)
 		self.committed = []
 		self.not_found = []
 		self.finalized = False
@@ -96,6 +125,9 @@ class OutputWriter:
 		self.committed.append(result)
 		return takeover
 
+	def has_history(self, target, channel_id):
+		return os.path.isfile(history_path(self.output_folder, target))
+
 	def record_not_found(self, index, target):
 		self.not_found.append((index, target))
 
@@ -110,6 +142,12 @@ class OutputWriter:
 		for chat_id, reason in agg.skipped:
 			print(f'> Skipped metadata for chat {chat_id}: {reason}', file=sys.stderr)
 		return agg
+
+	def finish(self, state, *, summary, stop_reason, requests, targets):
+		pass
+
+	def close(self):
+		pass
 
 
 '''
