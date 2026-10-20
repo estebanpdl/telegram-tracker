@@ -12,13 +12,11 @@ the methods of storage.writer.OutputWriter, which the collector uses.
 	finish    counters, collected-chat rows, errors, request statistics,
 	          target outcomes and the run's end state, in one transaction
 
-Before any of a channel is written, `phone` is cleared on every User
-marked `is_self` (storage.writer.drop_own_phone), so neither a raw column
-nor a computed column holds the collecting account's phone number.
+Before storing channel payloads, clear `User.phone` on objects marked
+`is_self` (storage.writer.drop_own_phone); other fields stay as collected.
 
-A failed transaction is rolled back and raises StorageError; channels
-committed earlier stay. When `finish` fails, the run is marked
-interrupted if that still succeeds.
+Transaction failures raise StorageError and roll back; earlier commits stay.
+After a failed `finish`, marking the run interrupted is best effort.
 
 In both mode (storage.dual), the channel transaction also sets the
 target's files_state to 'pending', and `finish` sets aggregate_files to
