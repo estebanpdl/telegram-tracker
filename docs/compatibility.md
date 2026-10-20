@@ -7,7 +7,7 @@
 | Interpreter | Python 3.14.7 (conda-forge), conda env `telegram-tracker` |
 | Run tests | `conda run -n telegram-tracker python -m unittest discover -s tests -v` (from the repo root) |
 | Dependency check | `conda run -n telegram-tracker python -m pip check` |
-| Installed command | 2026-10-18: wheel built with build 1.6.1 and setuptools 84.0.0, installed with pip 26.2.1 into a fresh Python 3.14.7 virtual environment with the pinned requirements. From an empty directory, `tgtracker` and `python -m telegram_tracker` matched `python main.py` in help, argument errors, exit codes, and builder outputs. |
+| Installed command | 2026-10-20: wheel and sdist built from a clean export with build 1.6.1 and setuptools 84.2.0; the wheel installed with pip 26.2.1 into a fresh Python 3.14.7 virtual environment with only the pinned requirements (`pip check` clean). From an empty directory, `tgtracker` and `python -m telegram_tracker` matched `python main.py` in help, argument errors, exit codes, offline auth and profile commands, storage-mode refusals, and builder outputs; help and imports worked with the service libraries blocked. The synthetic three-mode storage matrix gave the same results (exit codes, states, counts, and checks) through the installed package as from the source tree. |
 
 Direct dependencies are pinned in `requirements.txt`:
 
@@ -146,13 +146,15 @@ as AND. The server receives ID bounds on every page and `--until` on the first;
 returned messages are also filtered locally. Paging stops at the cap or below
 `--since`/`--min-id`. The date stop assumes dates follow ID order. Boundary-page
 chats/users may refer to excluded messages. A filtered run replaces saved history
-and warns before credentials when matching target files exist.
+and warns before credentials when matching target files exist. The warning checks
+files only: a `sqlite` folder gets none, although its database histories are replaced.
 
 `--update` derives each target's minimum ID from its saved history, fetches newer
 posts, and merges by ID with fetched copies winning. It is exclusive with every
 window flag and metadata-only, and unavailable in the legacy collection form.
-No new posts leaves the messages file byte-identical; absent history causes full
-collection. Malformed saved history fails that target without replacement.
+No new posts leaves the messages file byte-identical and the database history row
+unchanged; absent history causes full collection. Malformed saved history fails
+that target without replacement.
 Updates do not refresh earlier edited or deleted Telegram posts.
 
 ## Collection and persistence
@@ -334,3 +336,21 @@ opening the database).
   interpreters. `tests/virtual_time.py` jumps to timers, avoiding real pacing waits.
 - `tests/test_environment.py` checks pinned interfaces and prevents reintroduction
   of removed pandas and matplotlib calls.
+
+## Validation limits
+
+The evidence above is offline and synthetic. Not covered:
+
+- Platforms: Windows on local NTFS only. The POSIX permission branch, `O_EXCL`
+  lock and lease files on Linux/macOS, hard-link database publication outside
+  Windows, and network file systems are unexercised.
+- Interruption: Ctrl+C is tested as `KeyboardInterrupt` raised in the fake client
+  and as task cancellation inside the process, not as a SIGINT delivered to a
+  running process.
+- Live Telegram: the database modes (`sqlite`, `both`) and named profiles have no
+  live run; collection evidence for them comes from the fake client only.
+- Request rates: concurrency and request-interval defaults are project limits;
+  Telegram's per-account limits were not measured.
+- Readers: SQLite runs in rollback-journal mode. An open read transaction on the
+  database delays a collection's writes; after the 5 s busy timeout the run stops
+  with exit 1.

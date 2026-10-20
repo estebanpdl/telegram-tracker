@@ -485,8 +485,9 @@ the run, its time, its options and its profile.
   transaction that also sets `user_version`, updates `schema_meta`, inserts its
   `migrations` row and checks foreign keys, so a failed step leaves the previous
   version. Backups are never deleted automatically, and there are no downgrades.
-  Version 1 is the first schema version, so no upgrade exists yet, and a file with
-  this application ID and a version below 1 is refused.
+  Version 1 is the first schema version, so no upgrade exists yet and there is no
+  command that runs one; a file with this application ID and a version below 1 is
+  refused.
 - To back up the database yourself, don't copy the file while a collection is
   running. Use SQLite's backup API, for example
   `sqlite3 telegram-tracker.sqlite3 ".backup copy.sqlite3"`, or Python's

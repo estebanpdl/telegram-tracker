@@ -17,7 +17,7 @@
 
 Telegram Tracker collects public Telegram channels through Telegram's API and turns the collected files into a messages dataset and a channel network.
 
-- `collect` saves each channel's profile metadata and posts as JSON, plus aggregate files about the chats found in that data (e.g., forward sources). You can collect one channel or a list of channels from a text file.
+- `collect` saves each channel's profile metadata and posts as JSON, plus aggregate files about the chats found in that data (e.g., forward sources). You can collect one channel or a list of channels from a text file. The same data can also go to an SQLite database, instead of the files or beside them (see [Storage modes](#storage-modes---storage)).
 - `build-dataset` reads the collected files and writes `msgs_dataset.csv` and `collected_chats.xlsx`.
 - `build-network` reads `collected_chats.csv` and writes a directed graph, `Graph.gexf`, and a preview image, `network.png`.
 
@@ -27,6 +27,8 @@ Contents:
 
 - [Requirements](#requirements)
 - [Installation and setup](#installation-and-setup)
+- [Logging in and saved credentials](#logging-in-and-saved-credentials)
+- [Account profiles](#account-profiles)
 - [First login](#first-login)
 - [Commands](#commands)
 - [Collecting channels](#collecting-channels)
@@ -34,8 +36,12 @@ Contents:
 - [Updating saved histories](#updating-saved-histories---update)
 - [Batches, concurrency, and rate limits](#batches-concurrency-and-rate-limits)
 - [Output files](#output-files)
+- [Storage modes](#storage-modes---storage)
+- [Reading the database](#reading-the-database)
+- [Database backups and schema versions](#database-backups-and-schema-versions)
 - [Collection status, locking, and recovery](#collection-status-locking-and-recovery)
 - [Building the dataset and the network](#building-the-dataset-and-the-network)
+- [Known limits](#known-limits)
 - [Running the tests](#running-the-tests)
 
 ## Requirements
@@ -259,7 +265,7 @@ python main.py collect --batch-file ./channels.txt --limit-download-to-channel-m
 
 Each requested channel is collected separately. A channel that does not exist, is private, or cannot be accessed fails only that channel: it is listed in `_exceptions-channels-not-found.txt`, the other channels are still collected, and the exit code is 1. At the end, the run prints a summary of the targets and requests, and names the failed channels on stderr.
 
-**Metadata only** saves `<channel>.json` and the aggregate files, but no new `<channel>_messages.json`. A messages file from an earlier run stays in place; the summary and `collection-status.json` (`stale_history`) name those channels.
+**Metadata only** saves `<channel>.json` and the aggregate files, but no new `<channel>_messages.json`. A messages file from an earlier run stays in place; the summary and `collection-status.json` (`stale_history`) name those channels. In a `sqlite` or `both` folder, the messages stored in the database stay in place the same way.
 
 ## Collecting part of a history
 
@@ -288,6 +294,8 @@ python main.py collect --telegram-channel example_channel --min-id 12345 -o ./ou
 
 **A filtered run replaces `<channel>_messages.json` with the selected messages only.** It does not merge them into the saved history. Before connecting, the command warns on stderr when a channel already has a saved history in the output folder, naming up to 10 channels. To keep earlier histories, write filtered runs to a fresh `--output`, or use `--update` to add new posts. The run header prints the active window. Window options cannot be combined with `--limit-download-to-channel-metadata` in `collect`.
 
+In a `sqlite` or `both` folder, a filtered run also replaces the channel's history in the database with the selection. The warning before connecting looks for `<channel>_messages.json` files only, so a `sqlite` folder gets no warning even though its histories are replaced.
+
 Known limits:
 
 - Pages are kept whole, so the `chats` and `users` of the page that crosses a bound can include entries referenced only by excluded messages.
@@ -300,20 +308,28 @@ Known limits:
 python main.py collect --batch-file ./channels.txt --update -o ./output/data
 ```
 
-Use the same `--output` as the earlier collection. For each channel, `--update` reads the saved `<channel>/<channel>_messages.json`, collects only posts with a higher id, and merges them in:
+Use the same `--output` as the earlier collection. For each channel, `--update` reads the saved history, collects only posts with a higher id, and merges them in. The saved history depends on the folder's [storage mode](#storage-modes---storage):
 
-- Messages are merged by id. A fetched copy replaces a saved one, saved posts are kept, and the file stays ordered newest first.
+| Mode | Saved history read and updated |
+|---|---|
+| `files` | `<channel>/<channel>_messages.json` |
+| `sqlite` | The channel's history in the database, found by the channel's numeric id after it is resolved |
+| `both` | Both copies. They must hold the same messages first (see [`--update` in `both`](#storage-modes---storage)) |
+
+In every mode:
+
+- Messages are merged by id. A fetched copy replaces a saved one and saved posts are kept. The messages file stays ordered newest first.
 - `chats` and `users` are merged by id, fetched copies first. `count` and the other fields come from the latest response.
-- With no new posts, the file is left byte for byte as it was.
-- A failed request leaves the saved file as it was.
-- A saved file that cannot be read or parsed fails that channel and is left untouched.
-- A channel with no saved file is collected in full; the summary lists those channels.
+- With no new posts, the saved history is left as it was: the file byte for byte, the database history with its earlier run and time.
+- A failed request leaves the saved history as it was.
+- A saved history that cannot be read or parsed fails that channel and is left untouched.
+- A channel with no saved history is collected in full; the summary lists those channels.
 
 `--update` cannot be combined with the history window options or with `--limit-download-to-channel-metadata`. The earlier collection form does not accept it.
 
 | | History window (`--min-id`, `--since`, ...) | `--update` |
 |---|---|---|
-| Saved `<channel>_messages.json` | Replaced by the selection | Kept; new posts merged in |
+| Saved history (file or database) | Replaced by the selection | Kept; new posts merged in |
 | Where to write | A fresh `--output` | The folder of the earlier collection |
 | Lower bound | Given by you | The highest saved message id of each channel |
 
@@ -426,6 +442,74 @@ python main.py collect --batch-file ./channels.txt --output ./output/project-b -
 
 **`--update` in `both`.** Before a channel's first history request, its saved history must be the same in both copies: the same newest message ID and the same message IDs. A channel whose copies differ, or that has a saved history in only one of them, fails with guidance, and the other channels continue; the larger copy is never taken as a repair. A channel without a history in either copy is collected in full.
 
+**After a crash or a killed run.** The database stores each channel in its own transaction, so the channels saved before the crash stay in it; the run's aggregate rows and end state are missing. `collection-status.json` still says `running`, and `.collection.lock` and `telegram-tracker.sqlite3.lock` stay behind if the run had taken them. To continue:
+
+1. Make sure no collection is running (check the process ID in the lock messages).
+2. Delete both lock files.
+3. Collect into the same folder again. The new run records the crashed one as `interrupted` (stop reason `stale: ...`). In a `both` folder, a run that stops with `is blocked` found a `pending` mark: keep that folder and collect into a fresh `--output` (see above).
+
+## Reading the database
+
+`telegram-tracker.sqlite3` is an SQLite database: one binary file that SQLite libraries and tools open and query directly. It is not an SQL dump, the text file of `CREATE TABLE` and `INSERT` statements that some tools export; `collect` neither reads nor writes dumps. [docs/sqlite-schema.md](docs/sqlite-schema.md) describes every table, column, and view, and has more example queries.
+
+Open the database read-only, and preferably when no collection is writing to it. A connection inside an open read transaction makes a collection wait, and a write that waits more than 5 seconds stops the run with exit 1 (`the database is in use by another process`). Finish the query and close the connection before collecting.
+
+From Python, with the standard library only (the paths below are relative to the folder you run from):
+
+```python
+import sqlite3
+
+con = sqlite3.connect('file:output/project-b/telegram-tracker.sqlite3?mode=ro', uri=True)
+query = '''
+SELECT p.username, count(*) AS posts, min(m.date) AS first_post, max(m.date) AS last_post
+FROM messages m
+JOIN peers p ON p.peer_kind = 'channel' AND p.peer_id = m.channel_id
+GROUP BY m.channel_id
+ORDER BY posts DESC
+'''
+for row in con.execute(query):
+    print(row)
+con.close()
+```
+
+With pandas (installed with the requirements), `pandas.read_sql_query(query, con)` returns the same rows as a DataFrame. Columns not listed in the schema are still in each row's `raw` JSON; read them with `json_extract(raw, '$.field')`.
+
+To export an SQL dump, for example to load the data into another database system or to keep a text archive:
+
+```python
+import sqlite3
+
+con = sqlite3.connect('file:output/project-b/telegram-tracker.sqlite3?mode=ro', uri=True)
+with open('project-b.sql', 'w', encoding='utf-8') as dump:
+    for statement in con.iterdump():
+        dump.write(statement + '\n')
+con.close()
+```
+
+A dump does not carry the database's identity (its application ID and schema version), so a database rebuilt from a dump is refused by `collect` as not being a Telegram Tracker database. Use a backup (below) to keep a copy that `collect` accepts.
+
+## Database backups and schema versions
+
+**Schema version.** A database records its schema version, `1` in this release, and an application ID that marks it as a Telegram Tracker database. `collect` uses only a database of the current version: an older or newer one, another SQLite database, an empty file, or a damaged one is refused before connecting (exit 1) and left untouched. `collect` never upgrades a database.
+
+**No upgrade command yet.** Version 1 is the first schema version, so there is nothing to upgrade, and this release has no `migrate` command. The package contains the upgrade procedure for later versions (a checked backup first, then one transaction per version step, under the database lock), but no upgrade step is defined.
+
+**Backups.** Back up while no collection is running, through SQLite's backup API, which copies a consistent state:
+
+```python
+import sqlite3
+
+source = sqlite3.connect('file:output/project-b/telegram-tracker.sqlite3?mode=ro', uri=True)
+backup = sqlite3.connect('project-b-backup.sqlite3')
+source.backup(backup)
+backup.close()
+source.close()
+```
+
+The `sqlite3` command-line shell, if you have it, does the same with `sqlite3 telegram-tracker.sqlite3 ".backup copy.sqlite3"`. Copying the file itself is safe only while no collection is running and no `telegram-tracker.sqlite3-journal` file is beside it.
+
+A backup belongs to the folder its database was created for. Copied back over `telegram-tracker.sqlite3` in that folder (while no collection is running), it is accepted again. In any other folder, `collect` refuses it as a moved or copied folder, but it stays readable. In a `both` folder, restoring only the database makes the two copies differ, and `--update` then fails the channels whose histories differ; collect those with a full run, or start a fresh `--output`. The database holds personal data from the collected content (see [docs/sqlite-schema.md](docs/sqlite-schema.md#personal-data)); store backups as carefully as the database.
+
 ## Collection status, locking, and recovery
 
 Each collection writes `collection-status.json` in the output folder. It records the state, the profile (`profile_name`, `profile_id`), the parameters (full, window with its bounds, update, or metadata only), the request controls and statistics, the account check (`account_checks`), and each target's outcome (`succeeded`, `failed` with a reason, `duplicate`, `cancelled`), with the derived `min_id` and history mode for `--update` and any takeover. It holds no credentials, account IDs, or message text. Status files written by earlier versions have no profile fields: their profile is unknown.
@@ -475,6 +559,17 @@ Without `--data-path` (or `-d`), both use `./output/data`. They read local files
 **`build-network`** reads `collected_chats.csv` (`username`, `counter`, `source`) and writes `Graph.gexf`, a directed, unweighted graph from each source channel to the chats found in its data (e.g., forwards), and `network.png`, a preview with Louvain communities. Both are replaced on every build. Open the GEXF file in tools such as [Gephi](https://gephi.org/).
 
 Both builders refuse a folder whose `collection-status.json` says `running` or `interrupted` (exit 1, with the recovery steps above), and a folder collected with `--storage sqlite`, which has no file outputs (exit 1). A `both` folder is built from its files; the builders never open the database. Missing or malformed input files stop the build with exit 1 before anything is written. With no messages and no existing `msgs_dataset.csv`, the dataset has a header only; an existing dataset keeps its earlier rows. With no edges, the graph is empty and the image blank.
+
+## Known limits
+
+The behavior in this README is validated by the offline test suite, with synthetic data and a fake Telegram client, plus an install check of the built package. What that validation does not cover:
+
+- **Platforms.** Tested on Windows, on local NTFS drives only. The Linux and macOS permission branch (0700/0600), the lock and lease files on those systems, and network file systems are untested.
+- **Ctrl+C.** Interruption is tested by cancelling the collection inside the process, not by sending a real Ctrl+C (SIGINT) to a running command.
+- **Database modes and profiles against Telegram.** `--storage sqlite` and `both`, and named profiles, are validated offline; this validation includes no collection from Telegram in those modes or profiles.
+- **Request rates.** The concurrency and request-interval defaults are project limits. The rates that Telegram accepts for an account were not measured.
+- **Builders.** `build-dataset` and `build-network` read the files only. A `sqlite` folder has nothing for them until builders that read the database exist.
+- **Dataset appends.** `build-dataset` appends to `msgs_dataset.csv`, so building twice, or again after `--update`, duplicates rows (see [Building the dataset and the network](#building-the-dataset-and-the-network)).
 
 ## Running the tests
 
