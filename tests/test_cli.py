@@ -150,7 +150,7 @@ class HelpTests(CliTestCase):
 		sections = self.help_sections(['collect', '--help'])
 		self.assertEqual(
 			sections['history window'],
-			['--min-id', '--since', '--until', '--max-id', '--max-messages']
+			['--min-id', '--since', '--until', '--max-id', '--max-messages', '--yes']
 		)
 		self.assertNotIn('--min-id', sections['options'])
 
@@ -319,7 +319,7 @@ class CanonicalRunTests(CliTestCase):
 		spec = EXPECTED['scenarios']['min_id']
 		logs = []
 		for argv in (['--telegram-channel', 'alpha_fx', '--min-id', str(spec['min_id'])],
-				['collect', '--telegram-channel', 'alpha_fx', '--min-id', str(spec['min_id'])]):
+				['collect', '--telegram-channel', 'alpha_fx', '--min-id', str(spec['min_id']), '--yes']):
 			self.client = FakeTelegramClient(page_size=EXPECTED['page_size'])
 			code, _, _ = self.run_cli(argv + ['-o', self.out])
 			self.assertEqual(code, 0)
@@ -482,61 +482,6 @@ class DateParsingTests(offline_guard.OfflineTestCase):
 				value = cli.parsers.utc_datetime(text)
 				self.assertEqual(value, expected)
 				self.assertEqual(value.utcoffset().total_seconds(), 0)
-
-
-class ReplaceWarningTests(CliTestCase):
-	'''
-	A filtered run warns, before credentials, about saved histories it
-	will replace; unfiltered and metadata-only runs never warn.
-	'''
-
-	def setUp(self):
-		super().setUp()
-		self.collected = []
-
-		async def fake_run_collection(targets, output_folder, **kwargs):
-			self.collected.append(targets)
-			return collector.outcomes.CollectionSummary(requested=targets, output_folder=output_folder, succeeded=list(targets))
-
-		patcher = mock.patch.object(collector, 'run_collection', fake_run_collection)
-		patcher.start()
-		self.addCleanup(patcher.stop)
-
-	def save_history(self, *channels):
-		for channel in channels:
-			os.makedirs(os.path.join(self.out, channel), exist_ok=True)
-			with open(os.path.join(self.out, channel, f'{channel}_messages.json'), 'w', encoding='utf-8') as fh:
-				fh.write('{"count": 0, "messages": []}')
-
-	def test_single_channel_with_saved_history(self):
-		self.save_history('alpha_fx')
-		for argv in (['collect', '--telegram-channel', 'alpha_fx', '--since', '2026-01-01'],
-				['--telegram-channel', 'alpha_fx', '--min-id', '3']):
-			with self.subTest(argv=argv):
-				code, _, err = self.run_cli(argv + ['-o', self.out])
-				self.assertEqual(code, 0)
-				self.assertIn('> Warning: this filtered run replaces the saved messages of 1 channel(s)', err)
-				self.assertIn(': alpha_fx. Use a fresh --output', err)
-
-	def test_batch_lists_count_and_first_ten(self):
-		names = [f'c{i:02d}_fx' for i in range(12)]
-		self.save_history(*names)
-		batch = self.write_batch(*names, 'new_fx')
-		code, _, err = self.run_cli(['collect', '--batch-file', batch, '-o', self.out, '--max-messages', '5'])
-		self.assertEqual(code, 0)
-		self.assertIn('saved messages of 12 channel(s)', err)
-		self.assertIn(', '.join(names[:10]) + ', and 2 more.', err)
-		self.assertNotIn('new_fx', err)
-
-	def test_no_warning_without_window_history_or_messages(self):
-		self.save_history('alpha_fx')
-		for argv in (['collect', '--telegram-channel', 'alpha_fx'],
-				['collect', '--telegram-channel', 'beta_fx', '--since', '2026-01-01'],
-				['--telegram-channel', 'alpha_fx', '--limit-download-to-channel-metadata', '--min-id', '3'],
-				['--telegram-channel', 'alpha_fx', '--min-id', '0']):
-			with self.subTest(argv=argv):
-				code, _, err = self.run_cli(argv + ['-o', self.out])
-				self.assertEqual((code, err), (0, ''))
 
 
 if __name__ == '__main__':

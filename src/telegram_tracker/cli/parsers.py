@@ -249,8 +249,11 @@ def add_collect_arguments(parser, prog=SCRIPT_PROG):
 	window = parser.add_argument_group(
 		'history window',
 		'Select which messages to collect; bounds combine (AND). A filtered run '
-		'replaces each channel\'s saved messages with the selection, so write it '
-		'to a fresh --output to keep earlier histories. Not allowed with '
+		'replaces each channel\'s saved history (files or database) with the '
+		'selection, so write it to a fresh --output to keep earlier histories. '
+		'Before connecting, it names the channels that already have a saved '
+		'history and asks to continue; without a terminal to answer, it stops '
+		'unless --yes is given. Not allowed with '
 		'--limit-download-to-channel-metadata.'
 	)
 	add_min_id_argument(window)
@@ -279,6 +282,11 @@ def add_collect_arguments(parser, prog=SCRIPT_PROG):
 		type=bounded_int(1),
 		metavar='N',
 		help='At most N messages per channel, newest first.'
+	)
+	window.add_argument(
+		'--yes',
+		action='store_true',
+		help='Replace saved histories without asking (for scripts).'
 	)
 
 	update = parser.add_argument_group(
@@ -443,8 +451,9 @@ def build_legacy_parser(prog=SCRIPT_PROG):
 		'history window',
 		'Select which messages to collect. A run with --min-id replaces each '
 		'channel\'s saved messages with the selection, so write it to a fresh '
-		'--output to keep earlier histories. The other history window options '
-		f'and --update need `{run} collect`.'
+		'--output to keep earlier histories. It names the channels that already '
+		f'have one and replaces them without asking; `{run} collect` asks first. '
+		f'The other history window options and --update need `{run} collect`.'
 	)
 	add_min_id_argument(window)
 	return parser
