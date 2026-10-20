@@ -245,7 +245,8 @@ class DualWriter:
 			publish_staged(staged, self.replace)
 			append_logs(self.files.output_folder, self.aggregates)
 		except StorageError as exc:
-			self.database.interrupt_finished(stop_reason or f'storage error: {exc}')
+			error = f'storage error: {exc}'
+			self.database.interrupt_finished(f'{stop_reason}; {error}' if stop_reason else error)
 			raise
 		self.database.mark_aggregates_written()
 		self.aggregate_files = 'written'

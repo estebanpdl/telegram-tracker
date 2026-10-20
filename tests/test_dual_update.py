@@ -29,6 +29,7 @@ from telethon import errors
 from telegram_tracker.api.auth import ensure_authorized
 from telegram_tracker.collector import run_collection
 from telegram_tracker.storage import dual
+from telegram_tracker.storage import files as storage_files
 from telegram_tracker.storage.destination import select_destination
 from telegram_tracker.storage.sqlite import migrations
 from telegram_tracker.storage.sqlite.lease import DatabaseLocked
@@ -95,6 +96,26 @@ class StopTests(offline_guard.OfflineAsyncTestCase):
 		self.assertEqual(self.rows('SELECT count(*) FROM destination_pending'), [(0,)])
 		summary = await self.collect(['beta_fx'], FakeTelegramClient(page_size=2))
 		self.assertEqual(summary.succeeded, ['beta_fx'])
+
+
+	async def test_a_publish_failure_after_a_stop_records_both_reasons(self):
+		client = FakeTelegramClient(page_size=2)
+		client.script('GetHistoryRequest', None, None, None, None, None,
+			errors.FloodWaitError(request=None, capture=999))
+		real = os.replace
+
+		def replace(src, dst):
+			if dst.endswith('counter.csv'):
+				raise OSError(28, 'No space left on device')
+			return real(src, dst)
+
+		with mock.patch.object(storage_files.os, 'replace', replace):
+			summary = await self.collect(['alpha_fx', 'beta_fx'], client)
+		(state, reason, aggregate_files), = self.rows(
+			'SELECT state, stop_reason, aggregate_files FROM collection_runs')
+		self.assertEqual((state, aggregate_files), ('interrupted', 'pending'))
+		self.assertTrue(reason.startswith(summary.stop_reason + '; storage error: cannot replace'), reason)
+		self.assertIn('Telegram asked to wait 999 s', reason)
 
 
 class UpdateAgreementTests(storage_modes_support.BothCase):
