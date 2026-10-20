@@ -181,8 +181,9 @@ def add_auth_parsers(commands):
 		STATUS,
 		help='Show which session and credential sources are used.',
 		description='Show the application home, the profile, the selected session, '
-			'and where each app credential comes from. Values are never shown. Offline: a '
-			'session file does not prove that it is logged in.'
+			'and where each app credential comes from. Values are never shown. Notes a '
+			'./config/config.ini that saved credentials hide. Offline: a session file does '
+			'not prove that it is logged in.'
 	)
 	add_session_arguments(status)
 	status.add_argument(
