@@ -81,8 +81,12 @@ class ChannelResult:
 	observations -> [(req_type, [(chat_id, username), ...]), ...] in the
 		order the chats were seen (channel response, then history pages)
 	history -> JSON-safe messages payload to write; None writes nothing
+		(for 'merged', the history source decides: the files get the
+		whole merged history, the database none)
 	history_mode -> 'replaced' (full or window), 'merged' / 'unchanged' /
 		'created' (--update), or 'not_collected' (metadata only)
+	fetched -> for 'merged', the fetched payload merged into the saved
+		history (the database upserts it); None otherwise
 	'''
 	index: int
 	target: str
@@ -90,6 +94,7 @@ class ChannelResult:
 	channel_data: dict | None = None
 	history: dict | None = None
 	history_mode: str = 'not_collected'
+	fetched: dict | None = None
 	observations: list = field(default_factory=list)
 	messages: int | None = None
 	min_id: int | None = None
