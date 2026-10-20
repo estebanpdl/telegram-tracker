@@ -75,7 +75,8 @@ async def run_collection(
 		policy=None,
 		profile=None,
 		identify=None,
-		writer_factory=None
+		writer_factory=None,
+		preflight=None
 	):
 	'''
 	Collect `targets` (normalized, without duplicates) with one client.
@@ -104,7 +105,10 @@ async def run_collection(
 		arguments output_folder, profile, started_at, targets, parameters;
 		see storage.writer.OutputWriter for the writer's methods); default:
 		the file outputs. Raising StorageError stops the run before any
-		channel request.
+		channel request. The writer's status_fields() are added to the
+		sidecar when it opens and when the run ends.
+	preflight -> called after the output-lock check and before the client
+		is created (the database lease check); raising stops the run.
 
 	Missing/inaccessible targets, stalled pagination, unreadable saved
 	histories (--update), --update into another profile's history, and
@@ -121,6 +125,8 @@ async def run_collection(
 	summary.concurrency = max(1, min(concurrency, len(summary.requested)))
 
 	check_unlocked(output_folder)
+	if preflight is not None:
+		preflight()
 	client = client_factory()
 	try:
 		await client.connect()
@@ -184,6 +190,7 @@ async def _collect_locked(
 		parameters=parameters
 	)
 	try:
+		status.data.update(_status_fields(writer))
 		status.write()
 		await _collect_targets(
 			client, summary, policy, status, writer,
@@ -362,6 +369,14 @@ async def _close_quietly(cache):
 		pass
 
 
+def _status_fields(writer):
+	'''
+	The writer's sidecar keys; none for a writer without status_fields.
+	'''
+	fields = getattr(writer, 'status_fields', None)
+	return fields() if fields is not None else {}
+
+
 def _finish(writer, cache, status, summary, policy, *, failing):
 	'''
 	Finalize aggregates from the committed channels, fill the summary from
@@ -424,6 +439,7 @@ def _finish(writer, cache, status, summary, policy, *, failing):
 		state = INTERRUPTED
 
 	try:
+		status.data.update(_status_fields(writer))
 		status.finish(
 			state,
 			summary=counts,

@@ -12,9 +12,9 @@ import sys
 
 # import local submodules
 from telegram_tracker.storage.aggregates import reduce_results, write_aggregates
-from telegram_tracker.storage.files import history_path, write_json
+from telegram_tracker.storage.files import history_path, pretty_json_text, to_json_text, write_text
 from telegram_tracker.storage.histories import FileHistories
-from telegram_tracker.storage.provenance import write_provenance
+from telegram_tracker.storage.provenance import provenance_path, provenance_record
 from telegram_tracker.storage.records import LOCK_FILE, OutputLocked, StorageError
 from telegram_tracker.storage.status import utc_now
 from telegram_tracker.utils import create_dirs, discard
@@ -67,7 +67,8 @@ class OutputWriter:
 	User objects marked `is_self` (see drop_own_phone).
 
 	The collector's contract with a run's store, which this class
-	implements for the files and storage.sqlite.writer for the database:
+	implements for the files, storage.sqlite.writer for the database, and
+	storage.dual for both:
 
 		histories                    the history source for --update
 		                             (storage.histories)
@@ -80,6 +81,7 @@ class OutputWriter:
 		finish(state, *, summary, stop_reason, requests, targets)
 		                             record the run's end (files: nothing,
 		                             the sidecar holds it)
+		status_fields()              keys added to collection-status.json
 		close()
 
 	A failed write raises StorageError, which ends the run.
@@ -99,9 +101,22 @@ class OutputWriter:
 	def commit(self, result):
 		'''
 		Write <target>.json and, when the result carries one,
-		<target>_messages.json and its provenance record. The channel counts
-		as collected only after all are in place. Returns the takeover entry
-		of a replaced history (see provenance.write_provenance) or None.
+		<target>_messages.json and its provenance record, each replaced in
+		that order. The channel counts as collected only after all are in
+		place. Returns the takeover entry of a replaced history (see
+		provenance.write_provenance) or None.
+		'''
+		files, takeover = self.channel_files(result)
+		for path, text in files:
+			write_text(path, text)
+		self.committed.append(result)
+		return takeover
+
+	def channel_files(self, result):
+		'''
+		[(path, text)] of the files `commit` writes for `result`, in write
+		order, and the takeover entry. Creates the channel folder and clears
+		the own phone number; writes no file.
 		'''
 		target = result.target
 		try:
@@ -110,20 +125,20 @@ class OutputWriter:
 			raise StorageError(f'cannot create {self.output_folder}/{target}: {exc}') from exc
 
 		drop_own_phone(result.channel_data)
-		write_json(f'{self.output_folder}/{target}/{target}.json', result.channel_data)
+		files = [(f'{self.output_folder}/{target}/{target}.json', to_json_text(result.channel_data))]
 		takeover = None
 		if result.history is not None:
 			path = history_path(self.output_folder, target)
 			had_history = os.path.isfile(path)
 			drop_own_phone(result.history)
-			write_json(path, result.history)
+			files.append((path, to_json_text(result.history)))
 			if self.profile is not None:
-				takeover = write_provenance(
+				record, takeover = provenance_record(
 					self.output_folder, result, self.profile, self.started_at, had_history
 				)
-
-		self.committed.append(result)
-		return takeover
+				if record is not None:
+					files.append((provenance_path(self.output_folder, target), pretty_json_text(record)))
+		return files, takeover
 
 	def has_history(self, target, channel_id):
 		return os.path.isfile(history_path(self.output_folder, target))
@@ -139,12 +154,24 @@ class OutputWriter:
 		agg = reduce_results(self.committed, outcomes, self.not_found)
 		self.finalized = True
 		write_aggregates(self.output_folder, agg)
+		self.report_skipped(agg)
+		return agg
+
+	@staticmethod
+	def report_skipped(agg):
 		for chat_id, reason in agg.skipped:
 			print(f'> Skipped metadata for chat {chat_id}: {reason}', file=sys.stderr)
-		return agg
 
 	def finish(self, state, *, summary, stop_reason, requests, targets):
 		pass
+
+	def status_fields(self):
+		'''
+		Keys this store adds to collection-status.json (at the start and at
+		the end of the run): none for the files, so their sidecar keeps its
+		earlier shape.
+		'''
+		return {}
 
 	def close(self):
 		pass

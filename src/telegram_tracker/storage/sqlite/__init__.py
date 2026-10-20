@@ -13,8 +13,10 @@ Modules:
 	mapping     payloads to rows and stored rows back to payloads
 	histories   SQLiteHistories: --update against the stored histories
 	writer      SQLiteWriter: one run's channel and aggregate writes
+	lease       the database lease held by collections and upgrades
 
-The collector reaches the database only through a writer factory such
-as functools.partial(SQLiteWriter.open, path). Standard library only;
-importing any module opens nothing.
+The collector reaches the database only through a writer factory:
+storage.destination opens it for `collect --storage sqlite|both`, under
+the database lease. Standard library only; importing any module opens
+nothing.
 '''

@@ -28,6 +28,12 @@ Modules:
 	files       atomic file writes and saved message histories
 	writer      OutputWriter and the output-folder lock
 	status      collection-status.json and the builders' gate
+	manifest    collection-storage.json: the storage mode of a folder
+	            that holds the database
+	destination the --storage mode of a run, its checks and locks, and
+	            the writer it opens
+	dual        DualWriter: the files and the database in one run
+	sqlite      the database (see its package docstring)
 
 Importing any of them has no side effects and loads neither Telethon nor
 pandas (pandas loads when aggregates are written). The package exports
