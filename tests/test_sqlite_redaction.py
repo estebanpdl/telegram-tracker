@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 '''
-The collecting account's phone number never reaches the database: every
+The collecting account's User.phone is redacted before storage: every
 User object flagged `is_self` is stored with `phone` null in raw columns
 and in the computed `peers.phone`, wherever it appears (channel snapshot,
 history, an --update merge, nested in a message, repeated), and the
-database file holds no copy of it. Every other field of that user and
-every other user, phone number included, is stored unfiltered.
+synthetic fixture's number has no copy in the database file. Every other
+field of that user and every other user, phone number included, is stored unfiltered.
 Synthetic users only.
 '''
 

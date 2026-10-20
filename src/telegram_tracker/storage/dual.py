@@ -18,8 +18,8 @@ run's aggregates and end state sets aggregate_files to 'pending'; the
 files are replaced and the exception logs appended; aggregate_files
 becomes 'written'.
 
-A failure while staging or in the database transaction leaves both sinks
-as they were (the temporary files are removed). A failure while
+A channel staging or transaction failure preserves its previous payloads
+in both sinks; run bookkeeping may still record failure. A failure while
 publishing stops the run with StorageError: the target is recorded as
 failed if the database still accepts it, and 'pending' stays. Any
 'pending' left behind (also by a crash between steps 2 and 4) blocks
@@ -55,7 +55,7 @@ from telegram_tracker.storage.writer import OutputWriter
 
 
 # Windows replace retry: up to 5 attempts, waiting 0.05, 0.1, 0.2, 0.4 s
-# between them (0.75 s at most per file)
+# between them (0.75 s total configured delay per file, excluding filesystem calls)
 REPLACE_ATTEMPTS = 5
 REPLACE_DELAYS = (0.05, 0.1, 0.2, 0.4)
 

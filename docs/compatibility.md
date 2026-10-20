@@ -226,7 +226,9 @@ agree) selects the writer through `storage.destination`:
   them, commit the database transaction with `files_state = 'pending'`, replace the
   files, set `written`. Aggregates: stage, finish the run in the database with
   `aggregate_files = 'pending'`, replace, append the exception logs (text mode, platform
-  newlines), set `written`. A staging or database failure changes neither sink. A
+  newlines), set `written`. Failed channel staging or its database transaction
+  preserves the previous channel payloads in both sinks; run bookkeeping may
+  still record the failure. A
   publish failure records the target as failed (best effort), keeps `pending` and stops
   the run with a storage error; after the run's end state was stored, it is set to
   `interrupted`. Any `pending` row blocks collection into the folder in every mode until

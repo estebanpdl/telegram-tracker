@@ -34,6 +34,8 @@ from telegram_tracker.utils import discard
 
 
 BUSY_TIMEOUT_MS = 5000
+# os.rename refuses an existing destination on Windows, but may replace it on Unix.
+_RENAME_REFUSES_EXISTING = os.name == 'nt'
 
 
 class DatabaseBusy(StorageError):
@@ -207,9 +209,14 @@ def _link_new(tmp, path):
 	except FileExistsError:
 		raise DatabaseRefused(f'{path} appeared while it was being created; it was left untouched.') from None
 	except OSError:
-		# file systems without hard links (FAT, exFAT)
+		# Without hard links, only a non-replacing rename can publish safely.
 		if os.path.lexists(path):
 			raise DatabaseRefused(f'{path} appeared while it was being created; it was left untouched.') from None
+		if not _RENAME_REFUSES_EXISTING:
+			raise StorageError(
+				f'cannot create {path}: hard-link publication failed and this platform has no '
+				'safe non-replacing rename; choose an output on a filesystem supporting hard links'
+			) from None
 		try:
 			os.rename(tmp, path)
 		except OSError as exc:

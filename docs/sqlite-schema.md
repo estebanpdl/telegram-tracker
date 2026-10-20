@@ -467,7 +467,10 @@ the run, its time, its options and its profile.
   paths that aren't a plain file path (`:memory:`, `file:` URIs, `.sql` files,
   directories), are refused without being opened. A missing file is created only
   when a run opens the database for writing: it is built in a temporary file next to
-  it and moved into place once complete, never over a file that appeared meanwhile.
+  it and published once complete, never over a file that appeared meanwhile.
+  Publication uses a hard link, or a non-replacing rename on Windows. If hard-link
+  publication fails on another platform, creation is refused; choose a filesystem
+  supporting hard links.
   A file with this application ID and `user_version = 1` is used after its tables,
   indexes, views and triggers are checked against the schema and its `schema_meta`
   row is read. Collection refuses a file with another version, older or newer, and

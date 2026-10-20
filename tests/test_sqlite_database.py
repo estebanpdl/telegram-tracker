@@ -21,6 +21,7 @@ import offline_guard
 import sqlite_support
 
 from telegram_tracker.storage.sqlite import connection, schema
+from telegram_tracker.storage.records import StorageError
 from telegram_tracker.storage.sqlite.connection import DatabaseBusy, create_database, open_database
 from telegram_tracker.storage.sqlite.schema import DatabaseRefused, classify
 from telegram_tracker.storage.sqlite.writer import SQLiteWriter
@@ -139,10 +140,34 @@ class CreationTests(Case):
 
 	def test_creation_without_hard_links(self):
 		with mock.patch.object(connection.os, 'link', side_effect=OSError(1, 'not supported')):
+			if os.name != 'nt':
+				with self.assertRaises(StorageError):
+					create_database(self.db)
+				self.assertEqual(os.listdir(self.out), [])
+				return
 			create_database(self.db)
 		self.assertEqual(classify(self.db).kind, schema.CURRENT)
 		self.assertEqual(os.listdir(self.out), [schema.DB_FILENAME])
 		self.open()
+
+	def test_unsafe_rename_fallback_cannot_replace_a_racing_file(self):
+		real_exists, replacing_rename = os.path.lexists, os.replace
+
+		def racing_exists(path):
+			if path == self.db:
+				with open(path, 'wb') as writer:
+					writer.write(b'other process')
+				return False
+			return real_exists(path)
+
+		with mock.patch.object(connection.os, 'link', side_effect=OSError(1, 'not supported')), \
+				mock.patch.object(connection.os.path, 'lexists', racing_exists), \
+				mock.patch.object(connection.os, 'rename', replacing_rename), \
+				mock.patch.object(connection, '_RENAME_REFUSES_EXISTING', False, create=True):
+			with self.assertRaises(StorageError):
+				create_database(self.db)
+		self.assertEqual(sqlite_support.read_bytes(self.db), b'other process')
+		self.assertEqual(os.listdir(self.out), [schema.DB_FILENAME])
 
 	def test_current_database_opens_and_is_not_rewritten(self):
 		self.created()
