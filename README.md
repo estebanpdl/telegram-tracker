@@ -414,6 +414,18 @@ Login and the subsequent account check run before this policy is created; neithe
 
 The summary prints the counts (given, after removing duplicates, succeeded, failed, duplicates, cancelled) and, per kind of request (`resolve`, `channel`, `history`, `enrichment`), the policy attempts sent, retries, flood waits, and flood-wait seconds. `collection-status.json` records the same numbers.
 
+After the other summary lines, which keep their wording and order, the summary lists the messages saved per channel. It shows the size of each saved history after a full or window run, and also the messages added after `--update`:
+
+```
+> Messages saved: 50 in 1 channel(s)
+>   example_channel: 50
+
+> Messages saved: 3 new; the saved histories of 1 channel(s) now hold 53
+>   example_channel: 3 new, 53 in total
+```
+
+Failed channels and metadata-only runs are not listed.
+
 ## Output files
 
 ```
@@ -564,7 +576,7 @@ A backup belongs to the folder its database was created for. Copied back over `t
 
 ## Collection status, locking, and recovery
 
-Each collection writes `collection-status.json` in the output folder. It records the state, the profile (`profile_name`, `profile_id`), the parameters (full, window with its bounds, update, or metadata only), the request controls and statistics, the account check (`account_checks`), and each target's outcome (`succeeded`, `failed` with a reason, `duplicate`, `cancelled`; a target that a window run failed because its history was found under another name also keeps its `channel_id`), with the derived `min_id` and history mode for `--update` and any takeover. It holds no credentials, account IDs, or message text. Status files written by earlier versions have no profile fields: their profile is unknown.
+Each collection writes `collection-status.json` in the output folder. It records the state, the profile (`profile_name`, `profile_id`), the parameters (full, window with its bounds, update, or metadata only), the request controls and statistics, the account check (`account_checks`), and each target's outcome (`succeeded`, `failed` with a reason, `duplicate`, `cancelled`; a target that a window run failed because its history was found under another name also keeps its `channel_id`), with the saved history's size (`messages`), the derived `min_id`, history mode, and messages added (`new_messages`) for `--update`, and any takeover. It holds no credentials, account IDs, or message text. Status files written by earlier versions have no profile fields: their profile is unknown.
 
 | State | Meaning | Builders |
 |---|---|---|

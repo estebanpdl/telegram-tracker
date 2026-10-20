@@ -87,6 +87,10 @@ class ChannelResult:
 		'created' (--update), or 'not_collected' (metadata only)
 	fetched -> for 'merged', the fetched payload merged into the saved
 		history (the database upserts it); None otherwise
+	messages -> the history's message count after this run; None for
+		metadata only
+	new_messages -> for --update, the messages this run added to the
+		history (all of them for 'created'); None otherwise
 	'''
 	index: int
 	target: str
@@ -97,6 +101,7 @@ class ChannelResult:
 	fetched: dict | None = None
 	observations: list = field(default_factory=list)
 	messages: int | None = None
+	new_messages: int | None = None
 	min_id: int | None = None
 
 

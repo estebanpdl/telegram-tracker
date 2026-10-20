@@ -204,6 +204,9 @@ in input order for deterministic aggregates:
 - `collection-status.json` records the profile, parameters, outcomes, request
   statistics, and `running`, `complete`, `partial`, or `interrupted` state without
   credentials, account IDs, or message text. Metadata-only marks histories retained from earlier runs as stale.
+  A succeeded target records its history size (`messages`, null for metadata only); an `--update` target also
+  records the messages it added (`new_messages`), and the summary prints both after its
+  earlier lines.
 - Channel files keep collected users unfiltered, except that a `User` with `is_self`
   (the collecting account) is written with `phone` set to null.
 - Cancellation/fatal errors retain completed channels and finalize their aggregates

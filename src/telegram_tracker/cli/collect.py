@@ -339,6 +339,7 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 			'channel(s) are from an earlier run: '
 			+ ', '.join(summary.stale_histories) + '\n'
 		)
+	print_messages(summary.saved_messages)
 
 	if summary.stop_reason:
 		print(f'> Stopped: {summary.stop_reason}', file=sys.stderr)
@@ -408,6 +409,31 @@ def print_summary(summary, given):
 				f'>   {name:<11} {stats["requests"]} / {stats["retries"]} / '
 				f'{stats["flood_waits"]} / {stats["flood_wait_seconds"]}'
 			)
+	print('')
+
+
+def print_messages(saved_messages):
+	'''
+	Messages per saved history (stdout), after the other summary lines:
+	the history's count, and for --update the messages this run added.
+	Nothing when no history was saved.
+	'''
+	if not saved_messages:
+		return
+	total = sum(count for _, count, _ in saved_messages)
+	channels = len(saved_messages)
+	if all(new is not None for _, _, new in saved_messages):
+		added = sum(new for _, _, new in saved_messages)
+		print(
+			f'> Messages saved: {added} new; the saved histories of {channels} '
+			f'channel(s) now hold {total}'
+		)
+		for target, count, new in saved_messages:
+			print(f'>   {target}: {new} new, {count} in total')
+	else:
+		print(f'> Messages saved: {total} in {channels} channel(s)')
+		for target, count, _ in saved_messages:
+			print(f'>   {target}: {count}')
 	print('')
 
 

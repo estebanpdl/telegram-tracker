@@ -290,6 +290,8 @@ async def _collect_targets(client, summary, policy, status, writer, *, metadata_
 			)
 			if payload.min_id is not None:
 				entry['min_id'] = payload.min_id
+			if payload.new_messages is not None:
+				entry['new_messages'] = payload.new_messages
 			if takeover:
 				entry.update(takeover)
 				summary.takeovers.append((target, takeover['previous_profile_name']))
@@ -404,6 +406,8 @@ def _finish(writer, cache, status, summary, policy, *, failing):
 			summary.cancelled.append(target)
 		elif entry['status'] == 'succeeded':
 			summary.succeeded.append(target)
+			if entry.get('messages') is not None:
+				summary.saved_messages.append((target, entry['messages'], entry.get('new_messages')))
 			if entry.get('history') == 'created':
 				summary.collected_in_full.append(target)
 			if entry.get('stale_history'):
