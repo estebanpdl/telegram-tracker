@@ -13,7 +13,9 @@ for `sqlite` and `both`, the database <output>/telegram-tracker.sqlite3.
 	                    and nothing is left unpublished ('pending').
 	check_unlocked      just before connecting: no database lease is held.
 	open_writer         the collector's writer factory, called once the
-	                    output folder is locked: takes the database lease,
+	                    output folder is locked: for files, refuses a folder
+	                    that gained a manifest meanwhile; otherwise takes the
+	                    database lease,
 	                    checks again, creates the database and the manifest
 	                    for a new folder, and opens the run's writer. The
 	                    writer releases the lease when it closes.
@@ -225,6 +227,13 @@ class Destination:
 		from telegram_tracker.storage.writer import OutputWriter, open_file_writer
 
 		if not self.uses_database:
+			# a sqlite or both run may have set the folder up since `check`
+			manifest = read_manifest(self.output_folder)
+			if manifest is not None:
+				raise DestinationError(
+					f'{self.output_folder} was set up for --storage {manifest["storage"]} by another '
+					'run meanwhile; nothing was written.'
+				)
 			return open_file_writer(
 				output_folder=output_folder, profile=profile, started_at=started_at,
 				targets=targets, parameters=parameters

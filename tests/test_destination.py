@@ -145,6 +145,45 @@ class PendingTests(DestinationCase):
 		self.assertNoLocks()
 
 
+class FilesRaceTests(DestinationCase):
+
+	def contents(self, out):
+		data = {}
+		for name in storage_modes_support.listing(out):
+			with open(os.path.join(out, name), 'rb') as fh:
+				data[name] = fh.read()
+		return data
+
+	def test_a_files_run_refuses_a_folder_set_up_meanwhile(self):
+		original = destinations.Destination.check
+		for mode, legacy in (('both', False), ('sqlite', False), ('both', True)):
+			out = os.path.join(self.tmp, f'{mode}-{"legacy" if legacy else "collect"}')
+			raced = {}
+
+			def check_then_race(destination):
+				original(destination)
+				if not raced:
+					# another run sets the empty folder up after this run's check
+					raced['started'] = True
+					raced['code'] = self.collect(out=out, storage=mode)[0]
+					raced['contents'] = self.contents(out)
+
+			with self.subTest(mode=mode, legacy=legacy):
+				client = self.make_client()
+				argv = ['--telegram-channel', 'beta_fx', '-o', out] if legacy else \
+					['collect', '--telegram-channel', 'beta_fx', '-o', out]
+				with mock.patch.object(destinations.Destination, 'check', check_then_race):
+					code, _, err = self.run_cli(argv, client=client)
+				self.assertEqual(raced['code'], 0)
+				self.assertEqual(code, 1)
+				self.assertIn(f'was set up for --storage {mode} by another run meanwhile; nothing was written', err)
+				self.assertIn('get_me', client.call_names())  # refused under the lock, after login
+				self.assertNotIn('get_entity', client.call_names())
+				self.assertEqual(self.contents(out), raced['contents'])
+				self.assertEqual(self.rows('SELECT count(*) FROM collection_runs', out=out), [(1,)])
+				self.assertNoLocks(out)
+
+
 class LeaseTests(DestinationCase):
 
 	def test_a_held_database_lease_is_refused_before_connecting(self):
