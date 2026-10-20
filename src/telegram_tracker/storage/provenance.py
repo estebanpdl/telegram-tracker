@@ -158,6 +158,17 @@ def write_provenance(output_folder, result, run, started_at, had_history):
 	Returns the takeover entry ({'takeover': True, 'previous_profile_name':
 	..., 'previous_profile_id': ...}) or None.
 	'''
+	record, takeover = provenance_record(output_folder, result, run, started_at, had_history)
+	if record is not None:
+		write_json_pretty(provenance_path(output_folder, result.target), record)
+	return takeover
+
+
+def provenance_record(output_folder, result, run, started_at, had_history):
+	'''
+	The record write_provenance writes (None: nothing to write) and the
+	takeover entry, computed without writing.
+	'''
 	path = provenance_path(output_folder, result.target)
 	mode = result.history_mode
 	if mode == 'merged':
@@ -166,10 +177,9 @@ def write_provenance(output_folder, result, run, started_at, had_history):
 		except HistoryUnreadable:
 			record = None
 		if record is None:
-			return None
+			return None, None
 		record.update(history=mode, run_started_at=started_at, **fingerprint(result.history))
-		write_json_pretty(path, record)
-		return None
+		return record, None
 
 	takeover = None
 	if mode == 'replaced' and had_history:
@@ -184,7 +194,7 @@ def write_provenance(output_folder, result, run, started_at, had_history):
 				'previous_profile_name': (previous or {}).get('profile_name'),
 				'previous_profile_id': (previous or {}).get('profile_id')
 			}
-	write_json_pretty(path, {
+	return {
 		'format': PROVENANCE_FORMAT,
 		'channel_id': result.channel_id,
 		**run.record(),
@@ -194,5 +204,4 @@ def write_provenance(output_folder, result, run, started_at, had_history):
 		'takeover': takeover is not None,
 		'previous_profile_name': takeover and takeover['previous_profile_name'],
 		'previous_profile_id': takeover and takeover['previous_profile_id']
-	})
-	return takeover
+	}, takeover

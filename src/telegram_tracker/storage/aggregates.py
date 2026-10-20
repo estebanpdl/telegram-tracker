@@ -12,7 +12,7 @@ import os
 from dataclasses import dataclass, field
 
 # import local submodules
-from telegram_tracker.storage.files import append_lines, replace_file, write_text
+from telegram_tracker.storage.files import append_lines, replace_file, text_writer
 from telegram_tracker.storage.records import CHANNELS_NOT_FOUND, COUNTER_COLUMNS, \
 	DATASET_STAT_COLUMNS, USERS_NOT_FOUND, StorageError
 from telegram_tracker.utils import chats_dataset_columns
@@ -201,47 +201,60 @@ def write_aggregates(output_folder, agg):
 	leaves an existing file untouched; a missing or header-only file with
 	no new rows becomes a header-correct empty file.
 	'''
-	import pandas as pd
-
 	try:
-		chats_path = f'{output_folder}/chats.txt'
-		earlier = []
-		if os.path.isfile(chats_path):
-			with open(chats_path, mode='r', encoding='utf-8') as reader:
-				earlier = [line.rstrip() for line in reader]
-		ids = dict.fromkeys(earlier + [str(i) for i in agg.chat_ids])
-		write_text(chats_path, ''.join(f'{c}\n' for c in ids))
-
-		counter_df = counter_frame(agg.counter)
-		replace_file(
-			f'{output_folder}/counter.csv',
-			lambda tmp: counter_df.to_csv(tmp, encoding='utf-8', index=False)
-		)
-
-		csv_path = f'{output_folder}/collected_chats.csv'
-		has_rows = os.path.isfile(csv_path) and not _has_no_rows(csv_path)
-		if agg.metadata:
-			df = pd.DataFrame(agg.metadata).merge(
-				counter_df.drop(columns='username'), how='left', on='id'
-			)
-			if has_rows:
-				# text as written; this run's counts never touch earlier rows
-				earlier_df = pd.read_csv(
-					csv_path, encoding='utf-8', dtype=str, keep_default_na=False
-				)
-				df = pd.concat([earlier_df, df], ignore_index=True)
-			replace_file(
-				csv_path,
-				lambda tmp: df.to_csv(tmp, index=False, encoding='utf-8')
-			)
-		elif not has_rows:
-			empty = pd.DataFrame(columns=empty_collected_chats_columns())
-			replace_file(
-				csv_path,
-				lambda tmp: empty.to_csv(tmp, index=False, encoding='utf-8')
-			)
+		for path, write in aggregate_files(output_folder, agg):
+			replace_file(path, write)
 	except OSError as exc:
 		raise StorageError(f'cannot update aggregate files in {output_folder}: {exc}') from exc
 
+	append_logs(output_folder, agg)
+
+
+def aggregate_files(output_folder, agg):
+	'''
+	Yield (path, write) for each aggregate file write_aggregates
+	replaces, in order; write(temp_path) writes one file. The earlier
+	contents a file builds on are read just before it is yielded. The
+	exception logs are appended separately (append_logs).
+	'''
+	import pandas as pd
+
+	chats_path = f'{output_folder}/chats.txt'
+	earlier = []
+	if os.path.isfile(chats_path):
+		with open(chats_path, mode='r', encoding='utf-8') as reader:
+			earlier = [line.rstrip() for line in reader]
+	ids = dict.fromkeys(earlier + [str(i) for i in agg.chat_ids])
+	yield (chats_path, text_writer(''.join(f'{c}\n' for c in ids)))
+
+	counter_df = counter_frame(agg.counter)
+	yield (
+		f'{output_folder}/counter.csv',
+		lambda tmp: counter_df.to_csv(tmp, encoding='utf-8', index=False)
+	)
+
+	csv_path = f'{output_folder}/collected_chats.csv'
+	has_rows = os.path.isfile(csv_path) and not _has_no_rows(csv_path)
+	if agg.metadata:
+		df = pd.DataFrame(agg.metadata).merge(
+			counter_df.drop(columns='username'), how='left', on='id'
+		)
+		if has_rows:
+			# text as written; this run's counts never touch earlier rows
+			earlier_df = pd.read_csv(
+				csv_path, encoding='utf-8', dtype=str, keep_default_na=False
+			)
+			df = pd.concat([earlier_df, df], ignore_index=True)
+		yield (csv_path, lambda tmp: df.to_csv(tmp, index=False, encoding='utf-8'))
+	elif not has_rows:
+		empty = pd.DataFrame(columns=empty_collected_chats_columns())
+		yield (csv_path, lambda tmp: empty.to_csv(tmp, index=False, encoding='utf-8'))
+
+
+def append_logs(output_folder, agg):
+	'''
+	Append this run's not-found entries to the exception logs (text
+	mode, so lines end as the platform's other text files do).
+	'''
 	append_lines(f'{output_folder}/{CHANNELS_NOT_FOUND}', agg.channels_not_found)
 	append_lines(f'{output_folder}/{USERS_NOT_FOUND}', agg.users_not_found)
