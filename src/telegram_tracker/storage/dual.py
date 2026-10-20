@@ -119,6 +119,9 @@ class DualHistories:
 	def before_requests(self, target):
 		return self.files.before_requests(target)
 
+	def stored(self, channel_id):
+		return self.database.stored(channel_id)
+
 	def after_resolve(self, target, channel_id, saved):
 		stored = self.database.after_resolve(target, channel_id, None)
 		if saved is None and stored is None:

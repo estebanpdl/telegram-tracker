@@ -14,7 +14,7 @@ from telegram_tracker.api import CHANNEL_ACCESS_ERRORS
 from telegram_tracker.collector.history import HistoryWindow, fetch_history
 from telegram_tracker.collector.outcomes import TargetUnavailable
 from telegram_tracker.collector.rpc import CHANNEL
-from telegram_tracker.storage.histories import FileHistories
+from telegram_tracker.storage.histories import FileHistories, ReplaceNotConfirmed
 from telegram_tracker.storage.records import ChannelResult
 from telegram_tracker.utils import JSONEncoder
 
@@ -49,7 +49,8 @@ async def collect_channel(
 		update=False,
 		after_resolve=None,
 		profile=None,
-		histories=None
+		histories=None,
+		confirmed=None
 	):
 	'''
 	Collect one target and return its ChannelResult; nothing is written.
@@ -65,7 +66,11 @@ async def collect_channel(
 	full. The file source checks before any request and reads the history
 	again after the fetch. With a `profile` (RunProfile), --update into a
 	history another profile collected raises HistoryRefused before any
-	history request (see storage.provenance). `after_resolve(entity)` is awaited
+	history request (see storage.provenance). With `confirmed` (a window
+	run: the targets whose replacement was confirmed by name before
+	connecting), a target outside it whose channel has a history stored
+	under its ID raises ReplaceNotConfirmed before any history request.
+	`after_resolve(entity)` is awaited
 	right after entity resolution (entity is False when missing) and may
 	raise to stop. Raises TargetUnavailable, PaginationStalled,
 	HistoryUnreadable, HistoryRefused, or RequestFailed for a target that
@@ -98,6 +103,8 @@ async def collect_channel(
 		if saved is not None:
 			window = HistoryWindow(min_id=saved.newest_id)
 		result.min_id = window.min_id
+	if confirmed is not None and target not in confirmed and histories.stored(channel_id):
+		raise ReplaceNotConfirmed(channel_id)
 
 	try:
 		channel_request = await cache.full_channel(channel_id, CHANNEL)

@@ -317,9 +317,10 @@ Runs without a history window (full, `--update`, metadata only) never ask.
 
 The earlier collection form (`python main.py --telegram-channel NAME --min-id N`) does not accept `--yes`, so it only prints the warning and goes on, as it did before; it writes files only. Use `collect` to be asked.
 
+Before connecting, a `sqlite` or `both` folder can only be searched by name: the database keys histories by the channel's numeric id, which is known only after connecting. A channel given under a name that no earlier run used and that is not its stored username (for example a username that changed since the last run) is found after it resolves. Without `--yes`, that channel fails before any of its messages are requested and its stored history is kept; the reason says the history was found under another name. The run goes on with the other channels and exits 1. The failed target's record keeps the channel's id, so running the same command again asks first. In `files` folders a new name writes a new folder and replaces nothing.
+
 Known limits:
 
-- In `sqlite` and `both` folders, a channel is found by name, because the database keys histories by the channel's numeric id, which is only known after connecting. A channel given under a name that no earlier run used and that is not its stored username (for example a username that changed since the last run) is not found, and its history is replaced without asking.
 - Pages are kept whole, so the `chats` and `users` of the page that crosses a bound can include entries referenced only by excluded messages.
 - `--since` stops paging at the first page older than the date. This assumes message dates follow id order, which imported histories can break.
 - `count` in the saved JSON (`collected_actions` in the dataset) is Telegram's total for the channel, not the number of messages saved.
@@ -534,7 +535,7 @@ A backup belongs to the folder its database was created for. Copied back over `t
 
 ## Collection status, locking, and recovery
 
-Each collection writes `collection-status.json` in the output folder. It records the state, the profile (`profile_name`, `profile_id`), the parameters (full, window with its bounds, update, or metadata only), the request controls and statistics, the account check (`account_checks`), and each target's outcome (`succeeded`, `failed` with a reason, `duplicate`, `cancelled`), with the derived `min_id` and history mode for `--update` and any takeover. It holds no credentials, account IDs, or message text. Status files written by earlier versions have no profile fields: their profile is unknown.
+Each collection writes `collection-status.json` in the output folder. It records the state, the profile (`profile_name`, `profile_id`), the parameters (full, window with its bounds, update, or metadata only), the request controls and statistics, the account check (`account_checks`), and each target's outcome (`succeeded`, `failed` with a reason, `duplicate`, `cancelled`; a target that a window run failed because its history was found under another name also keeps its `channel_id`), with the derived `min_id` and history mode for `--update` and any takeover. It holds no credentials, account IDs, or message text. Status files written by earlier versions have no profile fields: their profile is unknown.
 
 | State | Meaning | Builders |
 |---|---|---|

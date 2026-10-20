@@ -381,11 +381,14 @@ class SQLiteWriter:
 						for name, s in (requests or {}).items()
 					]
 				)
+				# a failed target keeps its channel_id when it resolved before
+				# failing (an unconfirmed replace), so a later run can find it
 				self.con.executemany(
-					'UPDATE run_targets SET status = ?, reason = ?, alias_of = ? '
-					'WHERE run_id = ? AND input_index = ?',
+					'UPDATE run_targets SET status = ?, reason = ?, alias_of = ?, '
+					'channel_id = coalesce(?, channel_id) WHERE run_id = ? AND input_index = ?',
 					[
-						(entry['status'], entry.get('reason'), entry.get('alias_of'), self.run_id, index)
+						(entry['status'], entry.get('reason'), entry.get('alias_of'), entry.get('channel_id'),
+							self.run_id, index)
 						for index, entry in enumerate(targets) if entry['status'] != 'succeeded'
 					]
 				)

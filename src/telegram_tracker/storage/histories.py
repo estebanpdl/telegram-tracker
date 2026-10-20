@@ -21,6 +21,12 @@ Both lookups raise HistoryUnreadable for a history that cannot be read
 and HistoryRefused for one the run's profile may not update; either
 fails only that target.
 
+For a window run, after resolution and before any history request:
+
+	stored(channel_id) -> True when a history is stored under the
+		resolved channel ID. Only the database keys histories by ID; the
+		files are named after the target, so they never match here.
+
 `FileHistories` reads <target>_messages.json and decides everything by
 target name, before any request. The database source
 (storage.sqlite.histories) decides by channel ID, after resolution.
@@ -33,7 +39,23 @@ from dataclasses import dataclass
 
 # import local submodules
 from telegram_tracker.storage.files import history_path, merge_histories, newest_id, read_history
-from telegram_tracker.storage.provenance import check_update
+from telegram_tracker.storage.provenance import HistoryRefused, check_update
+
+
+class ReplaceNotConfirmed(HistoryRefused):
+	'''
+	A window run would replace a history stored under the resolved
+	channel ID that the check before connecting did not find by name (a
+	new name of the channel). Fails only that target, before its history
+	is requested; `channel_id` is recorded so the next run's check finds
+	it and asks.
+	'''
+	def __init__(self, channel_id):
+		super().__init__(
+			'a saved history of its channel was found under another name, so it was not '
+			'replaced; run again to be asked first, or pass --yes'
+		)
+		self.channel_id = channel_id
 
 
 @dataclass(frozen=True)
@@ -69,6 +91,9 @@ class FileHistories:
 
 	def after_resolve(self, target, channel_id, saved):
 		return saved
+
+	def stored(self, channel_id):
+		return False
 
 	def merge(self, target, saved, fetched):
 		'''

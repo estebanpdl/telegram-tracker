@@ -153,8 +153,11 @@ sqlite: a read-only lookup of histories by earlier run input or stored channel
 username, case-insensitive; both: either) and warns. A terminal is asked
 `Continue? [y/N]`: anything but y/yes, or EOF, exits 1. `--yes` skips the question.
 Input that is not a console (a pipe, a file, or NUL, which reports isatty() on
-Windows) exits 2. A stopped run creates no client and writes nothing. The legacy
-form cannot take `--yes`: it warns and proceeds, as before.
+Windows) exits 2. A stopped run creates no client and writes nothing. Without
+`--yes`, a target whose resolved channel has a database history the name lookup
+missed fails before its first history request (history kept; its run_targets row
+and sidecar entry keep `channel_id`, so a rerun asks). The legacy form cannot take
+`--yes`: it warns and proceeds, as before.
 
 `--update` derives each target's minimum ID from its saved history, fetches newer
 posts, and merges by ID with fetched copies winning. It is exclusive with every

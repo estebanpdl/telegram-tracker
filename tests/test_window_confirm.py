@@ -410,6 +410,111 @@ class DetectionTests(ConfirmCase):
 		self.assertFalse(os.path.exists(out))
 
 
+class RenamedChannelTests(ConfirmCase):
+	'''
+	A channel given under a name the check before connecting cannot know
+	(`alpha_renamed`: never an input, not the stored username) is found
+	after resolution: without --yes its stored history is kept and the
+	target fails; the next run asks.
+	'''
+
+	def setUp(self):
+		super().setUp()
+		raw = load_world_raw()
+		raw['entities']['alpha_renamed'] = {'chat': 101}
+		self.raw = raw
+
+	def run_window(self, stdin, out, *extra, targets=('alpha_renamed',)):
+		return self.window(stdin, out, *extra, targets=targets, client=self.make_client(self.raw))
+
+	def stored_history(self, out):
+		return (
+			self.rows('SELECT run_id, mode, message_count FROM histories WHERE channel_id = 101', out=out),
+			self.rows('SELECT message_id FROM messages WHERE channel_id = 101 ORDER BY 1', out=out)
+		)
+
+	def test_an_unconfirmed_stored_history_fails_the_target_and_is_kept(self):
+		for storage in ('sqlite', 'both'):
+			with self.subTest(storage=storage):
+				out = self.folder(storage)
+				self.save(storage, out, client=self.make_client(self.raw))
+				history, files = self.stored_history(out), snapshot(os.path.join(out, 'alpha_fx'))
+				self.assertGreater(len(history[1]), 1)
+
+				code, stdout, err = self.run_window(io.StringIO(''), out)
+				self.assertEqual(code, 1, err)
+				self.assertNotIn('Warning', err)
+				self.assertNotIn(PROMPT, stdout)
+				self.assertIn('> alpha_renamed: a saved history of its channel was found under another name', err)
+				self.assertIn('run again to be asked first, or pass --yes', err)
+				self.assertEqual(self.stored_history(out), history)
+				self.assertEqual(snapshot(os.path.join(out, 'alpha_fx')), files)
+				self.assertFalse(os.path.exists(os.path.join(out, 'alpha_renamed')))
+				entry = self.status(out)['targets'][0]
+				self.assertEqual((entry['status'], entry['channel_id']), ('failed', 101))
+				self.assertIn('found under another name', entry['reason'])
+				self.assertEqual(
+					self.rows('SELECT status, channel_id FROM run_targets WHERE input = ? ORDER BY run_id DESC LIMIT 1',
+						'alpha_renamed', out=out),
+					[('failed', 101)]
+				)
+
+	def test_other_targets_of_the_batch_continue(self):
+		out = self.folder('sqlite')
+		self.save('sqlite', out, client=self.make_client(self.raw))
+		history = self.stored_history(out)
+		code, _, err = self.run_window(io.StringIO(''), out, targets=('alpha_renamed', 'beta_fx'))
+		self.assertEqual(code, 1, err)
+		statuses = [t['status'] for t in self.status(out)['targets']]
+		self.assertEqual(statuses, ['failed', 'succeeded'])
+		self.assertEqual(self.history_size('sqlite', out, 'beta_fx', 102), 1)
+		self.assertEqual(self.stored_history(out), history)
+
+	def test_the_next_run_asks_and_yes_replaces(self):
+		for storage in ('sqlite', 'both'):
+			with self.subTest(storage=storage):
+				out = self.folder(storage)
+				self.save(storage, out, client=self.make_client(self.raw))
+				history = self.stored_history(out)
+				self.assertEqual(self.run_window(io.StringIO(''), out)[0], 1)
+
+				# the failed run recorded the channel under the new name
+				destination = select_destination(out)
+				destination.check()
+				self.assertEqual(destination.saved_histories(['alpha_renamed']), ['alpha_renamed'])
+
+				code, stdout, err = self.run_window(Terminal('n\n'), out)
+				self.assertEqual(code, 1, err)
+				self.assertIn(PROMPT, stdout)
+				self.assertIn(': alpha_renamed. Use a fresh --output', err)
+				self.assertEqual(self.stored_history(out), history)
+
+				code, _, err = self.run_window(Terminal('y\n'), out)
+				self.assertEqual(code, 0, err)
+				self.assertEqual(self.history_size('sqlite', out), 1)
+
+	def test_yes_replaces_without_the_check(self):
+		for storage in ('sqlite', 'both'):
+			with self.subTest(storage=storage):
+				out = self.folder(storage)
+				self.save(storage, out, client=self.make_client(self.raw))
+				code, stdout, err = self.run_window(io.StringIO(''), out, '--yes')
+				self.assertEqual(code, 0, err)
+				self.assertNotIn('found under another name', err)
+				self.assertEqual(self.history_size('sqlite', out), 1)
+				self.assertEqual(self.status(out)['targets'][0]['status'], 'succeeded')
+
+	def test_files_keep_a_renamed_channel_apart(self):
+		# file histories are named after the target, so nothing is replaced
+		out = self.folder('files')
+		self.save('files', out, client=self.make_client(self.raw))
+		files = snapshot(os.path.join(out, 'alpha_fx'))
+		code, _, err = self.run_window(io.StringIO(''), out)
+		self.assertEqual(code, 0, err)
+		self.assertEqual(snapshot(os.path.join(out, 'alpha_fx')), files)
+		self.assertEqual(self.history_size('files', out, 'alpha_renamed'), 1)
+
+
 class LegacyFormTests(ConfirmCase):
 	'''
 	The legacy form cannot take --yes: it warns and goes on, as before.

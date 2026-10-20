@@ -202,13 +202,16 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 			parser.error(f'the --output folder must be outside the application home ({home})')
 		destination.protected = (session.path,)
 		destination.check()
+		confirmed = None
 		if bounds and not metadata_only:
-			stop = confirm_replaced_histories(
-				destination.saved_histories(targets), output_folder,
-				legacy=legacy, assume_yes=args.get('yes', False)
-			)
+			assume_yes = args.get('yes', False)
+			existing = destination.saved_histories(targets)
+			stop = confirm_replaced_histories(existing, output_folder, legacy=legacy, assume_yes=assume_yes)
 			if stop is not None:
 				return stop
+			if not (legacy or assume_yes):
+				# a history found only after resolution was not confirmed
+				confirmed = frozenset(existing)
 		phone = None
 		if client_factory is None:
 			from telegram_tracker.api import create_client
@@ -290,6 +293,7 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 					identify=account_check(profile, session, home, RunProfile),
 					writer_factory=destination.open_writer,
 					preflight=destination.check_unlocked,
+					confirmed=confirmed,
 					**controls
 				)
 			)
