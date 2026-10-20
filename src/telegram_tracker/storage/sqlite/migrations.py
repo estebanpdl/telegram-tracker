@@ -32,6 +32,7 @@ from telegram_tracker.storage.sqlite.connection import BUSY_TIMEOUT_MS, app_vers
 	check_library, storage_error, transaction
 from telegram_tracker.storage.sqlite.schema import APPLICATION_ID, CURRENT, MISSING, NEWER, OLDER, \
 	SCHEMA_VERSION, DatabaseRefused, classify, refusal_message
+from telegram_tracker.storage.sqlite.lease import DatabaseLease
 from telegram_tracker.storage.status import utc_now
 from telegram_tracker.utils import discard
 
@@ -89,10 +90,18 @@ def migrate(path, *, upgrades=None, target_version=SCHEMA_VERSION, busy_timeout_
 	'''
 	Upgrade the data database at `path` to `target_version`, backing it
 	up before every step (see the module docstring). Returns the list of
-	backups made; an empty list when it already has that version. Run
-	only while no collection uses the database.
+	backups made; an empty list when it already has that version. Holds
+	the database lease (see lease.py) from before the first read to the
+	last step, so no collection writes between the checks, the backup and
+	the step transaction; a held lease raises DatabaseLocked.
 	'''
-	upgrades = UPGRADES if upgrades is None else upgrades
+	if classify(path).kind == MISSING:
+		raise DatabaseRefused(f'{path} does not exist')
+	with DatabaseLease(path):
+		return _migrate_leased(path, UPGRADES if upgrades is None else upgrades, target_version, busy_timeout_ms)
+
+
+def _migrate_leased(path, upgrades, target_version, busy_timeout_ms):
 	found = classify(path)
 	if found.kind == MISSING:
 		raise DatabaseRefused(f'{path} does not exist')

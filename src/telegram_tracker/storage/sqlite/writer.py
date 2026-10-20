@@ -19,9 +19,15 @@ nor a computed column holds the collecting account's phone number.
 A failed transaction is rolled back and raises StorageError; channels
 committed earlier stay. When `finish` fails, the run is marked
 interrupted if that still succeeds.
+
+In both mode (storage.dual), the channel transaction also sets the
+target's files_state to 'pending', and `finish` sets aggregate_files to
+'pending'; the mark_* methods set 'written' once the files are published,
+and fail_target / interrupt_finished record a publication failure.
 '''
 
 # import modules
+import os
 import sqlite3
 import sys
 import uuid
@@ -35,7 +41,7 @@ from telegram_tracker.storage.sqlite.connection import BUSY_TIMEOUT_MS, app_vers
 from telegram_tracker.storage.sqlite.histories import SQLiteHistories
 from telegram_tracker.storage.sqlite.mapping import entities, envelope, json_text, \
 	merged_entities, message_rows, participants_count, peer_row
-from telegram_tracker.storage.sqlite.schema import SERIALIZER_VERSION
+from telegram_tracker.storage.sqlite.schema import SCHEMA_VERSION, SERIALIZER_VERSION
 from telegram_tracker.storage.status import utc_now
 from telegram_tracker.storage.writer import drop_own_phone
 
@@ -80,12 +86,20 @@ class SQLiteWriter:
 	'''
 	The run's writer for the database at `path`; see the module docstring.
 	`profile` (RunProfile or None) is recorded on the run and on every
-	history the run replaces or creates.
+	history the run replaces or creates. `storage` is the run's storage
+	mode: 'sqlite', or 'both' when storage.dual.DualWriter also writes the
+	files and records their publication (files_state, aggregate_files).
 	'''
-	def __init__(self, con, path, run_id, profile=None, parameters=None):
+	def __init__(self, con, path, run_id, profile=None, parameters=None, *, storage='sqlite', run_uuid=None,
+			stale_runs=0, lease=None, dataset_uuid=None):
 		self.con = con
 		self.path = path
 		self.run_id = run_id
+		self.run_uuid = run_uuid
+		self.storage = storage
+		self.stale_runs = stale_runs
+		self.lease = lease
+		self.dataset_uuid = dataset_uuid
 		self.profile = profile or RunProfile()
 		self.parameters = parameters or {}
 		self.histories = SQLiteHistories(con, profile)
@@ -97,24 +111,45 @@ class SQLiteWriter:
 	@classmethod
 	def open(
 			cls, path, *, output_folder=None, profile=None, started_at=None, targets=(),
-			parameters=None, protected=(), busy_timeout_ms=BUSY_TIMEOUT_MS):
+			parameters=None, protected=(), busy_timeout_ms=BUSY_TIMEOUT_MS, storage='sqlite',
+			stale_reason=None, output_binding=None, lease=None):
 		'''
 		Open the database (see connection.open_database; a missing one is
-		created) and record the run. Use as a collector writer factory:
-		functools.partial(SQLiteWriter.open, path).
+		created, recording `output_binding`) and record the run. Use as a
+		collector writer factory: functools.partial(SQLiteWriter.open, path).
+
+		stale_reason -> when given, runs still recorded as running are first
+			marked interrupted with this stop reason, in the transaction that
+			records this run; their number is `stale_runs`. Only a caller that
+			holds the database lease may pass it (storage.destination): then
+			no other process is writing, and a running run is one whose
+			process ended without finishing.
+		lease -> the held database lease (sqlite.lease.DatabaseLease),
+			released by `close`; on a failure here the caller still holds it
 		'''
 		parameters = parameters or {}
-		con = open_database(path, create=True, protected=protected, busy_timeout_ms=busy_timeout_ms)
+		con = open_database(
+			path, create=True, protected=protected, busy_timeout_ms=busy_timeout_ms,
+			output_binding=output_binding
+		)
 		try:
 			record = (profile or RunProfile()).record()
+			run_uuid = str(uuid.uuid4())
 			with transaction(con, 'record the run'):
+				dataset_uuid = con.execute('SELECT dataset_uuid FROM schema_meta').fetchone()[0]
+				stale = 0
+				if stale_reason is not None:
+					stale = con.execute(
+						"UPDATE collection_runs SET state = 'interrupted', stop_reason = ? WHERE state = 'running'",
+						(stale_reason,)
+					).rowcount
 				run_id = con.execute(
 					'INSERT INTO collection_runs (run_uuid, profile_name, profile_id, state, mode, '
 					'storage, started_at, parameters, app_version, telethon_version, serializer_version) '
-					"VALUES (?, ?, ?, 'running', ?, 'sqlite', ?, ?, ?, ?, ?)",
+					"VALUES (?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?)",
 					(
-						str(uuid.uuid4()), record['profile_name'], record['profile_id'],
-						parameters.get('mode', 'full'), started_at or utc_now(), json_text(parameters),
+						run_uuid, record['profile_name'], record['profile_id'],
+						parameters.get('mode', 'full'), storage, started_at or utc_now(), json_text(parameters),
 						app_version(), package_version('telethon'), SERIALIZER_VERSION
 					)
 				).lastrowid
@@ -127,7 +162,25 @@ class SQLiteWriter:
 			if isinstance(exc, (ValueError, TypeError)):
 				raise StorageError(f'cannot record the run in {path}: {exc}') from None
 			raise
-		return cls(con, path, run_id, profile, parameters)
+		return cls(
+			con, path, run_id, profile, parameters, storage=storage, run_uuid=run_uuid, stale_runs=stale,
+			lease=lease, dataset_uuid=dataset_uuid
+		)
+
+	def status_fields(self):
+		'''
+		What collection-status.json records about this database (see
+		storage.writer.OutputWriter.status_fields).
+		'''
+		return {
+			'storage': self.storage,
+			'database': {
+				'file': os.path.basename(self.path),
+				'schema_version': SCHEMA_VERSION,
+				'dataset_uuid': self.dataset_uuid,
+				'run_uuid': self.run_uuid
+			}
+		}
 
 	'''
 
@@ -135,23 +188,25 @@ class SQLiteWriter:
 
 	'''
 
-	def commit(self, result):
+	def commit(self, result, *, files_state=None):
 		'''
 		Store one ChannelResult in one transaction. Returns the takeover
 		entry of a replaced history (as storage.provenance) or None.
+		`files_state` ('pending' in both mode) is set on the target's row
+		in the same transaction.
 		'''
 		for payload in (result.channel_data, result.history, result.fetched):
 			if payload is not None:
 				drop_own_phone(payload)
 		try:
 			with transaction(self.con, f'save {result.target}'):
-				takeover = self._write_channel(result)
+				takeover = self._write_channel(result, files_state)
 		except (ValueError, TypeError) as exc:
 			raise StorageError(f'cannot save {result.target}: {exc}') from None
 		self.committed.append(result)
 		return takeover
 
-	def _write_channel(self, result):
+	def _write_channel(self, result, files_state=None):
 		channel_id = result.channel_id
 		self.con.execute(
 			UPSERT_SNAPSHOT, (channel_id, self.run_id, utc_now(), json_text(result.channel_data))
@@ -168,12 +223,13 @@ class SQLiteWriter:
 		updated = self.con.execute(
 			"UPDATE run_targets SET status = 'succeeded', channel_id = ?, history_mode = ?, min_id = ?, "
 			'messages = ?, participants_count = ?, reason = NULL, takeover = ?, '
-			'previous_profile_name = ?, previous_profile_id = ? WHERE run_id = ? AND input_index = ?',
+			'previous_profile_name = ?, previous_profile_id = ?, files_state = ? '
+			'WHERE run_id = ? AND input_index = ?',
 			(
 				channel_id, result.history_mode, result.min_id, result.messages,
 				participants_count(result.channel_data), 1 if takeover else 0,
 				takeover_record.get('previous_profile_name'), takeover_record.get('previous_profile_id'),
-				self.run_id, result.index
+				files_state, self.run_id, result.index
 			)
 		).rowcount
 		if updated != 1:
@@ -284,6 +340,16 @@ class SQLiteWriter:
 		'''
 		agg = reduce_results(self.committed, outcomes, self.not_found)
 		self.finalized = True
+		self.record_observations(agg)
+		for chat_id, reason in agg.skipped:
+			print(f'> Skipped metadata for chat {chat_id}: {reason}', file=sys.stderr)
+		return agg
+
+	def record_observations(self, agg):
+		'''
+		Store the observations of `agg`, the run's Aggregates, in one
+		transaction; `finish` then stores the rest of it.
+		'''
 		with transaction(self.con, "save the run's observations"):
 			self.con.executemany(
 				'INSERT INTO run_observations (run_id, seq, input_index, kind, page, channel_id, '
@@ -291,21 +357,24 @@ class SQLiteWriter:
 				[(self.run_id, seq, *observation) for seq, observation in enumerate(agg.observations)]
 			)
 		self.aggregates = agg
-		for chat_id, reason in agg.skipped:
-			print(f'> Skipped metadata for chat {chat_id}: {reason}', file=sys.stderr)
-		return agg
 
 	def finish(self, state, *, summary, stop_reason, requests, targets):
 		'''
 		Store the aggregates (when finalize succeeded), the request
 		statistics, the outcome of every target not committed, and the
 		run's end state, in one transaction. `targets` are the sidecar's
-		target entries.
+		target entries. In both mode, stored aggregates set
+		aggregate_files to 'pending' in that transaction.
 		'''
 		try:
 			with transaction(self.con, 'finish the run'):
 				if self.aggregates is not None:
 					self._write_aggregates(self.aggregates)
+					if self.storage == 'both':
+						self.con.execute(
+							"UPDATE collection_runs SET aggregate_files = 'pending' WHERE run_id = ?",
+							(self.run_id,)
+						)
 				self.con.executemany(
 					'INSERT INTO run_requests (run_id, method_class, requests, retries, flood_waits, '
 					'flood_wait_seconds) VALUES (?, ?, ?, ?, ?, ?)',
@@ -363,16 +432,71 @@ class SQLiteWriter:
 			]
 		)
 
-	def _mark_interrupted(self, reason):
+	def _mark_interrupted(self, reason, *, finished=False):
+		'''
+		Best effort: record the run as interrupted, while it is still
+		running or, with `finished`, also after its end state was stored.
+		'''
 		try:
 			with transaction(self.con, 'mark the run interrupted'):
 				self.con.execute(
 					"UPDATE collection_runs SET state = 'interrupted', stop_reason = ?, finished_at = ? "
-					"WHERE run_id = ? AND state = 'running'",
-					(reason, utc_now(), self.run_id)
+					"WHERE run_id = ? AND (state = 'running' OR ?)",
+					(reason, utc_now(), self.run_id, finished)
 				)
 		except StorageError:
 			pass
 
+	'''
+
+	Publication state (both mode)
+
+	'''
+
+	def mark_target_written(self, index):
+		'''
+		The files of target `index` are published: files_state 'written'.
+		'''
+		with transaction(self.con, 'record the published files'):
+			self.con.execute(
+				"UPDATE run_targets SET files_state = 'written' WHERE run_id = ? AND input_index = ?",
+				(self.run_id, index)
+			)
+
+	def mark_aggregates_written(self):
+		with transaction(self.con, 'record the published aggregate files'):
+			self.con.execute(
+				"UPDATE collection_runs SET aggregate_files = 'written' WHERE run_id = ?", (self.run_id,)
+			)
+
+	def fail_target(self, index, reason):
+		'''
+		Best effort after a committed channel's files could not be
+		published: its outcome becomes failed with `reason`, its
+		files_state stays 'pending', and it leaves `committed`, so the
+		run's aggregates leave it out as the files do.
+		'''
+		self.committed = [r for r in self.committed if r.index != index]
+		try:
+			with transaction(self.con, 'record the failed publication'):
+				self.con.execute(
+					"UPDATE run_targets SET status = 'failed', reason = ? WHERE run_id = ? AND input_index = ?",
+					(reason, self.run_id, index)
+				)
+		except StorageError:
+			pass
+
+	def interrupt_finished(self, reason):
+		'''
+		Best effort after the aggregate files could not be published
+		although the run's end state was stored.
+		'''
+		self._mark_interrupted(reason, finished=True)
+
 	def close(self):
-		self.con.close()
+		try:
+			self.con.close()
+		finally:
+			if self.lease is not None:
+				self.lease.__exit__(None, None, None)
+				self.lease = None
