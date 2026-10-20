@@ -195,9 +195,54 @@ The collector reaches storage only through a writer (`run_collection(...,
 writer_factory=...)`) and its history source (`storage.histories`). The default is
 the file writer above. `storage.sqlite.writer.SQLiteWriter` stores the same results in
 the database described in [sqlite-schema.md](sqlite-schema.md), one transaction
-per channel, applying the same `is_self` phone rule; no command option selects it yet,
-and the sidecar and folder lock are unchanged with it. Its `--update` lookup is
-by resolved channel ID, after resolution and before the first history request.
+per channel, applying the same `is_self` phone rule; `collect --storage` selects it
+(see below). Its `--update` lookup is by resolved channel ID, after resolution and
+before the first history request.
+
+### Storage modes
+
+`collect --storage files|sqlite|both` (canonical form only; the three entry points
+agree) selects the writer through `storage.destination`:
+
+- A folder without `collection-storage.json` is a `files` folder: files mode writes no
+  manifest, so its outputs and sidecar keep their earlier shape. `sqlite` and `both`
+  write the manifest (format 1: storage, database name, dataset UUID) right after
+  creating `<output>/telegram-tracker.sqlite3`, which records the canonical folder in
+  `schema_meta.output_binding`. There is no option for another database path.
+- Without `--storage`, the recorded mode is used. Another explicit mode, or `sqlite`/
+  `both` for a folder that holds other entries and no manifest, exits 2 before any
+  client exists. The legacy collection form refuses `sqlite`/`both` folders with exit 2.
+- Before credentials, read only: a recorded database must exist, classify as current,
+  match the manifest's dataset UUID and the folder binding, and have no
+  `destination_pending` row; otherwise exit 1. The selected session path is passed as
+  a protected path and is never opened as the database.
+- Lock order: `.collection.lock`, then `telegram-tracker.sqlite3.lock` (beside the
+  canonical database path). Both are checked before connecting, each with its own
+  message, and taken after login. Under the database lease the checks run again before
+  the first write; `storage.sqlite.migrations.migrate` takes the same lease. Runs still
+  `running` when the lease is free are recorded as `interrupted` (`stop_reason`
+  `stale: ...`, `finished_at` null) in the transaction that records the new run.
+- `both` (`storage.dual.DualWriter`): per channel, stage the files as files mode writes
+  them, commit the database transaction with `files_state = 'pending'`, replace the
+  files, set `written`. Aggregates: stage, finish the run in the database with
+  `aggregate_files = 'pending'`, replace, append the exception logs (text mode, platform
+  newlines), set `written`. A staging or database failure changes neither sink. A
+  publish failure records the target as failed (best effort), keeps `pending` and stops
+  the run with a storage error; after the run's end state was stored, it is set to
+  `interrupted`. Any `pending` row blocks collection into the folder in every mode until
+  a fresh folder is used; lock deletion does not clear it. A crash between replace and
+  mark blocks too (a safe false positive). On Windows, `both` retries a `PermissionError`
+  from `os.replace` up to 5 attempts (waits 0.05, 0.1, 0.2, 0.4 s); files mode keeps one
+  attempt.
+- `both --update` compares the files' and the database's newest ID and message-ID set
+  after resolution, before the first history request; a difference, or a history in one
+  sink only, fails that channel (`SinksDisagree`). The files get files mode's merged
+  history; the database upserts the fetched messages.
+- The sidecar gains, for database modes only, `storage`, `database` (file, schema
+  version, dataset UUID, run UUID) and, for `both`, `publication` (pending targets,
+  aggregate state). Its format stays 1.
+- Builders read `collection-storage.json` only: a `sqlite` folder is refused, `both`
+  passes to the usual sidecar gates. No builder opens the database.
 
 ### Scheduling and request policy
 
@@ -254,7 +299,8 @@ by default.
 `datasets.build_dataset` and `network.build_network` read local files without
 Telethon, credentials, or sessions. Plotting loads only when rendering. Builders
 reject running/interrupted status, note partial runs, and accept older folders
-with no sidecar.
+with no sidecar. They refuse a `--storage sqlite` folder (from its manifest, without
+opening the database).
 
 - `msgs_dataset.csv` appends: rebuilding duplicates rows, including after `--update`.
   `collected_chats.xlsx` is replaced. Message files use sorted paths.

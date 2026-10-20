@@ -17,6 +17,15 @@ from datetime import datetime, timezone
 
 DEFAULT_OUTPUT = './output/data'
 
+# --storage values (storage.manifest); importing that module would load
+# storage code, which parsers avoid
+STORAGE_CHOICES = ('files', 'sqlite', 'both')
+
+BUILDER_STORAGE_NOTE = (
+	'Reads the file outputs of `collect --storage files` or `--storage both`; '
+	'a folder collected with --storage sqlite has none.'
+)
+
 SCRIPT_PROG = 'main.py'
 COMMAND_PROG = 'tgtracker'
 MODULE_PROG = 'python -m telegram_tracker'
@@ -349,6 +358,23 @@ def add_collect_arguments(parser, prog=SCRIPT_PROG):
 			'again, duplicating earlier rows.'
 	)
 
+	storage = parser.add_argument_group(
+		'storage',
+		'Where collected data is saved. A folder keeps the mode it was first '
+		'collected with: without --storage, a run uses that mode (files for a '
+		'folder collected before); another mode is refused. sqlite and both '
+		'need a new or empty --output.'
+	)
+	storage.add_argument(
+		'--storage',
+		choices=STORAGE_CHOICES,
+		help='files: JSON, CSV and TXT files (default for a new folder). sqlite: '
+			'only the database <output>/telegram-tracker.sqlite3, so build-dataset '
+			'and build-network have nothing to read until builders for the database '
+			'exist. both: the same data in the files and the database; the builders '
+			'read the files.'
+	)
+
 	controls = parser.add_argument_group(
 		'request controls',
 		'Shared by channel collection requests after the account check, '
@@ -442,12 +468,14 @@ def build_parsers(prog=SCRIPT_PROG):
 		BUILD_DATASET,
 		help='Build msgs_dataset.csv and collected_chats.xlsx from collected data.',
 		description='Build msgs_dataset.csv (appended to) and '
-			'collected_chats.xlsx (replaced) from collected data. Offline.'
+			'collected_chats.xlsx (replaced) from collected data. Offline. '
+			+ BUILDER_STORAGE_NOTE
 	)
 	subparsers[BUILD_NETWORK] = commands.add_parser(
 		BUILD_NETWORK,
 		help='Build Graph.gexf and network.png from collected_chats.csv.',
-		description='Build Graph.gexf and network.png from collected_chats.csv. Offline.'
+		description='Build Graph.gexf and network.png from collected_chats.csv. Offline. '
+			+ BUILDER_STORAGE_NOTE
 	)
 
 	subparsers[AUTH], actions = add_auth_parsers(commands)

@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 
 # import local submodules
 from telegram_tracker.storage.files import write_json_pretty
+from telegram_tracker.storage.manifest import DATABASE_FILE, SQLITE, ManifestError, recorded_storage
 from telegram_tracker.storage.records import INTERRUPTED, RUNNING, STATUS_FILE, STATUS_FORMAT
 from telegram_tracker.utils import DataInputError
 
@@ -99,8 +100,22 @@ def check_collection_status(data_path, *, messages=True):
 	`data_path` is running or was interrupted; returns notes (strings)
 	for a finalized partial run and, when `messages`, for a run whose
 	message files hold a subset (history window or --update). Folders
-	without a sidecar (earlier versions) pass with no notes.
+	without a sidecar (earlier versions) pass with no notes. A folder
+	collected with --storage sqlite has no file outputs and is refused
+	(its storage manifest says so; the database itself is not opened).
 	'''
+	try:
+		storage = recorded_storage(data_path)
+	except ManifestError as exc:
+		raise DataInputError(str(exc)) from None
+	if storage == SQLITE:
+		raise DataInputError(
+			f'{data_path} was collected with --storage sqlite: it holds only the database '
+			f'{DATABASE_FILE}, and the builders read the file outputs. Builders that read the '
+			'database are not available yet; collect with --storage both (into a fresh '
+			'--output) to get files as well.'
+		)
+
 	status = read_status(data_path)
 	if status is None:
 		return []

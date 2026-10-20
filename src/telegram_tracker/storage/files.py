@@ -37,12 +37,56 @@ def replace_file(path, write):
 		discard(tmp)
 
 
-def write_text(path, text):
+def stage_file(path, write):
+	'''
+	Call write(temp_path) and return the temporary path, to be moved over
+	`path` later (see publish_staged). OSError becomes StorageError; a
+	failed write leaves no temporary file.
+	'''
+	tmp = temp_path_for(path)
+	try:
+		write(tmp)
+	except OSError as exc:
+		discard(tmp)
+		raise StorageError(f'cannot write {path}: {exc}') from exc
+	return tmp
+
+
+def publish_staged(staged, replace=None):
+	'''
+	Move each staged (temp_path, path) over its path, in order, with
+	`replace` (default os.replace). On the first failure, the remaining
+	temporary files are removed and StorageError names the file that was
+	not replaced; files replaced before it stay replaced.
+	'''
+	replace = replace or os.replace
+	for position, (tmp, path) in enumerate(staged):
+		try:
+			replace(tmp, path)
+		except OSError as exc:
+			discard_staged(staged[position:])
+			raise StorageError(f'cannot replace {path}: {exc}') from exc
+
+
+def discard_staged(staged):
+	for tmp, _ in staged:
+		discard(tmp)
+
+
+def text_writer(text):
 	def write(tmp):
 		with open(tmp, mode='w', encoding='utf-8') as writer:
 			writer.write(text)
 
-	replace_file(path, write)
+	return write
+
+
+def write_text(path, text):
+	replace_file(path, text_writer(text))
+
+
+def pretty_json_text(data):
+	return json.dumps(data, ensure_ascii=False, indent=1) + '\n'
 
 
 def write_json(path, data):
@@ -50,7 +94,7 @@ def write_json(path, data):
 
 
 def write_json_pretty(path, data):
-	write_text(path, json.dumps(data, ensure_ascii=False, indent=1) + '\n')
+	write_text(path, pretty_json_text(data))
 
 
 def append_lines(path, lines):

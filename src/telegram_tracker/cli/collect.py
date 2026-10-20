@@ -21,7 +21,7 @@ import warnings
 # import local submodules
 from telegram_tracker.cli.builders import missing_dependency
 from telegram_tracker.cli.profile_checks import account_check
-from telegram_tracker.cli.parsers import COLLECT, DEFAULT_OUTPUT
+from telegram_tracker.cli.parsers import COLLECT, DEFAULT_OUTPUT, invocation
 from telegram_tracker.cli.targets import read_targets
 from telegram_tracker.credentials import accounts, profiles
 from telegram_tracker.credentials import home as homes
@@ -132,9 +132,20 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 		from telegram_tracker.api.auth import AuthenticationError, ensure_authorized
 		from telegram_tracker.collector import HistoryWindow, run_collection
 		from telegram_tracker.storage import OutputLocked, StorageError
+		from telegram_tracker.storage.destination import StorageChoiceRefused, select_destination
 		from telegram_tracker.storage.provenance import RunProfile
 	except ModuleNotFoundError as exc:
 		return missing_dependency(COLLECT, exc)
+
+	try:
+		destination = select_destination(output_folder, args.get('storage'), legacy=legacy)
+	except StorageChoiceRefused as exc:
+		if legacy:
+			parser.error(f'{exc}. Use `{invocation(parser.prog)} collect`, which keeps the folder\'s mode')
+		parser.error(str(exc))
+	except StorageError as exc:
+		print(f'> {exc}', file=sys.stderr)
+		return 1
 
 	window = HistoryWindow(**bounds)
 
@@ -147,6 +158,8 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 			parser.error('the session file must not be inside the --output folder')
 		if homes.is_within(output_folder, home) or homes.is_within(home, output_folder):
 			parser.error(f'the --output folder must be outside the application home ({home})')
+		destination.protected = (session.path,)
+		destination.check()
 		phone = None
 		if client_factory is None:
 			from telegram_tracker.api import create_client
@@ -168,6 +181,9 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 	except (homes.HomeError, sources.CredentialError) as exc:
 		print(f'> {exc}', file=sys.stderr)
 		return 2
+	except StorageError as exc:
+		print(f'> {exc}', file=sys.stderr)
+		return 1
 
 	if session.notice:
 		print(session.notice, file=sys.stderr)
@@ -195,6 +211,8 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 		print(f'History window: {window.describe()}\n')
 	if update:
 		print('Update: new posts are merged into saved histories\n')
+	if destination.uses_database:
+		print(f'Storage: {destination.describe()}\n')
 	if batch:
 		duplicates = given - len(targets)
 		print(
@@ -218,6 +236,8 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 					window=window,
 					update=update,
 					identify=account_check(profile, session, home, RunProfile),
+					writer_factory=destination.open_writer,
+					preflight=destination.check_unlocked,
 					**controls
 				)
 			)

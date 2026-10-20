@@ -225,6 +225,7 @@ The earlier commands still work and reach the same code. They are supported thro
 | (none) | `python main.py collect ... --since/--until/--max-id/--max-messages` | History window: **`collect` only** |
 | (none) | `python main.py collect ... --update` | Merge new posts into saved histories: **`collect` only** |
 | (none) | `python main.py collect ... --concurrency/--request-interval/--max-flood-wait/--max-retries` | Request controls: **`collect` only**. The earlier form uses the defaults |
+| (none) | `python main.py collect ... --storage files\|sqlite\|both` | Storage mode: **`collect` only**. The earlier form writes files and refuses a `sqlite` or `both` folder |
 | `python build-datasets.py [--data-path DIR]` | `python main.py build-dataset [--data-path DIR]` | `-d` also works |
 | `python channels-to-network.py [--data-path DIR]` | `python main.py build-network [--data-path DIR]` | `-d` also works |
 
@@ -237,8 +238,8 @@ The same for every form:
 | Code | Meaning |
 |---|---|
 | `0` | Every requested target was collected, the build succeeded, or the `auth` action completed (including "nothing to do"). Empty channels and empty inputs count as success. |
-| `1` | A target failed, the login failed, the run stopped early (flood wait or rejected session), the output folder, the session, or the Telegram account is in use, the session belongs to another account than the profile or the phone number, writing an output or the credentials failed, the application home cannot be created, an `auth` confirmation was declined, `auth status --check` found the session logged out, the input data of a build is missing or malformed, or a library is missing. |
-| `2` | Invalid arguments, including an unreadable batch file or an unsupported line in it, an invalid or unknown profile, `--session` or `TELEGRAM_TRACKER_SESSION` with a named profile, and missing or invalid app credentials (before any connection). |
+| `1` | A target failed, the login failed, the run stopped early (flood wait or rejected session), the output folder, its database, the session, or the Telegram account is in use, a `sqlite` or `both` folder is blocked or its database cannot be used, the session belongs to another account than the profile or the phone number, writing an output or the credentials failed, the application home cannot be created, an `auth` confirmation was declined, `auth status --check` found the session logged out, the input data of a build is missing or malformed, or a library is missing. |
+| `2` | Invalid arguments, including an unreadable batch file or an unsupported line in it, a `--storage` mode the folder cannot take (or the earlier collection form on a `sqlite` or `both` folder), an invalid or unknown profile, `--session` or `TELEGRAM_TRACKER_SESSION` with a named profile, and missing or invalid app credentials (before any connection). |
 | `130` | Interrupted with Ctrl+C. |
 
 ## Collecting channels
@@ -357,6 +358,8 @@ output/data/                          (or the folder given with --output)
 ├── collected_chats.csv               metadata of the chats found in the data (e.g., forwards)
 ├── counter.csv                       how often each chat was found in this run
 ├── collection-status.json            state and per-target outcome of the last collection
+├── collection-storage.json           storage mode, for sqlite and both folders only
+├── telegram-tracker.sqlite3          the database (--storage sqlite or both)
 ├── _exceptions-channels-not-found.txt   requested targets that were missing or inaccessible (when any)
 ├── _exceptions-users-not-found.txt      discovered chats whose metadata could not be retrieved (when any)
 ├── msgs_dataset.csv                  written by build-dataset
@@ -390,6 +393,38 @@ Several profiles can collect into the same `--output` folder, one run at a time 
 - **A full or window run replaces any history** and records its own profile. When the previous profile could not have updated it, the record and the channel's entry in `collection-status.json` get `takeover: true` with the previous profile's name and ID, and the run summary lists the channel.
 - Two profile names for the same Telegram account are still different profiles here, and a profile name alone cannot tell apart accounts in different application homes or on different computers. A full run resolves a refused update.
 - Access hashes and file references in the collected data are valid only for the account that collected them; the provenance record and `collection-status.json` name the profile, not the account. Channel metadata files (`<channel>.json`) reflect the latest run that wrote each file. Aggregate files follow the append/replace rules above; older rows can reflect other profiles and are not individually profile-tagged.
+
+## Storage modes (`--storage`)
+
+`collect --storage MODE` chooses where the collected data goes:
+
+| Mode | Writes | Builders |
+|---|---|---|
+| `files` | The files above. The default for a new folder | Run |
+| `sqlite` | Only the database `<output>/telegram-tracker.sqlite3`, plus `collection-status.json` and `collection-storage.json` | Refuse: they read the files, and builders that read the database are not available yet |
+| `both` | The same data in the files (exactly as `files` writes them) and in the database | Run on the files |
+
+The database holds the same fields as the files, plus a record of every run; see [docs/sqlite-schema.md](docs/sqlite-schema.md) for its tables and example queries. Its path is always `telegram-tracker.sqlite3` inside the `--output` folder.
+
+```
+# a new folder that keeps both the files and the database
+python main.py collect --batch-file ./channels.txt --output ./output/project-b --storage both
+
+# later runs into that folder use the recorded mode without the option
+python main.py collect --batch-file ./channels.txt --output ./output/project-b --update
+```
+
+**A folder keeps its mode.** A `sqlite` or `both` folder records its mode in `collection-storage.json` (with the database's dataset ID) when it is created. A run without `--storage` uses the recorded mode; a folder without that file is a `files` folder. Choosing another mode for a folder exits 2 before connecting, and so does `sqlite` or `both` for a folder that already holds other files: existing outputs are not converted, so start a new or empty `--output`. The earlier collection form (`python main.py --telegram-channel ...`) writes files only and refuses a `sqlite` or `both` folder with exit 2; use `collect` there.
+
+**Checks before connecting.** For a `sqlite` or `both` folder, the database must exist, be a Telegram Tracker database of the current schema version, belong to the folder (the dataset ID in `collection-storage.json` and the folder it was created for), and have no unpublished files (see below). Otherwise the run exits 1 before connecting and leaves the folder untouched. A folder that was moved or copied is refused for this reason; collect into a fresh `--output`. The selected session file is never opened as the database, and any other SQLite file at that path is refused untouched.
+
+**Locks.** Besides `.collection.lock`, a database run holds `telegram-tracker.sqlite3.lock`, taken after the folder lock (after login) and removed when the run ends. An existing one is reported before connecting with its own message (`The database ... is in use by another collection or upgrade (pid ..., started ...)`). A lock left by a killed run is not removed automatically: make sure no collection is running, then delete it. The checks above run again once both locks are held, before anything is written. A run that finds an earlier run still recorded as `running` in the database (its process ended without finishing) records that run as `interrupted`, with a stop reason starting with `stale:`, and says so on stderr.
+
+**How `both` keeps the two copies detectable.** For each channel, the files are first written to temporary files; then the database stores the channel and marks its files `pending`; then the temporary files replace the channel's files; then the mark becomes `written`. The aggregate files follow the same order after the last channel. A failure before the database step leaves both copies as they were. A failure while replacing the files stops the run (exit 1), records that channel as failed in the database, and leaves the `pending` mark. On Windows, a replace that another program briefly refuses (an antivirus scanner, a file indexer) is retried, up to 5 attempts within 0.75 s, in `both` mode only.
+
+**Recovering a blocked folder.** A `pending` mark means the files and the database may disagree, so every later collection into that folder exits 1 with `<folder> is blocked: ...`, in any mode. Deleting the lock files does not clear it. Keep the folder for inspection and collect into a fresh `--output`; there is no repair command. A process that ends after replacing the files but before recording it leaves the mark too, although the files then agree with the database: such a folder is blocked as well. A crash can also leave temporary files (`<name>.<pid>.tmp.<ext>`, `.telegram-tracker.sqlite3.<id>.creating`) next to the files; they are never read and can be deleted. A Ctrl+C or a flood-wait stop does not block the folder: the channels saved before it are in both copies. A crash during a new folder's setup, after the database was created and before `collection-storage.json` was written, leaves a database without a manifest: the folder then counts as a `files` folder, a run without `--storage` writes files beside that database (whose first run stays `running`), and `--storage sqlite` or `both` is refused because the folder is not empty. Delete the folder, or collect into a fresh `--output`.
+
+**`--update` in `both`.** Before a channel's first history request, its saved history must be the same in both copies: the same newest message ID and the same message IDs. A channel whose copies differ, or that has a saved history in only one of them, fails with guidance, and the other channels continue; the larger copy is never taken as a repair. A channel without a history in either copy is collected in full.
 
 ## Collection status, locking, and recovery
 
@@ -439,7 +474,7 @@ Without `--data-path` (or `-d`), both use `./output/data`. They read local files
 
 **`build-network`** reads `collected_chats.csv` (`username`, `counter`, `source`) and writes `Graph.gexf`, a directed, unweighted graph from each source channel to the chats found in its data (e.g., forwards), and `network.png`, a preview with Louvain communities. Both are replaced on every build. Open the GEXF file in tools such as [Gephi](https://gephi.org/).
 
-Both builders refuse a folder whose `collection-status.json` says `running` or `interrupted` (exit 1, with the recovery steps above). Missing or malformed input files stop the build with exit 1 before anything is written. With no messages and no existing `msgs_dataset.csv`, the dataset has a header only; an existing dataset keeps its earlier rows. With no edges, the graph is empty and the image blank.
+Both builders refuse a folder whose `collection-status.json` says `running` or `interrupted` (exit 1, with the recovery steps above), and a folder collected with `--storage sqlite`, which has no file outputs (exit 1). A `both` folder is built from its files; the builders never open the database. Missing or malformed input files stop the build with exit 1 before anything is written. With no messages and no existing `msgs_dataset.csv`, the dataset has a header only; an existing dataset keeps its earlier rows. With no edges, the graph is empty and the image blank.
 
 ## Running the tests
 

@@ -18,6 +18,7 @@ at the path.
 # import modules
 import contextlib
 import os
+import pathlib
 import sqlite3
 import uuid
 
@@ -65,13 +66,17 @@ def storage_error(exc, action):
 	return StorageError(f'cannot {action}: {exc}')
 
 
-def connect(path, busy_timeout_ms=BUSY_TIMEOUT_MS):
+def connect(path, busy_timeout_ms=BUSY_TIMEOUT_MS, *, readonly=False):
 	'''
 	Connect to `path` (already checked by the caller) in autocommit mode
-	with foreign keys on and the busy timeout set.
+	with foreign keys on and the busy timeout set; with `readonly`,
+	through a read-only URI built here from the checked path.
 	'''
+	target, uri = path, False
+	if readonly:
+		target, uri = pathlib.Path(os.path.abspath(path)).as_uri() + '?mode=ro', True
 	try:
-		con = sqlite3.connect(path, timeout=busy_timeout_ms / 1000, isolation_level=None)
+		con = sqlite3.connect(target, timeout=busy_timeout_ms / 1000, isolation_level=None, uri=uri)
 	except sqlite3.Error as exc:
 		raise storage_error(exc, f'open {path}') from None
 	try:
@@ -136,23 +141,27 @@ def verify(con, path):
 		raise DatabaseRefused(f'{path} is damaged: its schema_meta row is missing or wrong.')
 
 
-def open_database(path, *, create=False, protected=(), busy_timeout_ms=BUSY_TIMEOUT_MS):
+def open_database(
+		path, *, create=False, protected=(), busy_timeout_ms=BUSY_TIMEOUT_MS, output_binding=None,
+		readonly=False):
 	'''
 	Connect to the data database at `path`. A missing file is created
-	when `create` is set (only once the destination is locked) and
-	refused otherwise. Raises DatabaseRefused for any other file that is
-	not a current data database, leaving it untouched, and StorageError
-	when it cannot be read.
+	when `create` is set (only once the destination is locked; it records
+	`output_binding`) and refused otherwise. Raises DatabaseRefused for
+	any other file that is not a current data database, leaving it
+	untouched, and StorageError when it cannot be read. With `readonly`,
+	the connection cannot write (a check before the destination is
+	locked).
 	'''
 	found = classify(path, protected)
 	if found.kind == MISSING:
-		if not create:
+		if not create or readonly:
 			raise DatabaseRefused(f'{path} does not exist')
-		create_database(path, busy_timeout_ms=busy_timeout_ms)
+		create_database(path, output_binding=output_binding, busy_timeout_ms=busy_timeout_ms)
 	elif found.kind != CURRENT:
 		raise DatabaseRefused(refusal_message(path, found))
 
-	con = connect(path, busy_timeout_ms)
+	con = connect(path, busy_timeout_ms, readonly=readonly)
 	try:
 		verify(con, path)
 	except BaseException:
