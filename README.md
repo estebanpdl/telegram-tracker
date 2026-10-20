@@ -227,7 +227,7 @@ The earlier commands still work and reach the same code. They are supported thro
 | `python main.py --batch-file FILE` | `python main.py collect --batch-file FILE` | Collects up to 3 channels at once, like `collect` |
 | `... --limit-download-to-channel-metadata` | `python main.py collect ... --limit-download-to-channel-metadata` | |
 | `... --output DIR` / `-o DIR` | `python main.py collect ... --output DIR` | Default `./output/data`, relative to the working directory |
-| `... --min-id N` | `python main.py collect ... --min-id N` | Same meaning: only messages with an id above N |
+| `... --min-id N` | `python main.py collect ... --min-id N` | Same meaning: only messages with an id above N. `collect` asks before replacing saved histories; the earlier form only warns |
 | (none) | `python main.py collect ... --since/--until/--max-id/--max-messages` | History window: **`collect` only** |
 | (none) | `python main.py collect ... --update` | Merge new posts into saved histories: **`collect` only** |
 | (none) | `python main.py collect ... --concurrency/--request-interval/--max-flood-wait/--max-retries` | Request controls: **`collect` only**. The earlier form uses the defaults |
@@ -244,8 +244,8 @@ The same for every form:
 | Code | Meaning |
 |---|---|
 | `0` | Every requested target was collected, the build succeeded, or the `auth` action completed (including "nothing to do"). Empty channels and empty inputs count as success. |
-| `1` | A target failed, the login failed, the run stopped early (flood wait or rejected session), the output folder, its database, the session, or the Telegram account is in use, a `sqlite` or `both` folder is blocked or its database cannot be used, the session belongs to another account than the profile or the phone number, writing an output or the credentials failed, the application home cannot be created, an `auth` confirmation was declined, `auth status --check` found the session logged out, the input data of a build is missing or malformed, or a library is missing. |
-| `2` | Invalid arguments, including an unreadable batch file or an unsupported line in it, a `--storage` mode the folder cannot take (or the earlier collection form on a `sqlite` or `both` folder), an invalid or unknown profile, `--session` or `TELEGRAM_TRACKER_SESSION` with a named profile, and missing or invalid app credentials (before any connection). |
+| `1` | A target failed, the login failed, the run stopped early (flood wait or rejected session), the output folder, its database, the session, or the Telegram account is in use, a `sqlite` or `both` folder is blocked or its database cannot be used, the session belongs to another account than the profile or the phone number, writing an output or the credentials failed, the application home cannot be created, an `auth` confirmation or the replacement of saved histories by a filtered run was declined, `auth status --check` found the session logged out, the input data of a build is missing or malformed, or a library is missing. |
+| `2` | Invalid arguments, including an unreadable batch file or an unsupported line in it, a `--storage` mode the folder cannot take (or the earlier collection form on a `sqlite` or `both` folder), an invalid or unknown profile, `--session` or `TELEGRAM_TRACKER_SESSION` with a named profile, a filtered `collect` run that would replace saved histories without a terminal to confirm it and without `--yes`, and missing or invalid app credentials (before any connection). |
 | `130` | Interrupted with Ctrl+C. |
 
 ## Collecting channels
@@ -292,12 +292,34 @@ python main.py collect --batch-file ./channels.txt --max-messages 500 -o ./outpu
 python main.py collect --telegram-channel example_channel --min-id 12345 -o ./output/new-posts
 ```
 
-**A filtered run replaces `<channel>_messages.json` with the selected messages only.** It does not merge them into the saved history. Before connecting, the command warns on stderr when a channel already has a saved history in the output folder, naming up to 10 channels. To keep earlier histories, write filtered runs to a fresh `--output`, or use `--update` to add new posts. The run header prints the active window. Window options cannot be combined with `--limit-download-to-channel-metadata` in `collect`.
+**A filtered run replaces each channel's saved history with the selected messages only.** It does not merge them into the saved history. To keep earlier histories, write filtered runs to a fresh `--output`, or use `--update` to add new posts. The run header prints the active window. Window options cannot be combined with `--limit-download-to-channel-metadata` in `collect`.
 
-In a `sqlite` or `both` folder, a filtered run also replaces the channel's history in the database with the selection. The warning before connecting looks for `<channel>_messages.json` files only, so a `sqlite` folder gets no warning even though its histories are replaced.
+**`collect` asks before it replaces a saved history.** Before reading credentials or connecting, it looks for the requested channels that already have a saved history in the output folder:
+
+| Mode | Saved history looked for |
+|---|---|
+| `files` | `<channel>/<channel>_messages.json` |
+| `sqlite` | A history in the database for a channel that an earlier run collected under the same name, or whose stored username it is (case-insensitive). The database is opened read-only. |
+| `both` | Either of the above |
+
+If it finds any, it prints a warning on stderr with their number and the first 10 names, then asks `Continue? [y/N]`:
+
+```
+> Warning: this filtered run replaces the saved messages of 2 channel(s) in ./output/data: example_channel, other_channel. Use a fresh --output to keep them.
+Continue? [y/N]
+```
+
+- `y` or `yes` goes on. Any other answer, or end of input, stops with exit 1 before connecting; nothing is written.
+- `--yes` replaces them without asking, for scripts.
+- Without a terminal to answer (input piped, or redirected from a file or from `NUL`), the run stops with exit 2 before connecting and asks for `--yes` or a fresh `--output`. It never replaces them silently.
+
+Runs without a history window (full, `--update`, metadata only) never ask.
+
+The earlier collection form (`python main.py --telegram-channel NAME --min-id N`) does not accept `--yes`, so it only prints the warning and goes on, as it did before; it writes files only. Use `collect` to be asked.
 
 Known limits:
 
+- In `sqlite` and `both` folders, a channel is found by name, because the database keys histories by the channel's numeric id, which is only known after connecting. A channel given under a name that no earlier run used and that is not its stored username (for example a username that changed since the last run) is not found, and its history is replaced without asking.
 - Pages are kept whole, so the `chats` and `users` of the page that crosses a bound can include entries referenced only by excluded messages.
 - `--since` stops paging at the first page older than the date. This assumes message dates follow id order, which imported histories can break.
 - `count` in the saved JSON (`collected_actions` in the dataset) is Telegram's total for the channel, not the number of messages saved.
@@ -329,7 +351,7 @@ In every mode:
 
 | | History window (`--min-id`, `--since`, ...) | `--update` |
 |---|---|---|
-| Saved history (file or database) | Replaced by the selection | Kept; new posts merged in |
+| Saved history (file or database) | Replaced by the selection, once confirmed (or with `--yes`) | Kept; new posts merged in |
 | Where to write | A fresh `--output` | The folder of the earlier collection |
 | Lower bound | Given by you | The highest saved message id of each channel |
 
