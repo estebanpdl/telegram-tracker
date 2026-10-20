@@ -8,11 +8,14 @@ The schema is defined in [sqlite-schema.sql](sqlite-schema.sql).
 `tests/test_sqlite_schema.py` applies it to an empty database and checks it against
 the synthetic payloads in `tests/fixtures/sqlite/variants.json`.
 
-**Status:** the current `collect` command writes the file outputs only. No command
-creates this database yet. This document specifies the contract for a future
-database writer. Transaction handling, profile checks and publication blocking
-described below must be implemented by that writer; applying the DDL alone does
-not provide them.
+**Status:** the `collect` command writes the file outputs only; no command option
+selects this database yet. The database writer is implemented in
+`telegram_tracker.storage.sqlite` (schema checks, transactions, history rules,
+profile checks, own-phone rule and upgrades, as described below) and is used through
+the collector's writer interface. Publication state for runs that write both the
+database and files (`files_state`, `aggregate_files`, `destination_pending`) is
+defined by the schema but not yet written. Applying the DDL alone provides none of
+the writer's behavior.
 
 ## What the database contains
 
@@ -235,8 +238,9 @@ Key: (`run_id`, `error_index`).
 
 ### peers
 
-The latest stored object for every user, chat and channel that appeared in a
-history, a channel snapshot or an enrichment response.
+The latest stored object for every user, chat and channel listed in a history or a
+channel snapshot (their `chats` and `users` arrays). Chats found through enrichment
+are stored as rows in `collected_chat_rows`.
 
 | Column | Meaning |
 |---|---|
@@ -272,7 +276,7 @@ The latest full-channel response (`<target>.json`) per channel.
 |---|---|
 | `channel_id` | Channel. |
 | `run_id` | Run that wrote the snapshot. |
-| `observed_at` | UTC time of the response. |
+| `observed_at` | UTC time the run stored the snapshot. |
 | `raw` | The response as returned, including its `chats` and `users` arrays. |
 | `about` | Computed: channel description. |
 | `participants_count` | Computed: member count. |
@@ -378,11 +382,25 @@ and updates only its own rows. `peers`, `channel_snapshots`, `histories`,
   `history_entities`, chats and users are united by typed key, the fetched ones first
   and then the earlier ones not fetched again, as in the messages file. The fetched
   envelope replaces the stored one. `histories.mode` becomes `merged`, and its
-  profile stays unchanged. When no new message arrives, the current tables are not
-  touched and the target's `history_mode` is `unchanged`. A channel without a `histories` row is
-  collected in full and recorded as `created`.
+  profile and `window_bounds` stay unchanged. When no new message arrives,
+  `histories`, `messages` and `history_entities` are not touched and the target's
+  `history_mode` is `unchanged`; the channel snapshot and its peers are stored as in
+  any run. A channel without a `histories` row is collected in full and recorded as
+  `created`. A stored history that can't be read fails that target only.
 - **Metadata-only run.** Writes `channel_snapshots` and `peers` only. A history is
   stale when its `run_id` is older than the snapshot's.
+- **Peers.** A peer listed again gets `last_seen_run` of the new run. A full object
+  replaces the stored one and its `run_id`; a `min` object replaces only another
+  `min` object.
+- **Run records.** A run's `collection_runs` row (state `running`) and its
+  `run_targets` rows (`pending`) are written when the run opens the database. Each
+  channel's transaction also sets its target's outcome. When the run ends, its
+  observations are written in one transaction, then its counters, collected-chat
+  rows, errors, request statistics, the remaining target outcomes and its end state in
+  another. If that last transaction fails, the run is marked `interrupted` if
+  possible; its observations stay. A run whose process stopped before recording its
+  end (for example, killed) stays `running`: it is evidence of an interrupted run,
+  not a run in progress.
 - **Both sinks.** In `both` mode the files hold the same fields as the database. Before
   an `--update`, the stored history's newest ID and message-ID set must agree in the
   database and the files; a channel whose two copies disagree, or that exists in only
@@ -441,19 +459,28 @@ the run, its time, its options and its profile.
 
 ## Schema versioning and backups
 
-- On opening, a file is checked before anything is written. A missing file is
-  created once the run holds the destination locks. A file with this application ID
-  and `user_version = 1` is used. A file with an older version is refused until it
-  is upgraded; a newer version is refused.
-  Any other SQLite database, including a Telethon session, is refused and left
-  untouched, and a file that isn't an SQLite database is refused as corrupt. An SQLite
-  library without JSON1 is refused.
+- On opening, a file is classified from its 100-byte SQLite header (application ID
+  and `user_version`) before any connection is made. Paths naming a Telethon session
+  file (`*.session` and its `-journal`, `-wal` and `-shm` files) or `config.ini`, and
+  paths that aren't a plain file path (`:memory:`, `file:` URIs, `.sql` files,
+  directories), are refused without being opened. A missing file is created only
+  when a run opens the database for writing: it is built in a temporary file next to
+  it and moved into place once complete, never over a file that appeared meanwhile.
+  A file with this application ID and `user_version = 1` is used after its tables,
+  indexes, views and triggers are checked against the schema and its `schema_meta`
+  row is read. Collection refuses a file with another version, older or newer, and
+  never upgrades it. Any other SQLite database, including a Telethon session, is
+  refused and left untouched; an empty file is refused, and a file that isn't an
+  SQLite database is refused as damaged. An SQLite library older than 3.31 or without
+  JSON1 is refused.
 - An upgrade from version N to N+1 runs offline and makes a backup first: a consistent
   copy through SQLite's backup API, named `<name>.v<N>-<UTC time>.bak.sqlite3` next
   to the database, then checked with `PRAGMA integrity_check`. Each step runs in one
-  transaction that also sets `user_version` and inserts its `migrations` row, so a
-  failed step leaves the previous version. Backups are never deleted automatically,
-  and there are no downgrades.
+  transaction that also sets `user_version`, updates `schema_meta`, inserts its
+  `migrations` row and checks foreign keys, so a failed step leaves the previous
+  version. Backups are never deleted automatically, and there are no downgrades.
+  Version 1 is the first schema version, so no upgrade exists yet, and a file with
+  this application ID and a version below 1 is refused.
 - To back up the database yourself, don't copy the file while a collection is
   running. Use SQLite's backup API, for example
   `sqlite3 telegram-tracker.sqlite3 ".backup copy.sqlite3"`, or Python's
@@ -521,6 +548,16 @@ Any field not projected into a column, here the reactions of each post:
 SELECT message_id, json_extract(raw, '$.reactions.results') AS reactions
 FROM messages
 WHERE channel_id = 1001 AND json_extract(raw, '$.reactions') IS NOT NULL;
+```
+
+Targets that didn't succeed, per run:
+
+```sql
+SELECT r.run_id, r.started_at, r.state, t.input, t.status, t.reason
+FROM run_targets t
+JOIN collection_runs r ON r.run_id = t.run_id
+WHERE t.status <> 'succeeded'
+ORDER BY r.run_id, t.input_index;
 ```
 
 History state and owner of every channel:
