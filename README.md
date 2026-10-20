@@ -128,6 +128,15 @@ The first source that provides a value wins:
 
 Only one file source (2, 3, or 4) is used, as a whole: the first one present. A value missing from it is not taken from another file. Template values (`api_id = api_id`, `<your api_id>`, or empty) count as missing, so the placeholder `config/config.ini` in the repository never hides saved credentials. An invalid value (for example an `api_id` that is not a positive number) stops the command with exit 2; it never falls back to another source. There are no command-line options for the API ID, hash, or phone, and none for the login code or password.
 
+Saved credentials therefore hide a `./config/config.ini` that holds real values. For the default profile, `auth status` notes it, without changing which source is used:
+
+```
+Credentials in use: api_id: credentials.json; api_hash: credentials.json; phone: credentials.json
+Note: ./config/config.ini also sets api_id, api_hash, phone but is not used, because credentials.json comes first. Pass --config ./config/config.ini to use it instead.
+```
+
+The note names fields, never values. It also flags invalid ones (`(invalid: api_id)`), or says why the file cannot be read (`./config/config.ini cannot be read (permission denied); not used, because credentials.json comes first`). A file with only template values gets no note. Other commands don't open that file while saved credentials exist.
+
 `collect` uses the same sources but never asks for app credentials: with values missing it exits 2 and names the ways to provide them.
 
 ### Which session is used
@@ -144,9 +153,27 @@ Nothing is moved or copied automatically. Once a session exists in the applicati
 
 ### Checking, logging out, and removing saved credentials
 
-- `auth status` shows the application home, the selected session, the saved credentials file, and where each value comes from: source names only, never values. It works offline and creates nothing, so a present session file does not prove that it is still logged in. `auth status --check` connects to Telegram to find out (exit 0 logged in, 1 not); it never asks for a code and never creates a session. Telethon may update the session file while checking.
+- `auth status` shows the application home, the selected session, the saved credentials file, and where each value comes from: source names only, never values. It works offline and creates nothing, so a present session file does not prove that it is still logged in. `auth status --check` connects to Telegram to find out (exit 0 logged in, 1 not); it never asks for a code and never creates a session. With `--check`, the `Session:` line only says `present`, and the last line, `Login: logged in` or `Login: not logged in`, gives the result. Telethon may update the session file while checking.
 - `auth logout` asks for confirmation (`--yes` skips it), then logs the session out on Telegram. That revokes it and deletes the session file. Saved credentials stay. A session that is not logged in, or no session at all, is left as it is.
 - `auth clear-credentials` asks for confirmation (`--yes` skips it), then deletes `credentials.json` only. It does not log the session out or touch environment variables, INI files, or collected data, and it removes a damaged file without reading it.
+
+### Session, file, and network errors
+
+`collect`, `auth login`, `auth status --check`, and `auth logout` tell problems on this computer apart from login and network failures. Each of the following exits 1 and changes no file. None of them is fixed by logging in again.
+
+| Message | Cause |
+|---|---|
+| `The session is in use by another process (pid ..., started ...)` | Another command of this tool holds the session. Wait for it to end. If none is running, an interrupted one left the `.lock` file named in the message; delete it. |
+| `cannot lock the session (<session>.lock: its folder does not exist)` | `--session` or `TELEGRAM_TRACKER_SESSION` points into a folder that does not exist. |
+| `cannot lock the session (<session>.lock: permission denied)` | Your account can't create files in the session's folder. |
+| `The session file <path> is locked by another program (SQLite: database is locked)` | A program outside this tool has the session file open, such as another Telethon script or a database viewer. Close it. |
+| `The session file <path> cannot be written (SQLite: attempt to write a readonly database)` | The session file or its folder is read-only. |
+| `The session file <path> cannot be opened (SQLite: unable to open database file)` | The folder is missing, or your account can't read and write the file. |
+| `The session file <path> is damaged or not a session file (SQLite: ...)` | The file isn't a Telethon session. It is left as it is. |
+| `A local file cannot be used: <path> (<reason>)` | Another file failed, for example `permission denied`. |
+| `Could not reach Telegram (<error>)` | The network or Telegram's servers. |
+
+`credentials.json`, `profile.json`, and INI files that can't be read name the reason: `not found`, `permission denied`, `not valid JSON`, `not UTF-8 text`, or `not a valid INI file`. Their exit codes are unchanged.
 
 ### How saved credentials are protected
 
@@ -244,7 +271,7 @@ The same for every form:
 | Code | Meaning |
 |---|---|
 | `0` | Every requested target was collected, the build succeeded, or the `auth` action completed (including "nothing to do"). Empty channels and empty inputs count as success. |
-| `1` | A target failed, the login failed, the run stopped early (flood wait or rejected session), the output folder, its database, the session, or the Telegram account is in use, a `sqlite` or `both` folder is blocked or its database cannot be used, the session belongs to another account than the profile or the phone number, writing an output or the credentials failed, the application home cannot be created, an `auth` confirmation or the replacement of saved histories by a filtered run was declined, `auth status --check` found the session logged out, the input data of a build is missing or malformed, or a library is missing. |
+| `1` | A target failed, the login failed, the run stopped early (flood wait or rejected session), the output folder, its database, the session, or the Telegram account is in use, the session file or another local file cannot be used, Telegram cannot be reached, a `sqlite` or `both` folder is blocked or its database cannot be used, the session belongs to another account than the profile or the phone number, writing an output or the credentials failed, the application home cannot be created, an `auth` confirmation or the replacement of saved histories by a filtered run was declined, `auth status --check` found the session logged out, the input data of a build is missing or malformed, or a library is missing. |
 | `2` | Invalid arguments, including an unreadable batch file or an unsupported line in it, a `--storage` mode the folder cannot take (or the earlier collection form on a `sqlite` or `both` folder), an invalid or unknown profile, `--session` or `TELEGRAM_TRACKER_SESSION` with a named profile, a filtered `collect` run that would replace saved histories without a terminal to confirm it and without `--yes`, and missing or invalid app credentials (before any connection). |
 | `130` | Interrupted with Ctrl+C. |
 

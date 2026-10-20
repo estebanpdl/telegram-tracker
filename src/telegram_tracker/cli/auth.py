@@ -27,6 +27,7 @@ import contextlib
 import functools
 import getpass
 import os
+import sqlite3
 import sys
 import warnings
 
@@ -42,6 +43,7 @@ from telegram_tracker.credentials.lease import Lease, LeaseError
 from telegram_tracker.credentials.protection import ProtectionError
 from telegram_tracker.credentials.store import FIELDS, StoreError, clear_store, \
 	read_store, save_store, store_path
+from telegram_tracker.local_errors import client_failure
 
 
 MAX_ATTEMPTS = 3
@@ -141,7 +143,9 @@ def _connect(session, factory, work):
 	Under the session lease, create one client, connect it, await
 	work(client, closed), and disconnect the client once, unless work
 	marked it closed (closed['done'] = True) because Telethon already
-	disconnected it. Returns (exit code or None, work's result).
+	disconnected it. Returns (exit code or None, work's result). A held
+	lease, a login failure, the session file, another local file, and the
+	network each get their own message (see local_errors); all exit 1.
 	'''
 	try:
 		from telegram_tracker.api.auth import AuthenticationError
@@ -166,8 +170,8 @@ def _connect(session, factory, work):
 		return fail(exc, 1), None
 	except AuthenticationError as exc:
 		return fail(f'Login failed: {exc}', 1), None
-	except (OSError, ConnectionError) as exc:
-		return fail(f'Could not reach Telegram ({type(exc).__name__}).', 1), None
+	except (OSError, sqlite3.Error) as exc:
+		return fail(client_failure(exc, session.path), 1), None
 
 
 def _client_factory(session, resolution, client_factory):
@@ -365,7 +369,13 @@ def status(args, *, client_factory=None, authorize=None):
 	profiles.require(profile)
 	session = profiles.select_session(profile, args.get('session'))
 	present = os.path.isfile(session.path)
-	state = 'present; login not verified (offline)' if present else 'missing'
+	if not present:
+		state = 'missing'
+	elif args['check']:
+		# the Login line below reports the check
+		state = 'present'
+	else:
+		state = 'present; login not verified (offline)'
 	print(f'Session: {session.path} ({session.source}): {state}')
 	if session.notice:
 		print(session.notice)
@@ -388,7 +398,10 @@ def status(args, *, client_factory=None, authorize=None):
 		print(f'Credentials: error: {exc}')
 		return 2
 	print('Credentials in use: ' + '; '.join(resolution.labels()))
-	for note in resolution.notes:
+	notes = list(resolution.notes)
+	if profile.is_default:
+		notes.append(sources.shadowed_config(resolution))
+	for note in filter(None, notes):
 		print(f'Note: {note}')
 	if errors:
 		return 2

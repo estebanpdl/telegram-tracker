@@ -86,6 +86,15 @@ defaults without the `--session`/`--config` options.
 - `auth status` prints source labels only and works offline; `--check` connects an
   existing session without requesting a code. `auth logout` revokes the session and
   keeps saved credentials; `auth clear-credentials` deletes only `credentials.json`.
+- `auth status` of the default profile notes a `./config/config.ini` with values that
+  saved credentials hide (field names, invalid fields, or the read failure; never
+  values). Only `auth status` opens that file then; the selection is unchanged. With
+  `--check`, the Session line says `present` and the Login line gives the result.
+- Local failures are told apart from login and network failures, with exit 1: an
+  occupied or uncreatable session lease, SQLite errors of the session file by result
+  code (busy, read-only, cannot open, not a database), other files by path and reason,
+  and remaining `OSError`s as network failures. Credential and profile files that
+  cannot be read name the reason instead of the exception type.
 - Earlier versions read `./config/config.ini` unconditionally (a missing file was a
   traceback) and created `./session_file.session` in the working directory.
 

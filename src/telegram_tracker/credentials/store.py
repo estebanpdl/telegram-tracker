@@ -25,6 +25,7 @@ import os
 
 # import local submodules
 from telegram_tracker.credentials.lease import Lease, LeaseError
+from telegram_tracker.local_errors import file_reason
 from telegram_tracker.credentials.protection import ProtectionError, check, \
 	ensure_private_dir, protect, reject_link
 
@@ -92,7 +93,7 @@ def read_store(home):
 		with open(path, encoding='utf-8') as reader:
 			data = json.load(reader)
 	except (OSError, UnicodeDecodeError, ValueError) as exc:
-		raise StoreError(f'{path} cannot be read ({type(exc).__name__})') from None
+		raise StoreError(f'{path} cannot be read ({file_reason(exc)})') from None
 
 	if not isinstance(data, dict):
 		raise StoreError(f'{path} is not a credentials file')

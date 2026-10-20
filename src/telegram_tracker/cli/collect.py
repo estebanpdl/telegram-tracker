@@ -17,6 +17,7 @@ application home.
 import functools
 import io
 import os
+import sqlite3
 import sys
 import time
 import warnings
@@ -32,6 +33,7 @@ from telegram_tracker.credentials import home as homes
 from telegram_tracker.credentials import sources
 from telegram_tracker.credentials.lease import Lease, LeaseError
 from telegram_tracker.credentials.protection import ProtectionError
+from telegram_tracker.local_errors import client_failure
 from telegram_tracker.utils import data_folder_from
 
 
@@ -302,6 +304,10 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 		return 1
 	except (OutputLocked, StorageError, LeaseError, accounts.AccountError) as exc:
 		print(f'> {exc}', file=sys.stderr)
+		return 1
+	except (OSError, sqlite3.Error) as exc:
+		# from the client or its session file; the run's own files raise StorageError
+		print(f'> {client_failure(exc, session.path)}', file=sys.stderr)
 		return 1
 	except KeyboardInterrupt:
 		print('> Interrupted.', file=sys.stderr)
