@@ -81,6 +81,14 @@ def observe_linked_chat(counter, chat_id, username, source, parent_username):
 class Aggregates:
 	'''
 	This run's counters and aggregate rows, built by `reduce_results`.
+
+	observations -> every observation in replay order, as (input_index,
+		kind, page, chat_id, username, parent_id): kind 'channel_request',
+		'from_messages' (page: the history page, from 2; the first page's
+		chats are not counted) or 'linked' (parent_id: the chat whose
+		enrichment listed it); chat_ids lists their chat_id
+	errors -> (category, input_index, chat_id, reason) in replay order:
+		'target_not_found', 'enrichment_not_found', 'metadata_skipped'
 	'''
 	counter: dict = field(default_factory=dict)
 	chat_ids: list = field(default_factory=list)
@@ -88,6 +96,12 @@ class Aggregates:
 	users_not_found: list = field(default_factory=list)
 	channels_not_found: list = field(default_factory=list)
 	skipped: list = field(default_factory=list)
+	observations: list = field(default_factory=list)
+	errors: list = field(default_factory=list)
+
+
+# history pages are numbered from 1; the first page's chats are not counted
+FIRST_COUNTED_PAGE = 2
 
 
 def reduce_results(results, outcomes, not_found=()):
@@ -101,28 +115,39 @@ def reduce_results(results, outcomes, not_found=()):
 	'''
 	agg = Aggregates()
 	agg.channels_not_found = [t for _, t in sorted(not_found)]
+	agg.errors = [('target_not_found', i, None, None) for i, _ in sorted(not_found)]
 
 	for result in sorted(results, key=lambda r: r.index):
 		source = result.target
+		page = FIRST_COUNTED_PAGE - 1
 		for req_type, chats in result.observations:
+			if req_type == 'from_messages':
+				page += 1
 			for chat_id, username in chats:
 				agg.chat_ids.append(chat_id)
+				agg.observations.append((
+					result.index, req_type, page if req_type == 'from_messages' else None,
+					chat_id, username, None
+				))
 				if not observe_chat(agg.counter, chat_id, username, source, req_type):
 					continue
-				apply_outcome(agg, outcomes[chat_id], chat_id, username, source)
+				apply_outcome(agg, outcomes[chat_id], chat_id, username, source, result.index)
 
 	return agg
 
 
-def apply_outcome(agg, outcome, chat_id, username, source):
+def apply_outcome(agg, outcome, chat_id, username, source, index=None):
 	for linked_id, linked_username in outcome.linked:
 		agg.chat_ids.append(linked_id)
+		agg.observations.append((index, 'linked', None, linked_id, linked_username, chat_id))
 		observe_linked_chat(agg.counter, linked_id, linked_username, source, username)
 
 	if outcome.error == 'not_found':
 		agg.users_not_found.append(f'ID - {chat_id}')
+		agg.errors.append(('enrichment_not_found', index, chat_id, None))
 	elif outcome.error is not None:
 		agg.skipped.append((chat_id, outcome.error))
+		agg.errors.append(('metadata_skipped', index, chat_id, outcome.error))
 	else:
 		agg.metadata.extend(dict(row) for row in outcome.rows)
 

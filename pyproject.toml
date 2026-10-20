@@ -19,3 +19,6 @@ dependencies = { file = ["requirements.txt"] }
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["telegram_tracker*"]
+
+[tool.setuptools.package-data]
+"telegram_tracker.storage.sqlite" = ["schema-v1.sql"]
