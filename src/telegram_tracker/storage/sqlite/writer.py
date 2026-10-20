@@ -1,22 +1,20 @@
 # -*- coding: utf-8 -*-
 '''
-SQLiteWriter: one collection run's writes to the data database. It has
-the methods of storage.writer.OutputWriter, which the collector uses.
+SQLiteWriter stores one run through the storage.writer.OutputWriter contract.
 
 	open      connect (creating a missing database) and record the run as
 	          running with its targets pending, in one transaction
 	commit    one channel in one transaction: channel snapshot, peers,
 	          history, and the target's outcome
-	finalize  replay the committed results in input order and store the
-	          run's observations, in one transaction
+	finalize  store committed observations in input order, in one transaction
 	finish    counters, collected-chat rows, errors, request statistics,
 	          target outcomes and the run's end state, in one transaction
 
 Before storing channel payloads, clear `User.phone` on objects marked
 `is_self` (storage.writer.drop_own_phone); other fields stay as collected.
 
-Transaction failures raise StorageError and roll back; earlier commits stay.
-After a failed `finish`, marking the run interrupted is best effort.
+Transaction failures roll back with StorageError; earlier commits stay.
+Marking a failed `finish` interrupted is best effort.
 
 In both mode (storage.dual), the channel transaction also sets the
 target's files_state to 'pending', and `finish` sets aggregate_files to
@@ -381,8 +379,7 @@ class SQLiteWriter:
 						for name, s in (requests or {}).items()
 					]
 				)
-				# a failed target keeps its channel_id when it resolved before
-				# failing (an unconfirmed replace), so a later run can find it
+				# Keep resolved IDs so the next window run can ask.
 				self.con.executemany(
 					'UPDATE run_targets SET status = ?, reason = ?, alias_of = ?, '
 					'channel_id = coalesce(?, channel_id) WHERE run_id = ? AND input_index = ?',

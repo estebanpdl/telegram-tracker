@@ -55,6 +55,9 @@ class SQLiteHistories:
 			)
 		return SavedHistory(newest_id=newest or 0, messages=count, channel_id=channel_id)
 
+	def stored_file(self, target):
+		return False
+
 	def stored(self, channel_id):
 		try:
 			row = self.con.execute('SELECT 1 FROM histories WHERE channel_id = ?', (channel_id,)).fetchone()

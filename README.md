@@ -315,6 +315,8 @@ Continue? [y/N]
 
 Runs without a history window (full, `--update`, metadata only) never ask.
 
+If another collection creates a messages file while this run waits for login, a second check under the output lock catches it. Without `--yes`, that target fails before target requests and its file is kept; rerun to be asked first. Other targets continue.
+
 The earlier collection form (`python main.py --telegram-channel NAME --min-id N`) does not accept `--yes`, so it only prints the warning and goes on, as it did before; it writes files only. Use `collect` to be asked.
 
 Before connecting, a `sqlite` or `both` folder can only be searched by name: the database keys histories by the channel's numeric id, which is known only after connecting. A channel given under a name that no earlier run used and that is not its stored username (for example a username that changed since the last run) is found after it resolves. Without `--yes`, that channel fails before any of its messages are requested and its stored history is kept; the reason says the history was found under another name. The run goes on with the other channels and exits 1. The failed target's record keeps the channel's id, so running the same command again asks first. In `files` folders a new name writes a new folder and replaces nothing.
@@ -342,7 +344,7 @@ Use the same `--output` as the earlier collection. For each channel, `--update` 
 In every mode:
 
 - Messages are merged by id. A fetched copy replaces a saved one and saved posts are kept. The messages file stays ordered newest first.
-- `chats` and `users` are merged by id, fetched copies first. `count` and the other fields come from the latest response.
+- In files, `chats` and `users` are merged by id, fetched copies first. In the database, membership uses `(peer_kind, peer_id)`; shared peer rows retain a full object over a fetched `min` object, and can reflect a later collection of another channel. `count` and the other envelope fields come from the latest history response when new messages are merged.
 - With no new posts, the saved history is left as it was: the file byte for byte, the database history with its earlier run and time.
 - A failed request leaves the saved history as it was.
 - A saved history that cannot be read or parsed fails that channel and is left untouched.
@@ -465,11 +467,11 @@ python main.py collect --batch-file ./channels.txt --output ./output/project-b -
 
 **`--update` in `both`.** Before a channel's first history request, its saved history must be the same in both copies: the same newest message ID and the same message IDs. A channel whose copies differ, or that has a saved history in only one of them, fails with guidance, and the other channels continue; the larger copy is never taken as a repair. A channel without a history in either copy is collected in full.
 
-**After a crash or a killed run.** The database stores each channel in its own transaction, so the channels saved before the crash stay in it; the run's aggregate rows and end state are missing. `collection-status.json` still says `running`, and `.collection.lock` and `telegram-tracker.sqlite3.lock` stay behind if the run had taken them. To continue:
+**After a crash or a killed run.** The database stores each channel in its own transaction, so committed channels stay in it. Depending on when the process ended, aggregate rows or the end state may be missing, `collection-status.json` may still say `running`, and acquired lock files may remain. To continue:
 
 1. Make sure no collection is running (check the process ID in the lock messages).
-2. Delete both lock files.
-3. Collect into the same folder again. The new run records the crashed one as `interrupted` (stop reason `stale: ...`). In a `both` folder, a run that stops with `is blocked` found a `pending` mark: keep that folder and collect into a fresh `--output` (see above).
+2. Remove the stale `.collection.lock` and `telegram-tracker.sqlite3.lock` if present. Also remove any stale session lease (`<selected session>.lock`) and account lease in `<application home>/account-leases/` identified by the refusal messages; those leases also block collection into a fresh folder. Delete only locks whose owning processes have ended, and keep the session and database files.
+3. Collect into the same folder again. If the crashed run is still recorded as `running` in the database, the new run records it as `interrupted` (stop reason `stale: ...`). In a `both` folder, a run that stops with `is blocked` found a `pending` mark: keep that folder and collect into a fresh `--output` (see above).
 
 ## Reading the database
 
@@ -497,7 +499,7 @@ con.close()
 
 With pandas (installed with the requirements), `pandas.read_sql_query(query, con)` returns the same rows as a DataFrame. Columns not listed in the schema are still in each row's `raw` JSON; read them with `json_extract(raw, '$.field')`.
 
-To export an SQL dump, for example to load the data into another database system or to keep a text archive:
+To export an SQLite SQL dump as a text archive (other database systems may require adapting its SQLite-specific schema and syntax):
 
 ```python
 import sqlite3
@@ -531,7 +533,7 @@ source.close()
 
 The `sqlite3` command-line shell, if you have it, does the same with `sqlite3 telegram-tracker.sqlite3 ".backup copy.sqlite3"`. Copying the file itself is safe only while no collection is running and no `telegram-tracker.sqlite3-journal` file is beside it.
 
-A backup belongs to the folder its database was created for. Copied back over `telegram-tracker.sqlite3` in that folder (while no collection is running), it is accepted again. In any other folder, `collect` refuses it as a moved or copied folder, but it stays readable. In a `both` folder, restoring only the database makes the two copies differ, and `--update` then fails the channels whose histories differ; collect those with a full run, or start a fresh `--output`. The database holds personal data from the collected content (see [docs/sqlite-schema.md](docs/sqlite-schema.md#personal-data)); store backups as carefully as the database.
+A backup belongs to the folder its database was created for. Copied back over `telegram-tracker.sqlite3` in that folder (while no collection is running), it is accepted again. In any other folder, `collect` refuses it as a moved or copied folder, but it stays readable. The restored database must also match the folder manifest's dataset ID and have no pending publication marks. In a `both` folder, restoring only the database can make the two copies differ, and `--update` then fails the channels whose histories differ; collect those with a full run, or start a fresh `--output`. The database holds personal data from the collected content (see [docs/sqlite-schema.md](docs/sqlite-schema.md#personal-data)); store backups as carefully as the database.
 
 ## Collection status, locking, and recovery
 
