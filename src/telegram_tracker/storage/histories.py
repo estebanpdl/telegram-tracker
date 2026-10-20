@@ -21,11 +21,14 @@ Both lookups raise HistoryUnreadable for a history that cannot be read
 and HistoryRefused for one the run's profile may not update; either
 fails only that target.
 
-For a window run, after resolution and before any history request:
+For a window run:
 
 	stored(channel_id) -> True when a history is stored under the
-		resolved channel ID. Only the database keys histories by ID; the
-		files are named after the target, so they never match here.
+		resolved channel ID, after resolution. Only the database keys
+		histories by ID; target-named files never match here.
+	stored_file(target) -> True when a messages file exists under the
+		target name; checked under the output lock before target requests
+		to catch histories created after the confirmation scan.
 
 `FileHistories` reads <target>_messages.json and decides everything by
 target name, before any request. The database source
@@ -44,15 +47,16 @@ from telegram_tracker.storage.provenance import HistoryRefused, check_update
 
 class ReplaceNotConfirmed(HistoryRefused):
 	'''
-	A window run would replace a history stored under the resolved
-	channel ID that the check before connecting did not find by name (a
-	new name of the channel). Fails only that target, before its history
-	is requested; `channel_id` is recorded so the next run's check finds
-	it and asks.
+	A window run would replace a history the confirmation scan missed:
+	a file that appeared meanwhile, or a database history found only by
+	resolved channel ID. Fails only that target before history requests;
+	a resolved ID is recorded so the next scan can find the history.
 	'''
-	def __init__(self, channel_id):
+	def __init__(self, channel_id=None, *, appeared=False):
+		where = ('appeared after the replacement check' if appeared
+			else 'of its channel was found under another name')
 		super().__init__(
-			'a saved history of its channel was found under another name, so it was not '
+			f'a saved history {where}, so it was not '
 			'replaced; run again to be asked first, or pass --yes'
 		)
 		self.channel_id = channel_id
@@ -94,6 +98,9 @@ class FileHistories:
 
 	def stored(self, channel_id):
 		return False
+
+	def stored_file(self, target):
+		return os.path.isfile(history_path(self.output_folder, target))
 
 	def merge(self, target, saved, fetched):
 		'''

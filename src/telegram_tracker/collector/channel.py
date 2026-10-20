@@ -80,6 +80,9 @@ async def collect_channel(
 	result = ChannelResult(index=index, target=target)
 	if histories is None:
 		histories = FileHistories(output_folder, profile)
+	# The output lock is held now; login may have outlasted the earlier scan.
+	if confirmed is not None and target not in confirmed and histories.stored_file(target):
+		raise ReplaceNotConfirmed(appeared=True)
 	updating = update and not metadata_only
 
 	saved = None
