@@ -7,7 +7,7 @@
 | Interpreter | Python 3.14.7 (conda-forge), conda env `telegram-tracker` |
 | Run tests | `conda run -n telegram-tracker python -m unittest discover -s tests -v` (from the repo root) |
 | Dependency check | `conda run -n telegram-tracker python -m pip check` |
-| Installed command | 2026-10-18: wheel built with build 1.6.1 and setuptools 84.0.0, installed with pip 26.2.1 into a fresh Python 3.14.7 virtual environment with the pinned requirements. From an empty directory, `tgtracker` and `python -m telegram_tracker` matched `python main.py` in help, argument errors, exit codes, and builder outputs. |
+| Installed command | 2026-10-20: wheel and sdist built from a clean export with build 1.6.1 and setuptools 84.2.0; the wheel installed with pip 26.2.1 into a fresh Python 3.14.7 virtual environment with only the pinned requirements (`pip check` clean). From an empty directory, `tgtracker` and `python -m telegram_tracker` matched `python main.py` in help, argument errors, exit codes, offline auth and profile commands, storage-mode refusals, and builder outputs; help and imports worked with the service libraries blocked. The synthetic three-mode storage matrix gave the same results (exit codes, states, counts, and checks) through the installed package as from the source tree. |
 
 Direct dependencies are pinned in `requirements.txt`:
 
