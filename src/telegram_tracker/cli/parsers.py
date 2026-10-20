@@ -291,11 +291,12 @@ def add_collect_arguments(parser, prog=SCRIPT_PROG):
 		'--update',
 		action='store_true',
 		help='For each channel, collect only posts newer than the newest one in '
-			'its saved <channel>_messages.json and merge them into that file '
-			'(fetched copies win). A channel without a saved history is collected '
-			'in full. Posts deleted or edited on Telegram since the earlier run '
-			'are not reflected, and build-dataset appends the merged history '
-			'again, duplicating earlier rows.'
+			'its saved history and merge them into it (fetched copies win). The '
+			'saved history is <channel>_messages.json in files, the database in '
+			'sqlite, and both copies in both, which must agree. A channel without '
+			'a saved history is collected in full. Posts deleted or edited on '
+			'Telegram since the earlier run are not reflected, and build-dataset '
+			'appends the merged history again, duplicating earlier rows.'
 	)
 
 	storage = parser.add_argument_group(

@@ -159,6 +159,16 @@ class HelpTests(CliTestCase):
 		self.assertNotIn('--min-id', sections['options'])
 		self.assertIn('--output', sections['options'])
 
+	def test_update_help_names_the_saved_history_of_every_storage_mode(self):
+		code, out, _ = self.run_cli(['collect', '--help'], client_factory=None)
+		self.assertEqual(code, 0)
+		text = ' '.join(out.split())
+		update = text[text.index('--update For each channel'):text.index('storage: ')]
+		for phrase in ('newest one in its saved history and merge them into it',
+				'<channel>_messages.json in files', 'the database in sqlite',
+				'both copies in both, which must agree'):
+			self.assertIn(phrase, update)
+
 
 class HelpWithoutDependenciesTests(offline_guard.OfflineTestCase):
 	'''
