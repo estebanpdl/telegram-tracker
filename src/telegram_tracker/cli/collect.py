@@ -3,7 +3,9 @@
 `collect`: validation of the history window, --update, and request
 controls, then one collection run and its summary. Telethon, the
 collector, and credentials are loaded only after the arguments are valid.
-The profile, session, and app credentials are resolved as for `auth`
+A window run that replaces saved histories asks first, before
+credentials are read (confirm_replaced_histories). The profile, session,
+and app credentials are resolved as for `auth`
 (see telegram_tracker.credentials), and the session lease is held from
 before the client exists until the run ends. After login, one get_me
 request identifies the account; the account lease is then held until the
@@ -13,12 +15,14 @@ application home.
 
 # import modules
 import functools
+import io
 import os
 import sys
 import time
 import warnings
 
 # import local submodules
+from telegram_tracker.cli.auth import confirm
 from telegram_tracker.cli.builders import missing_dependency
 from telegram_tracker.cli.profile_checks import account_check
 from telegram_tracker.cli.parsers import COLLECT, DEFAULT_OUTPUT, invocation
@@ -31,7 +35,7 @@ from telegram_tracker.credentials.protection import ProtectionError
 from telegram_tracker.utils import data_folder_from
 
 
-# names listed by the existing-history warning before "and N more"
+# names listed by the replaced-history warning and the summary before "and N more"
 WARN_LIST_LIMIT = 10
 
 # Default channel workers for --batch-file; a single channel runs at 1
@@ -63,27 +67,67 @@ def window_bounds(args, parser):
 	return bounds
 
 
-def warn_replaced_histories(targets, output_folder):
+def confirm_replaced_histories(existing, output_folder, *, legacy, assume_yes):
 	'''
-	Before a filtered run: name the channels whose saved message history
-	will be replaced by the selection (stderr).
+	Before a filtered run, before credentials: name the channels whose
+	saved history the selection replaces (stderr), then ask to continue.
+	--yes skips the question; input that is not a terminal is refused
+	without it. The legacy form only warns: its arguments cannot take
+	--yes. Returns None to go on, or the exit code of a run that stops
+	here.
 	'''
-	existing = [
-		t for t in dict.fromkeys(targets)
-		if t and os.path.isfile(os.path.join(output_folder, t, f'{t}_messages.json'))
-	]
 	if not existing:
-		return
+		return None
 
-	names = ', '.join(existing[:WARN_LIST_LIMIT])
-	if len(existing) > WARN_LIST_LIMIT:
-		names += f', and {len(existing) - WARN_LIST_LIMIT} more'
 	print(
 		f'> Warning: this filtered run replaces the saved messages of '
-		f'{len(existing)} channel(s) in {output_folder}: {names}. '
+		f'{len(existing)} channel(s) in {output_folder}: {list_names(existing)}. '
 		'Use a fresh --output to keep them.',
 		file=sys.stderr
 	)
+	if legacy or assume_yes:
+		return None
+	if not interactive():
+		print(
+			'> Not replaced: input is not a terminal, so the replacement cannot be '
+			'confirmed. Pass --yes to replace them, or choose a fresh --output.',
+			file=sys.stderr
+		)
+		return 2
+	if not confirm('Continue?'):
+		print('> Nothing collected; the saved histories are unchanged.', file=sys.stderr)
+		return 1
+	return None
+
+
+def interactive():
+	'''
+	True when standard input is a terminal that can answer a question.
+	On Windows the NUL device also reports isatty(), so a standard input
+	with a file descriptor must also be a console there.
+	'''
+	try:
+		if sys.stdin is None or not sys.stdin.isatty():
+			return False
+		fd = sys.stdin.fileno()
+	except io.UnsupportedOperation:
+		# a stream without a descriptor: only its isatty() can tell
+		return True
+	except (OSError, ValueError):
+		return False
+	return os.name != 'nt' or windows_console(fd)
+
+
+def windows_console(fd):
+	import ctypes
+	import msvcrt
+
+	try:
+		handle = msvcrt.get_osfhandle(fd)
+	except OSError:
+		return False
+	mode = ctypes.c_ulong()
+	return bool(ctypes.windll.kernel32.GetConsoleMode(ctypes.c_void_p(handle), ctypes.byref(mode)))
 
 
 def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
@@ -114,8 +158,6 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 
 	targets, given = read_targets(args, parser)
 	output_folder = data_folder_from(args['output'], DEFAULT_OUTPUT)
-	if bounds and not metadata_only:
-		warn_replaced_histories(targets, output_folder)
 
 	batch = args['batch_file'] is not None
 	requested = args.get('concurrency') or (BATCH_CONCURRENCY if batch else 1)
@@ -160,6 +202,16 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 			parser.error(f'the --output folder must be outside the application home ({home})')
 		destination.protected = (session.path,)
 		destination.check()
+		confirmed = None
+		if bounds and not metadata_only:
+			assume_yes = args.get('yes', False)
+			existing = destination.saved_histories(targets)
+			stop = confirm_replaced_histories(existing, output_folder, legacy=legacy, assume_yes=assume_yes)
+			if stop is not None:
+				return stop
+			if not (legacy or assume_yes):
+				# a history found only after resolution was not confirmed
+				confirmed = frozenset(existing)
 		phone = None
 		if client_factory is None:
 			from telegram_tracker.api import create_client
@@ -184,6 +236,9 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 	except StorageError as exc:
 		print(f'> {exc}', file=sys.stderr)
 		return 1
+	except KeyboardInterrupt:
+		print('\n> Interrupted.', file=sys.stderr)
+		return 130
 
 	if session.notice:
 		print(session.notice, file=sys.stderr)
@@ -238,6 +293,7 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 					identify=account_check(profile, session, home, RunProfile),
 					writer_factory=destination.open_writer,
 					preflight=destination.check_unlocked,
+					confirmed=confirmed,
 					**controls
 				)
 			)

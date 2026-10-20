@@ -22,6 +22,7 @@ from telegram_tracker.collector.outcomes import SESSION_ERRORS, CollectionSummar
 	stop_reason_for
 from telegram_tracker.collector.rpc import MetadataCache, Requests
 from telegram_tracker.request_policy import AccountStopped, RequestFailed, RequestPolicy
+from telegram_tracker.storage.histories import ReplaceNotConfirmed
 from telegram_tracker.storage.provenance import HistoryRefused
 from telegram_tracker.storage.records import COMPLETE, INTERRUPTED, PARTIAL, \
 	HistoryUnreadable, StorageError
@@ -76,7 +77,8 @@ async def run_collection(
 		profile=None,
 		identify=None,
 		writer_factory=None,
-		preflight=None
+		preflight=None,
+		confirmed=None
 	):
 	'''
 	Collect `targets` (normalized, without duplicates) with one client.
@@ -109,6 +111,10 @@ async def run_collection(
 		sidecar when it opens and when the run ends.
 	preflight -> called after the output-lock check and before the client
 		is created (the database lease check); raising stops the run.
+	confirmed -> for a window run that asked before connecting: the
+		targets whose replacement was confirmed. Any other target whose
+		resolved channel has a history stored under its ID fails, keeping
+		that ID in its outcome (see collector.channel). None checks nothing.
 
 	Missing/inaccessible targets, stalled pagination, unreadable saved
 	histories (--update), --update into another profile's history, and
@@ -168,7 +174,8 @@ async def run_collection(
 					window=window,
 					update=update,
 					account_checks=0 if identify is None else 1,
-					writer_factory=writer_factory or open_file_writer
+					writer_factory=writer_factory or open_file_writer,
+					confirmed=confirmed
 				)
 	finally:
 		await client.disconnect()
@@ -178,7 +185,7 @@ async def run_collection(
 
 async def _collect_locked(
 		client, summary, policy, parameters, *, metadata_only, window, update, account_checks,
-		writer_factory):
+		writer_factory, confirmed):
 	status = StatusFile(
 		summary.output_folder, summary.requested, parameters, summary.profile, account_checks
 	)
@@ -194,13 +201,13 @@ async def _collect_locked(
 		status.write()
 		await _collect_targets(
 			client, summary, policy, status, writer,
-			metadata_only=metadata_only, window=window, update=update
+			metadata_only=metadata_only, window=window, update=update, confirmed=confirmed
 		)
 	finally:
 		writer.close()
 
 
-async def _collect_targets(client, summary, policy, status, writer, *, metadata_only, window, update):
+async def _collect_targets(client, summary, policy, status, writer, *, metadata_only, window, update, confirmed):
 	targets = summary.requested
 	cache = MetadataCache(Requests(client, policy))
 	queue = asyncio.Queue(maxsize=summary.concurrency)
@@ -237,13 +244,17 @@ async def _collect_targets(client, summary, policy, status, writer, *, metadata_
 				update=update,
 				after_resolve=functools.partial(after_resolve, index),
 				profile=summary.profile,
-				histories=writer.histories
+				histories=writer.histories,
+				confirmed=confirmed
 			)
 			outcome = ('result', result)
 		except TargetUnavailable:
 			outcome = ('not_found', NOT_FOUND_REASON)
 		except DuplicateTarget as exc:
 			outcome = ('duplicate', exc.alias_of)
+		except ReplaceNotConfirmed as exc:
+			print(f'> {target}: {exc}.', file=sys.stderr)
+			outcome = ('failed', str(exc), exc.channel_id)
 		except (PaginationStalled, HistoryUnreadable, HistoryRefused, RequestFailed) as exc:
 			print(f'> {target}: {exc}; messages not saved.', file=sys.stderr)
 			outcome = ('failed', str(exc))
@@ -257,7 +268,7 @@ async def _collect_targets(client, summary, policy, status, writer, *, metadata_
 		await queue.put((index, outcome))
 		summary.peak_queued_results = max(summary.peak_queued_results, queue.qsize())
 
-	def record(index, kind, payload):
+	def record(index, kind, payload, channel_id=None):
 		'''
 		Writer side: commit a result or record a failure. Only this
 		function touches output files and target statuses.
@@ -291,6 +302,8 @@ async def _collect_targets(client, summary, policy, status, writer, *, metadata_
 			if kind == 'not_found':
 				writer.record_not_found(index, target)
 			entry.update(status='failed', reason=payload)
+			if channel_id is not None:
+				entry['channel_id'] = channel_id
 
 	async def write_results():
 		while True:

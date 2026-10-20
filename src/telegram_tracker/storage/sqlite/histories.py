@@ -55,6 +55,13 @@ class SQLiteHistories:
 			)
 		return SavedHistory(newest_id=newest or 0, messages=count, channel_id=channel_id)
 
+	def stored(self, channel_id):
+		try:
+			row = self.con.execute('SELECT 1 FROM histories WHERE channel_id = ?', (channel_id,)).fetchone()
+		except sqlite3.Error as exc:
+			raise HistoryUnreadable(f'the stored history of channel {channel_id} cannot be read: {exc}') from None
+		return row is not None
+
 	def merge(self, target, saved, fetched):
 		'''
 		The writer upserts the fetched messages itself (ChannelResult.

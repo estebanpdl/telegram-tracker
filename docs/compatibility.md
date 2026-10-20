@@ -52,7 +52,9 @@ Legacy forms reach the same handlers:
 - Validation precedes credential reads: selectors, batch file and target forms,
   numeric bounds, dates, incompatible options, and flags for the wrong command.
 - Exit codes: 0 success; 1 target, login, input, storage, lease, or dependency
-  failure; 2 argument errors and missing/invalid app credentials; 130 interrupted.
+  failure, or a declined confirmation; 2 argument errors, missing/invalid app
+  credentials, and an unconfirmable history replacement (no terminal, no
+  `--yes`); 130 interrupted.
   Missing dependencies are named in the error.
 
 ### Sessions and app credentials
@@ -145,9 +147,17 @@ and `--max-messages` (newest first). Dates without offsets are UTC. Bounds combi
 as AND. The server receives ID bounds on every page and `--until` on the first;
 returned messages are also filtered locally. Paging stops at the cap or below
 `--since`/`--min-id`. The date stop assumes dates follow ID order. Boundary-page
-chats/users may refer to excluded messages. A filtered run replaces saved history
-and warns before credentials when matching target files exist. The warning checks
-files only: a `sqlite` folder gets none, although its database histories are replaced.
+chats/users may refer to excluded messages. A filtered run replaces saved history.
+Before credentials, `collect` finds the targets with one (files: the messages JSON;
+sqlite: a read-only lookup of histories by earlier run input or stored channel
+username, case-insensitive; both: either) and warns. A terminal is asked
+`Continue? [y/N]`: anything but y/yes, or EOF, exits 1. `--yes` skips the question.
+Input that is not a console (a pipe, a file, or NUL, which reports isatty() on
+Windows) exits 2. A stopped run creates no client and writes nothing. Without
+`--yes`, a target whose resolved channel has a database history the name lookup
+missed fails before its first history request (history kept; its run_targets row
+and sidecar entry keep `channel_id`, so a rerun asks). The legacy form cannot take
+`--yes`: it warns and proceeds, as before.
 
 `--update` derives each target's minimum ID from its saved history, fetches newer
 posts, and merges by ID with fetched copies winning. It is exclusive with every

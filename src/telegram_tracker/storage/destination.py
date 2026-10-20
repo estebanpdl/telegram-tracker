@@ -11,6 +11,8 @@ for `sqlite` and `both`, the database <output>/telegram-tracker.sqlite3.
 	check               before credentials, read only: the database is the
 	                    folder's own (manifest dataset_uuid, output binding)
 	                    and nothing is left unpublished ('pending').
+	saved_histories     before credentials, read only: which targets already
+	                    have a saved history that a window run replaces.
 	check_unlocked      just before connecting: no database lease is held.
 	open_writer         the collector's writer factory, called once the
 	                    output folder is locked: for files, refuses a folder
@@ -37,6 +39,17 @@ from telegram_tracker.storage.manifest import BOTH, DATABASE_FILE, FILES, MANIFE
 	read_manifest, write_manifest
 from telegram_tracker.storage.records import LOCK_FILE, StorageError
 from telegram_tracker.storage.status import utc_now
+
+
+# A stored history for a target name (both parameters): a channel an earlier
+# run resolved from that input, or a channel with that username. Usernames
+# and targets compare case-insensitively, like Telegram usernames.
+SAVED_HISTORY = (
+	'SELECT 1 FROM histories WHERE channel_id IN ('
+	'SELECT channel_id FROM run_targets WHERE input = ? COLLATE NOCASE AND channel_id IS NOT NULL '
+	"UNION SELECT peer_id FROM peers WHERE peer_kind = 'channel' AND username = ? COLLATE NOCASE"
+	') LIMIT 1'
+)
 
 
 class StorageChoiceRefused(Exception):
@@ -153,6 +166,44 @@ class Destination:
 		'''
 		if self.uses_database and self.manifest is not None:
 			self._check_database()
+
+	def saved_histories(self, targets):
+		'''
+		The targets, in order and once each, that already have a saved
+		history here: <target>/<target>_messages.json for files; for sqlite,
+		a history in the database of a channel an earlier run collected
+		under that target name or whose stored username it is (histories
+		are keyed by channel ID, which is only known after connecting);
+		either for both. Read only, after `check`; nothing is created.
+		'''
+		targets = [t for t in dict.fromkeys(targets) if t]
+		found = set()
+		if self.storage in (FILES, BOTH):
+			found.update(
+				t for t in targets
+				if os.path.isfile(os.path.join(self.output_folder, t, f'{t}_messages.json'))
+			)
+		if self.uses_database and self.manifest is not None:
+			found.update(self._database_histories([t for t in targets if t not in found]))
+		return [t for t in targets if t in found]
+
+	def _database_histories(self, targets):
+		from telegram_tracker.storage.sqlite.connection import open_database
+		from telegram_tracker.storage.sqlite.schema import DatabaseRefused
+
+		if not targets:
+			return set()
+		path = self.database_path
+		try:
+			con = open_database(path, protected=self.protected, readonly=True)
+		except DatabaseRefused as exc:
+			raise DestinationError(str(exc)) from None
+		try:
+			return {t for t in targets if con.execute(SAVED_HISTORY, (t, t)).fetchone()}
+		except Exception as exc:
+			raise DestinationError(f'cannot read {path}: {exc}') from None
+		finally:
+			con.close()
 
 	def check_unlocked(self):
 		'''
