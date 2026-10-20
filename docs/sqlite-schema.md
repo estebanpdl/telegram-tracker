@@ -8,14 +8,14 @@ The schema is defined in [sqlite-schema.sql](sqlite-schema.sql).
 `tests/test_sqlite_schema.py` applies it to an empty database and checks it against
 the synthetic payloads in `tests/fixtures/sqlite/variants.json`.
 
-**Status:** the `collect` command writes the file outputs only; no command option
-selects this database yet. The database writer is implemented in
-`telegram_tracker.storage.sqlite` (schema checks, transactions, history rules,
-profile checks, own-phone rule and upgrades, as described below) and is used through
-the collector's writer interface. Publication state for runs that write both the
-database and files (`files_state`, `aggregate_files`, `destination_pending`) is
-defined by the schema but not yet written. Applying the DDL alone provides none of
-the writer's behavior.
+**Status:** `collect --storage sqlite` writes this database only, and
+`collect --storage both` writes it together with the file outputs; the database is
+always `telegram-tracker.sqlite3` in the `--output` folder (see the README, "Storage
+modes"). The writer is implemented in `telegram_tracker.storage.sqlite` (schema
+checks, transactions, history rules, profile checks, own-phone rule and upgrades, as
+described below); `telegram_tracker.storage.dual` records the publication state of
+`both` runs (`files_state`, `aggregate_files`, `destination_pending`). Applying the
+DDL alone provides none of the writer's behavior.
 
 ## What the database contains
 
@@ -94,7 +94,7 @@ One row describing the database.
 | `dataset_uuid` | Random UUID identifying this dataset. |
 | `created_at`, `updated_at` | UTC creation and last-change times. |
 | `app_version` | Application version that created or last migrated the file. |
-| `output_binding` | Canonical output folder this database is bound to, or `NULL`. |
+| `output_binding` | Canonical output folder this database is bound to, or `NULL`. A collection refuses a database bound to another folder. |
 
 Key: `singleton`.
 
@@ -399,8 +399,10 @@ and updates only its own rows. `peers`, `channel_snapshots`, `histories`,
   rows, errors, request statistics, the remaining target outcomes and its end state in
   another. If that last transaction fails, the run is marked `interrupted` if
   possible; its observations stay. A run whose process stopped before recording its
-  end (for example, killed) stays `running`: it is evidence of an interrupted run,
-  not a run in progress.
+  end (for example, killed) stays `running` until the next collection into the folder
+  holds the database lease: that run records it as `interrupted`, with a
+  `stop_reason` starting with `stale:` and `finished_at` left `NULL`, in the
+  transaction that records itself. Its rows are kept.
 - **Both sinks.** In `both` mode the files hold the same fields as the database. Before
   an `--update`, the stored history's newest ID and message-ID set must agree in the
   database and the files; a channel whose two copies disagree, or that exists in only
@@ -473,7 +475,8 @@ the run, its time, its options and its profile.
   refused and left untouched; an empty file is refused, and a file that isn't an
   SQLite database is refused as damaged. An SQLite library older than 3.31 or without
   JSON1 is refused.
-- An upgrade from version N to N+1 runs offline and makes a backup first: a consistent
+- An upgrade from version N to N+1 runs offline, holding the database lease
+  (`telegram-tracker.sqlite3.lock`, as a collection does), and makes a backup first: a consistent
   copy through SQLite's backup API, named `<name>.v<N>-<UTC time>.bak.sqlite3` next
   to the database, then checked with `PRAGMA integrity_check`. Each step runs in one
   transaction that also sets `user_version`, updates `schema_meta`, inserts its
