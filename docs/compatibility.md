@@ -146,13 +146,15 @@ as AND. The server receives ID bounds on every page and `--until` on the first;
 returned messages are also filtered locally. Paging stops at the cap or below
 `--since`/`--min-id`. The date stop assumes dates follow ID order. Boundary-page
 chats/users may refer to excluded messages. A filtered run replaces saved history
-and warns before credentials when matching target files exist.
+and warns before credentials when matching target files exist. The warning checks
+files only: a `sqlite` folder gets none, although its database histories are replaced.
 
 `--update` derives each target's minimum ID from its saved history, fetches newer
 posts, and merges by ID with fetched copies winning. It is exclusive with every
 window flag and metadata-only, and unavailable in the legacy collection form.
-No new posts leaves the messages file byte-identical; absent history causes full
-collection. Malformed saved history fails that target without replacement.
+No new posts leaves the messages file byte-identical and the database history row
+unchanged; absent history causes full collection. Malformed saved history fails
+that target without replacement.
 Updates do not refresh earlier edited or deleted Telegram posts.
 
 ## Collection and persistence
@@ -334,3 +336,21 @@ opening the database).
   interpreters. `tests/virtual_time.py` jumps to timers, avoiding real pacing waits.
 - `tests/test_environment.py` checks pinned interfaces and prevents reintroduction
   of removed pandas and matplotlib calls.
+
+## Validation limits
+
+The evidence above is offline and synthetic. Not covered:
+
+- Platforms: Windows on local NTFS only. The POSIX permission branch, `O_EXCL`
+  lock and lease files on Linux/macOS, hard-link database publication outside
+  Windows, and network file systems are unexercised.
+- Interruption: Ctrl+C is tested as `KeyboardInterrupt` raised in the fake client
+  and as task cancellation inside the process, not as a SIGINT delivered to a
+  running process.
+- Live Telegram: the database modes (`sqlite`, `both`) and named profiles have no
+  live run; collection evidence for them comes from the fake client only.
+- Request rates: concurrency and request-interval defaults are project limits;
+  Telegram's per-account limits were not measured.
+- Readers: SQLite runs in rollback-journal mode. An open read transaction on the
+  database delays a collection's writes; after the 5 s busy timeout the run stops
+  with exit 1.
