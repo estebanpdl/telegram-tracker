@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 '''
-Offline network builder: reads <data>/collected_chats.csv and writes
-Graph.gexf and network.png.
+Offline network builder: reads the collected chats of a collection
+folder (through telegram_tracker.reader: <data>/collected_chats.csv or
+the database) and writes Graph.gexf, network.png and network-build.json
+(the source read).
 
 	build_network('./output/data')
 
@@ -18,6 +20,7 @@ No Telethon, config, or session access.
 
 # import modules
 import ast
+import json
 import math
 import numbers
 import os
@@ -26,13 +29,16 @@ import sys
 from dataclasses import dataclass
 
 # import local submodules
-from telegram_tracker.storage import check_collection_status
+from telegram_tracker.reader import AUTO, SQLITE, open_collection
+from telegram_tracker.reader.records import build_record
+from telegram_tracker.storage.status import utc_now
 from telegram_tracker.utils import DataInputError, discard, normalize_values, temp_path_for
 
 
 COLLECTED_CHATS = 'collected_chats.csv'
 GRAPH_FILE = 'Graph.gexf'
 IMAGE_FILE = 'network.png'
+BUILD_FILE = 'network-build.json'
 
 REQUIRED_COLUMNS = ('username', 'counter', 'source')
 
@@ -46,6 +52,8 @@ class NetworkSummary:
 	png: str
 	nodes: int
 	edges: int
+	source: str = None
+	build_record: str = None
 
 
 '''
@@ -63,19 +71,18 @@ def _is_count(value):
 	return math.isfinite(value) and value >= 0 and float(value).is_integer()
 
 
-def read_chats(chats_path):
+def read_chats(chats):
 	'''
-	Rows of collected_chats.csv as (username, counter, sources) tuples.
+	Rows of collected_chats.csv (a reader.records.ChatsInput) as
+	(username, counter, sources) tuples.
 	`source` must be a Python list literal of usernames and `counter` a
 	non-negative whole number.
 	'''
 	import pandas as pd
 
-	if not os.path.isfile(chats_path):
-		raise DataInputError(f'{chats_path} not found; run collection first')
-
+	chats_path = chats.label
 	try:
-		chats_file = pd.read_csv(chats_path, encoding='utf-8')
+		chats_file = pd.read_csv(chats.source, encoding='utf-8')
 	except (ValueError, UnicodeDecodeError) as exc:
 		raise DataInputError(f'{chats_path} is not a readable CSV: {exc}') from None
 
@@ -205,48 +212,69 @@ def render(G, G_louvain, image_path):
 	fig.savefig(image_path, format='png')
 
 
-def build_network(data_path, *, image=True):
+def build_network(data_path, *, image=True, source=AUTO):
 	'''
-	Build Graph.gexf and (unless image=False) network.png from
-	`data_path`/collected_chats.csv. Returns a NetworkSummary.
+	Build Graph.gexf, (unless image=False) network.png and
+	network-build.json from the collected chats of `data_path`, read from
+	`source` (reader.select: auto, files or sqlite). Returns a
+	NetworkSummary.
 
-	Raises DataInputError, before writing anything, when the last
-	collection into `data_path` is running or was interrupted
-	(collection-status.json), or the CSV is missing, lacks
-	username/counter/source, or has a malformed row. A note about a
-	partial collection goes to stderr.
+	Raises DataInputError, before writing anything, when the folder
+	cannot be read from that source (reader.select), the last collection
+	into `data_path` is running or was interrupted, or collected_chats is
+	missing, lacks username/counter/source, or has a malformed row. A
+	note about a partial collection goes to stderr.
 	'''
 	import networkx as nx
 
-	chats_path = f'{data_path}/{COLLECTED_CHATS}'
 	gexf_path = f'{data_path}/{GRAPH_FILE}'
 	png_path = f'{data_path}/{IMAGE_FILE}'
+	build_path = f'{data_path}/{BUILD_FILE}'
 
-	for note in check_collection_status(data_path, messages=False):
-		print(f'> Note: {note}.', file=sys.stderr)
+	with open_collection(data_path, source, messages=False) as collection:
+		for note in collection.notes:
+			print(f'> Note: {note}.', file=sys.stderr)
+		if collection.source == SQLITE:
+			print(f'Reading the database of {data_path}')
 
-	print('Creating network graph')
-	edges = edge_list(read_chats(chats_path))
+		print('Creating network graph')
+		rows = read_chats(collection.collected_chats())
+
+	edges = edge_list(rows)
 	G, G_louvain = build_graphs(edges)
+	record = build_record('build-network', collection, utc_now(), outputs={
+		GRAPH_FILE: {'nodes': G.number_of_nodes(), 'edges': G.number_of_edges()},
+		COLLECTED_CHATS: {'rows': len(rows)}
+	})
 
 	tmp_gexf = temp_path_for(gexf_path)
 	tmp_png = temp_path_for(png_path)
+	tmp_build = temp_path_for(build_path)
 	try:
 		nx.write_gexf(G, tmp_gexf)
 		if image:
 			render(G, G_louvain, tmp_png)
+		with open(tmp_build, mode='w', encoding='utf-8') as writer:
+			json.dump(record, writer, ensure_ascii=False, indent=1)
+			writer.write('\n')
 
 		os.replace(tmp_gexf, gexf_path)
 		print('Saved')
 		if image:
 			os.replace(tmp_png, png_path)
+		os.replace(tmp_build, build_path)
 	finally:
 		discard(tmp_gexf)
 		discard(tmp_png)
+		discard(tmp_build)
 
 	return NetworkSummary(
 		gexf=gexf_path,
 		png=png_path if image else None,
 		nodes=G.number_of_nodes(),
-		edges=G.number_of_edges()
+		edges=G.number_of_edges(),
+		source=collection.source,
+		build_record=build_path
 	)
+
+

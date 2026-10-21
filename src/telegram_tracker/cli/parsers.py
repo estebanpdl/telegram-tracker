@@ -20,10 +20,13 @@ DEFAULT_OUTPUT = './output/data'
 # --storage values (storage.manifest); importing that module would load
 # storage code, which parsers avoid
 STORAGE_CHOICES = ('files', 'sqlite', 'both')
+# builder --source values (reader.records), for the same reason
+AUTO = 'auto'
+SOURCES = (AUTO, 'files', 'sqlite')
 
 BUILDER_STORAGE_NOTE = (
-	'Reads the file outputs of `collect --storage files` or `--storage both`; '
-	'a folder collected with --storage sqlite has none.'
+	'Reads the file outputs of a files or both folder and the database of a '
+	'sqlite folder (--source chooses).'
 )
 
 SCRIPT_PROG = 'main.py'
@@ -319,10 +322,9 @@ def add_collect_arguments(parser, prog=SCRIPT_PROG):
 		'--storage',
 		choices=STORAGE_CHOICES,
 		help='files: JSON, CSV and TXT files (default for a new folder). sqlite: '
-			'only the database <output>/telegram-tracker.sqlite3, so build-dataset '
-			'and build-network have nothing to read until builders for the database '
-			'exist. both: the same data in the files and the database; the builders '
-			'read the files.'
+			'only the database <output>/telegram-tracker.sqlite3; build-dataset and '
+			'build-network read it. both: the same data in the files and the '
+			'database; the builders read the files unless given --source sqlite.'
 	)
 
 	controls = parser.add_argument_group(
@@ -382,6 +384,15 @@ def add_builder_arguments(parser):
 		type=str,
 		required=False,
 		help=f'Path where data is located. Will use `{DEFAULT_OUTPUT}` if not given.'
+	)
+	parser.add_argument(
+		'--source',
+		choices=SOURCES,
+		default=AUTO,
+		help='What to read: files (the file outputs), sqlite (the database '
+			'telegram-tracker.sqlite3) or auto (default: the database of a folder '
+			'collected with --storage sqlite, the files otherwise). The two are '
+			'never combined; a source the folder lacks is refused.'
 	)
 
 

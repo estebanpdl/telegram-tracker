@@ -2,7 +2,8 @@
 '''
 The database lease: `<database>.lock` beside the canonical database path
 (symlinks and junctions resolved), held by the one process that writes
-the database, a collection or an upgrade. Like the other leases
+the database, a collection or an upgrade, and by a builder while it
+reads the database (telegram_tracker.reader). Like the other leases
 (credentials.lease), a lease left by a crashed process is reported,
 never removed automatically.
 '''
@@ -34,7 +35,7 @@ def locked_message(path):
 	lease = database_lease_path(path)
 	detail = holder(canonical(path))
 	return (
-		f'The database {path} is in use by another collection or upgrade'
+		f'The database {path} is in use by another collection or upgrade, or a build reading it'
 		+ (f' ({detail})' if detail else '')
 		+ f'. If none is running, an earlier one was interrupted: delete {lease} '
 		'and try again.'

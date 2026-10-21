@@ -1,16 +1,19 @@
 # -*- coding: utf-8 -*-
 '''
-Offline dataset builder: reads collected files under a data folder and
-writes msgs_dataset.csv and collected_chats.xlsx.
+Offline dataset builder: reads a collection folder and writes
+msgs_dataset.csv and collected_chats.xlsx.
 
 	build_dataset('./output/data')
 
-Inputs: <data>/collected_chats.csv and every <data>/**/*_messages.json.
+Inputs (through telegram_tracker.reader): collected_chats.csv and every
+saved message history, from the file outputs (<data>/collected_chats.csv
+and every <data>/**/*_messages.json) or from the database.
 Outputs:
 	- msgs_dataset.csv: one row per message, appended to an existing file
 	  (a rerun duplicates rows; the header is written only once);
 	- collected_chats.xlsx: collected_chats.csv with per-channel message
-	  statistics, replaced on every run.
+	  statistics, replaced on every run;
+	- dataset-build.json: the source read and its histories, replaced.
 
 All inputs are read and checked before anything is written; outputs are
 replaced through temporary files, so a malformed input leaves earlier
@@ -18,7 +21,6 @@ outputs untouched. No Telethon, config, or session access.
 '''
 
 # import modules
-import glob
 import json
 import os
 import shutil
@@ -27,7 +29,9 @@ import sys
 from dataclasses import dataclass, field
 
 # import local submodules
-from telegram_tracker.storage import check_collection_status
+from telegram_tracker.reader import AUTO, SQLITE, open_collection
+from telegram_tracker.reader.records import build_record
+from telegram_tracker.storage.status import utc_now
 from telegram_tracker.utils import (
 	DataInputError, chats_dataset_columns, clean_msg, discard, msg_attrs,
 	temp_path_for,
@@ -38,6 +42,7 @@ from telegram_tracker.utils import (
 
 MSGS_DATASET = 'msgs_dataset.csv'
 COLLECTED_CHATS = 'collected_chats.csv'
+BUILD_FILE = 'dataset-build.json'
 
 # per-channel statistics added to collected_chats before the XLSX export
 STAT_COLUMNS = (
@@ -60,6 +65,8 @@ class DatasetSummary:
 	chats_xlsx: str
 	channels: list = field(default_factory=list)
 	rows_written: int = 0
+	source: str = None
+	build_record: str = None
 
 
 '''
@@ -68,68 +75,44 @@ Inputs
 
 '''
 
-def message_files(data_path):
+def read_collected_chats(chats):
 	'''
-	Every <data>/**/*_messages.json, sorted for a stable row order.
-	'''
-	pattern = os.path.join(glob.escape(data_path), '**', '*_messages.json')
-	return sorted(glob.glob(pattern, recursive=True))
-
-
-def channel_name(file_path):
-	'''
-	Channel username from a <channel>_messages.json path.
-	'''
-	return file_path.split('.json')[0].replace('\\', '/').split('/')[-1].replace(
-		'_messages', ''
-	)
-
-
-def read_collected_chats(chats_path):
-	'''
-	collected_chats.csv as a DataFrame; every column the XLSX export
-	selects must be present.
+	collected_chats.csv (a reader.records.ChatsInput) as a DataFrame;
+	every column the XLSX export selects must be present.
 	'''
 	import pandas as pd
 
-	if not os.path.isfile(chats_path):
-		raise DataInputError(f'{chats_path} not found; run collection first')
-
 	try:
-		data = pd.read_csv(chats_path, encoding='utf-8')
+		data = pd.read_csv(chats.source, encoding='utf-8')
 	except (ValueError, UnicodeDecodeError) as exc:
-		raise DataInputError(f'{chats_path} is not a readable CSV: {exc}') from None
+		raise DataInputError(f'{chats.label} is not a readable CSV: {exc}') from None
 
 	required = [c for c in chats_dataset_columns() if c not in STAT_COLUMNS]
 	missing = [c for c in required if c not in data.columns]
 	if missing:
 		raise DataInputError(
-			f'{chats_path} is missing columns: {", ".join(missing)}'
+			f'{chats.label} is missing columns: {", ".join(missing)}'
 		)
 
 	return data
 
 
-def read_messages(file_path):
+def read_messages(history):
 	'''
-	A <channel>_messages.json payload: an object with `count` and a list
-	of `messages`, each an object with a `_` type.
+	The payload of a reader.records.ChannelHistory: an object with
+	`count` and a list of `messages`, each an object with a `_` type.
 	'''
-	try:
-		with open(file_path, encoding='utf-8', mode='r') as fl:
-			obj = json.load(fl)
-	except (ValueError, UnicodeDecodeError) as exc:
-		raise DataInputError(f'{file_path} is not valid JSON: {exc}') from None
-
+	obj = history.load()
+	label = history.label
 	if not isinstance(obj, dict) or 'count' not in obj \
 			or not isinstance(obj.get('messages'), list):
 		raise DataInputError(
-			f'{file_path} is not a messages file (needs "count" and "messages")'
+			f'{label} is not a messages file (needs "count" and "messages")'
 		)
 
 	for item in obj['messages']:
 		if not isinstance(item, dict) or '_' not in item:
-			raise DataInputError(f'{file_path} has a message without a "_" type')
+			raise DataInputError(f'{label} has a message without a "_" type')
 
 	return obj
 
@@ -299,46 +282,20 @@ def message_rows(messages, username, chats):
 		yield dict(response)
 
 
-'''
-
-Outputs
-
-'''
-
-def build_dataset(data_path, *, progress=True):
+def read_channels(collection, data, progress):
 	'''
-	Build msgs_dataset.csv (append) and collected_chats.xlsx (replace)
-	from the collected files in `data_path`. Returns a DatasetSummary.
-
-	Raises DataInputError, before writing anything, when the last
-	collection into `data_path` is running or was interrupted
-	(collection-status.json), collected_chats.csv is missing or lacks
-	columns, or a messages file is malformed or produces an incomplete row.
-	Notes about a partial or subset collection go to stderr.
+	Read and transform every history of `collection` (a reader): fills
+	the statistics columns of `data` (collected chats) and returns
+	[(username, rows)] and the histories' build metadata records.
 	'''
-	import pandas as pd
 	from tqdm import tqdm
 
-	chats_path = f'{data_path}/{COLLECTED_CHATS}'
-	msgs_path = f'{data_path}/{MSGS_DATASET}'
-	xlsx_path = chats_path.replace('.csv', '.xlsx')
-
-	for note in check_collection_status(data_path):
-		print(f'> Note: {note}.', file=sys.stderr)
-
-	data = read_collected_chats(chats_path)
-	for column in STAT_COLUMNS:
-		data[column] = 0
-
-	columns = msgs_dataset_columns()
-	summary = DatasetSummary(msgs_dataset=msgs_path, chats_xlsx=xlsx_path)
-
-	# Read and transform every channel before writing
 	channels = []
-	for f in message_files(data_path):
-		username = channel_name(f)
+	records = []
+	for history in collection.histories():
+		username = history.name
 		print(f'Reading data from channel -> {username}')
-		obj = read_messages(f)
+		obj = read_messages(history)
 
 		for column, value in channel_stats(obj).items():
 			data.loc[data['username'] == username, column] = value
@@ -353,18 +310,75 @@ def build_dataset(data_path, *, progress=True):
 					pbar.update(1)
 			except (KeyError, TypeError, ValueError) as exc:
 				raise DataInputError(
-					f'{f}: cannot read message fields ({type(exc).__name__}: {exc})'
+					f'{history.label}: cannot read message fields ({type(exc).__name__}: {exc})'
 				) from None
 
 		channels.append((username, rows))
+		records.append(history.record(messages=len(messages)))
 		print('-- END --')
 		print('')
+
+	return channels, records
+
+
+'''
+
+Outputs
+
+'''
+
+def build_dataset(data_path, *, source=AUTO, progress=True):
+	'''
+	Build msgs_dataset.csv (append), collected_chats.xlsx (replace) and
+	dataset-build.json (replace) from the collection in `data_path`, read
+	from `source` (reader.select: auto, files or sqlite). Returns a
+	DatasetSummary.
+
+	Raises DataInputError, before writing anything, when the folder
+	cannot be read from that source (reader.select), the last collection
+	into `data_path` is running or was interrupted, collected_chats is
+	missing or lacks columns, or a history is malformed or produces an
+	incomplete row. Notes about a partial or subset collection, and about
+	appending to an existing msgs_dataset.csv, go to stderr.
+	'''
+	import pandas as pd
+
+	msgs_path = f'{data_path}/{MSGS_DATASET}'
+	xlsx_path = f'{data_path}/{COLLECTED_CHATS}'.replace('.csv', '.xlsx')
+	build_path = f'{data_path}/{BUILD_FILE}'
+
+	# Read and transform every channel before writing
+	with open_collection(data_path, source) as collection:
+		for note in collection.notes:
+			print(f'> Note: {note}.', file=sys.stderr)
+		if collection.source == SQLITE:
+			print(f'Reading the database of {data_path}')
+
+		data = read_collected_chats(collection.collected_chats())
+		for column in STAT_COLUMNS:
+			data[column] = 0
+
+		channels, histories = read_channels(collection, data, progress)
+
+	columns = msgs_dataset_columns()
+	summary = DatasetSummary(
+		msgs_dataset=msgs_path, chats_xlsx=xlsx_path, source=collection.source,
+		build_record=build_path
+	)
+	appending = os.path.isfile(msgs_path)
+	if appending:
+		print(
+			f'> Note: {msgs_path} exists; this build appends its rows, so rows from '
+			'earlier builds stay and building again duplicates them.',
+			file=sys.stderr
+		)
 
 	# Append rows to a copy of msgs_dataset.csv, then replace it
 	tmp_msgs = temp_path_for(msgs_path)
 	tmp_xlsx = temp_path_for(xlsx_path)
+	tmp_build = temp_path_for(build_path)
 	try:
-		header = not os.path.isfile(msgs_path)
+		header = not appending
 		if not header:
 			shutil.copyfile(msgs_path, tmp_msgs)
 
@@ -384,10 +398,21 @@ def build_dataset(data_path, *, progress=True):
 
 		data[chats_dataset_columns()].to_excel(tmp_xlsx, index=False)
 
+		record = build_record('build-dataset', collection, utc_now(), histories=histories, outputs={
+			MSGS_DATASET: {'rows_appended': summary.rows_written, 'appended_to_existing': appending},
+			os.path.basename(xlsx_path): {'rows': len(data)}
+		})
+		with open(tmp_build, mode='w', encoding='utf-8') as writer:
+			json.dump(record, writer, ensure_ascii=False, indent=1)
+			writer.write('\n')
+
 		os.replace(tmp_msgs, msgs_path)
 		os.replace(tmp_xlsx, xlsx_path)
+		os.replace(tmp_build, build_path)
 	finally:
 		discard(tmp_msgs)
 		discard(tmp_xlsx)
+		discard(tmp_build)
 
 	return summary
+
