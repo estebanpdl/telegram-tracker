@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from telegram_tracker.credentials.lease import Lease, LeaseError
 from telegram_tracker.credentials.protection import ProtectionError, check, reject_link
 from telegram_tracker.credentials.store import StoreError, replace_privately
+from telegram_tracker.local_errors import file_reason
 
 
 IDENTITY_NAME = 'profile.json'
@@ -92,7 +93,7 @@ def read_identity(root, name):
 		with open(path, encoding='utf-8') as reader:
 			data = json.load(reader)
 	except (OSError, UnicodeDecodeError, ValueError) as exc:
-		raise IdentityError(f'{path} cannot be read ({type(exc).__name__})') from None
+		raise IdentityError(f'{path} cannot be read ({file_reason(exc)})') from None
 
 	if not isinstance(data, dict) or set(data) != set(KEYS):
 		raise IdentityError(f'{path} must hold exactly: {", ".join(KEYS)}')

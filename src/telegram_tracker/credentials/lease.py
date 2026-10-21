@@ -8,10 +8,14 @@ other process still uses the guarded file.
 '''
 
 # import modules
+import errno
 import json
 import os
 
 from datetime import datetime, timezone
+
+# import local submodules
+from telegram_tracker.local_errors import file_reason
 
 
 LEASE_SUFFIX = '.lock'
@@ -74,10 +78,9 @@ class Lease:
 				f'{self.path} and try again.'
 			) from None
 		except OSError as exc:
-			raise LeaseError(
-				f'cannot lock {self.what.lower()} ({self.path}: '
-				f'{exc.strerror or type(exc).__name__})'
-			) from None
+			# creating the lock file: a missing path means a missing folder
+			reason = 'its folder does not exist' if exc.errno == errno.ENOENT else file_reason(exc)
+			raise LeaseError(f'cannot lock {self.what.lower()} ({self.path}: {reason})') from None
 		info = {
 			'pid': os.getpid(),
 			'started_at': datetime.now(timezone.utc).isoformat(timespec='seconds')

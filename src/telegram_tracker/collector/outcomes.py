@@ -53,7 +53,9 @@ class CollectionSummary:
 	'''
 	Outcome of one run. `failed` holds (target, reason) pairs; `cancelled`
 	lists targets not finished when the run stopped; `collected_in_full`
-	lists --update targets that had no saved history. `profile` is the
+	lists --update targets that had no saved history; `saved_messages`
+	holds (target, history message count, messages added by --update or
+	None) for each succeeded target with messages. `profile` is the
 	run's RunProfile (None when the caller gave none); `takeovers` holds
 	(target, previous profile name or None) for histories this run
 	replaced although they belonged to another profile.
@@ -65,6 +67,7 @@ class CollectionSummary:
 	cancelled: list = field(default_factory=list)
 	duplicates: list = field(default_factory=list)
 	collected_in_full: list = field(default_factory=list)
+	saved_messages: list = field(default_factory=list)
 	stale_histories: list = field(default_factory=list)
 	stop_reason: str | None = None
 	concurrency: int = 1

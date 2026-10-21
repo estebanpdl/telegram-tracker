@@ -18,6 +18,8 @@ in a file given with --config count as missing values.
 
 Files are read only when the environment leaves a field open. Results
 carry a source label per field; values never appear in messages.
+`auth status` alone also looks at a ./config/config.ini that saved
+credentials shadow (shadowed_config), without changing the selection.
 '''
 
 # import modules
@@ -28,6 +30,7 @@ from dataclasses import dataclass, field as dataclass_field
 
 # import local submodules
 from telegram_tracker.credentials.store import FIELDS, StoreError, check_field, read_store
+from telegram_tracker.local_errors import file_reason
 
 
 ENV_VARS = {
@@ -120,7 +123,7 @@ def read_ini(path, label):
 		with open(path, encoding='utf-8') as reader:
 			parser.read_file(reader)
 	except (OSError, UnicodeDecodeError, configparser.Error) as exc:
-		raise CredentialError(f'{label} cannot be read ({type(exc).__name__})') from None
+		raise CredentialError(f'{label} cannot be read ({file_reason(exc)})') from None
 	if not parser.has_section(INI_SECTION):
 		raise CredentialError(f'{label} has no [{INI_SECTION}] section')
 	section = parser[INI_SECTION]
@@ -189,6 +192,46 @@ def resolve(
 		else:
 			_take_file(result, values, LEGACY_CONFIG)
 	return result
+
+
+def shadowed_config(resolution, *, cwd=None, ini_reader=None, isfile=None):
+	'''
+	For `auth status` of the default profile: when the saved credentials
+	were the file source and ./config/config.ini is present too, a note
+	saying that the INI file is not used, with the fields it sets (and
+	which of them are invalid) or why it cannot be read. None when the
+	saved credentials were not used, or the INI file is absent or holds
+	only placeholders. Reads nothing in the first case and changes no
+	selection; names fields and sources, never values.
+	'''
+	if resolution.file_source != STORE:
+		return None
+	cwd = cwd or os.getcwd()
+	isfile = isfile or os.path.isfile
+	ini_reader = ini_reader or read_ini
+	legacy = os.path.join(cwd, LEGACY_INI)
+	if not isfile(legacy):
+		return None
+
+	unused = f'not used, because {STORE} comes first'
+	try:
+		values = ini_reader(legacy, LEGACY_CONFIG)
+	except CredentialError as exc:
+		return f'{exc}; {unused}'
+	fields = [f for f in FIELDS if not is_placeholder(f, values.get(f))]
+	if not fields:
+		return None
+	invalid = []
+	for f in fields:
+		try:
+			check_field(f, values[f], LEGACY_CONFIG)
+		except ValueError:
+			invalid.append(f)
+	return (
+		f'{LEGACY_CONFIG} also sets {", ".join(fields)}'
+		+ (f' (invalid: {", ".join(invalid)})' if invalid else '')
+		+ f' but is {unused}. Pass --config {LEGACY_CONFIG} to use it instead.'
+	)
 
 
 def _take_file(result, values, label):

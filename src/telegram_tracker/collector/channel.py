@@ -145,10 +145,13 @@ async def collect_channel(
 		result.history, result.history_mode = data, 'replaced'
 	elif saved is None:
 		result.history, result.history_mode = data, 'created'
+		result.new_messages = len(data['messages'])
 	else:
 		result.history, result.history_mode, result.messages = histories.merge(target, saved, data)
 		if result.history_mode == 'merged':
 			result.fetched = data
+		# merging keeps every saved message, so the count only grows
+		result.new_messages = result.messages - saved.messages
 		return result
 
 	result.messages = len(data['messages'])

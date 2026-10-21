@@ -17,6 +17,7 @@ application home.
 import functools
 import io
 import os
+import sqlite3
 import sys
 import time
 import warnings
@@ -32,6 +33,7 @@ from telegram_tracker.credentials import home as homes
 from telegram_tracker.credentials import sources
 from telegram_tracker.credentials.lease import Lease, LeaseError
 from telegram_tracker.credentials.protection import ProtectionError
+from telegram_tracker.local_errors import client_failure
 from telegram_tracker.utils import data_folder_from
 
 
@@ -303,6 +305,10 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 	except (OutputLocked, StorageError, LeaseError, accounts.AccountError) as exc:
 		print(f'> {exc}', file=sys.stderr)
 		return 1
+	except (OSError, sqlite3.Error) as exc:
+		# from the client or its session file; the run's own files raise StorageError
+		print(f'> {client_failure(exc, session.path)}', file=sys.stderr)
+		return 1
 	except KeyboardInterrupt:
 		print('> Interrupted.', file=sys.stderr)
 		return 130
@@ -333,6 +339,7 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 			'channel(s) are from an earlier run: '
 			+ ', '.join(summary.stale_histories) + '\n'
 		)
+	print_messages(summary.saved_messages)
 
 	if summary.stop_reason:
 		print(f'> Stopped: {summary.stop_reason}', file=sys.stderr)
@@ -402,6 +409,31 @@ def print_summary(summary, given):
 				f'>   {name:<11} {stats["requests"]} / {stats["retries"]} / '
 				f'{stats["flood_waits"]} / {stats["flood_wait_seconds"]}'
 			)
+	print('')
+
+
+def print_messages(saved_messages):
+	'''
+	Messages per saved history (stdout), after the other summary lines:
+	the history's count, and for --update the messages this run added.
+	Nothing when no history was saved.
+	'''
+	if not saved_messages:
+		return
+	total = sum(count for _, count, _ in saved_messages)
+	channels = len(saved_messages)
+	if all(new is not None for _, _, new in saved_messages):
+		added = sum(new for _, _, new in saved_messages)
+		print(
+			f'> Messages saved: {added} new; the saved histories of {channels} '
+			f'channel(s) now hold {total}'
+		)
+		for target, count, new in saved_messages:
+			print(f'>   {target}: {new} new, {count} in total')
+	else:
+		print(f'> Messages saved: {total} in {channels} channel(s)')
+		for target, count, _ in saved_messages:
+			print(f'>   {target}: {count}')
 	print('')
 
 
