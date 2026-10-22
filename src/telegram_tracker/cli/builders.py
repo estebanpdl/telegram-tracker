@@ -11,7 +11,7 @@ import time
 import warnings
 
 # import local submodules
-from telegram_tracker.cli.parsers import BUILD_DATASET, DEFAULT_OUTPUT, build_builder_parser
+from telegram_tracker.cli.parsers import AUTO, BUILD_DATASET, DEFAULT_OUTPUT, build_builder_parser
 from telegram_tracker.utils import DataInputError, data_folder_from
 
 
@@ -20,6 +20,7 @@ def run_builder(command, args):
 	Run build-dataset or build-network on --data-path.
 	'''
 	data_path = data_folder_from(args['data_path'], DEFAULT_OUTPUT)
+	source = args.get('source') or AUTO
 
 	print(f'\nInit program at {time.ctime()}\n\n')
 	try:
@@ -28,7 +29,7 @@ def run_builder(command, args):
 			if command == BUILD_DATASET:
 				from telegram_tracker.datasets import build_dataset
 
-				summary = build_dataset(data_path)
+				summary = build_dataset(data_path, source=source)
 				outcome = (
 					f'> Wrote {summary.rows_written} rows to {summary.msgs_dataset} '
 					f'and {summary.chats_xlsx}'
@@ -36,7 +37,7 @@ def run_builder(command, args):
 			else:
 				from telegram_tracker.network import build_network
 
-				summary = build_network(data_path)
+				summary = build_network(data_path, source=source)
 				outcome = (
 					f'> Wrote {summary.nodes} nodes and {summary.edges} edges to '
 					f'{summary.gexf} and {summary.png}'

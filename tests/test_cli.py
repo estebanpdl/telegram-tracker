@@ -284,12 +284,15 @@ class DispatchEquivalenceTests(CliTestCase):
 		for module, name, command, prog in (
 				(datasets, 'build_dataset', 'build-dataset', 'build-datasets.py'),
 				(network, 'build_network', 'build-network', 'channels-to-network.py')):
-			def record(data_path, name=name):
-				seen.append((name, data_path))
+			def record(data_path, name=name, source=None):
+				seen.append((name, data_path, source))
 				raise cli.builders.DataInputError('recorded')
 
 			with mock.patch.object(module, name, record):
-				for argv in ([], ['--data-path', 'some/dir/'], ['-d', 'some/dir'], ['--data-path=some/dir']):
+				for argv, source in (
+						([], 'auto'), (['--data-path', 'some/dir/'], 'auto'), (['-d', 'some/dir'], 'auto'),
+						(['--data-path=some/dir'], 'auto'), (['-d', 'some/dir', '--source', 'sqlite'], 'sqlite'),
+						(['-d', 'some/dir', '--source=files'], 'files')):
 					with self.subTest(command=command, argv=argv):
 						del seen[:]
 						self.run_cli([command, *argv])
@@ -297,6 +300,7 @@ class DispatchEquivalenceTests(CliTestCase):
 						self.assertEqual(len(seen), 2)
 						self.assertEqual(seen[0], seen[1])
 						self.assertEqual(seen[0][1], 'some/dir' if argv else './output/data')
+						self.assertEqual(seen[0][2], source)
 
 
 class CanonicalRunTests(CliTestCase):

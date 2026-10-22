@@ -18,10 +18,10 @@
 Telegram Tracker collects public Telegram channels through Telegram's API and turns the collected files into a messages dataset and a channel network.
 
 - `collect` saves each channel's profile metadata and posts as JSON, plus aggregate files about the chats found in that data (e.g., forward sources). You can collect one channel or a list of channels from a text file. The same data can also go to an SQLite database, instead of the files or beside them (see [Storage modes](#storage-modes---storage)).
-- `build-dataset` reads the collected files and writes `msgs_dataset.csv` and `collected_chats.xlsx`.
-- `build-network` reads `collected_chats.csv` and writes a directed graph, `Graph.gexf`, and a preview image, `network.png`.
+- `build-dataset` reads the collected data (the files, or the database) and writes `msgs_dataset.csv` and `collected_chats.xlsx`.
+- `build-network` reads the collected chats and writes a directed graph, `Graph.gexf`, and a preview image, `network.png`.
 
-The two builders run offline: they read local files only and never connect to Telegram.
+The two builders run offline: they read local data only and never connect to Telegram.
 
 Contents:
 
@@ -235,8 +235,8 @@ Rules and failure cases:
 ```
 python main.py collect --telegram-channel NAME [options]
 python main.py collect --batch-file FILE [options]
-python main.py build-dataset [--data-path DIR]
-python main.py build-network [--data-path DIR]
+python main.py build-dataset [--data-path DIR] [--source auto|files|sqlite]
+python main.py build-network [--data-path DIR] [--source auto|files|sqlite]
 python main.py auth login | status | logout | clear-credentials | profiles
 ```
 
@@ -444,8 +444,10 @@ output/data/                          (or the folder given with --output)
 ├── _exceptions-users-not-found.txt      discovered chats whose metadata could not be retrieved (when any)
 ├── msgs_dataset.csv                  written by build-dataset
 ├── collected_chats.xlsx              written by build-dataset
+├── dataset-build.json                written by build-dataset: what it read
 ├── Graph.gexf                        written by build-network
-└── network.png                       written by build-network
+├── network.png                       written by build-network
+└── network-build.json                written by build-network: what it read
 ```
 
 What happens when you collect into a folder that already holds data:
@@ -481,8 +483,8 @@ Several profiles can collect into the same `--output` folder, one run at a time 
 | Mode | Writes | Builders |
 |---|---|---|
 | `files` | The files above. The default for a new folder | Run |
-| `sqlite` | Only the database `<output>/telegram-tracker.sqlite3`, plus `collection-status.json` and `collection-storage.json` | Refuse: they read the files, and builders that read the database are not available yet |
-| `both` | The same data in the files (exactly as `files` writes them) and in the database | Run on the files |
+| `sqlite` | Only the database `<output>/telegram-tracker.sqlite3`, plus `collection-status.json` and `collection-storage.json` | Run on the database |
+| `both` | The same data in the files (exactly as `files` writes them) and in the database | Run on the files; `--source sqlite` reads the database |
 
 The database holds the same fields as the files, plus a record of every run; see [docs/sqlite-schema.md](docs/sqlite-schema.md) for its tables and example queries. Its path is always `telegram-tracker.sqlite3` inside the `--output` folder.
 
@@ -498,7 +500,7 @@ python main.py collect --batch-file ./channels.txt --output ./output/project-b -
 
 **Checks before connecting.** For a `sqlite` or `both` folder, the database must exist, be a Telegram Tracker database of the current schema version, belong to the folder (the dataset ID in `collection-storage.json` and the folder it was created for), and have no unpublished files (see below). Otherwise the run exits 1 before connecting and leaves the folder untouched. A folder that was moved or copied is refused for this reason; collect into a fresh `--output`. The selected session file is never opened as the database, and any other SQLite file at that path is refused untouched.
 
-**Locks.** Besides `.collection.lock`, a database run holds `telegram-tracker.sqlite3.lock`, taken after the folder lock (after login) and removed when the run ends. An existing one is reported before connecting with its own message (`The database ... is in use by another collection or upgrade (pid ..., started ...)`). A lock left by a killed run is not removed automatically: make sure no collection is running, then delete it. The checks above run again once both locks are held, before anything is written. A run that finds an earlier run still recorded as `running` in the database (its process ended without finishing) records that run as `interrupted`, with a stop reason starting with `stale:`, and says so on stderr.
+**Locks.** Besides `.collection.lock`, a database run holds `telegram-tracker.sqlite3.lock`, taken after the folder lock (after login) and removed when the run ends. An existing one is reported before connecting with its own message (`The database ... is in use by another collection or upgrade, or a build reading it (pid ..., started ...)`); a builder reading the database holds it too. A lock left by a killed run is not removed automatically: make sure no collection is running, then delete it. The checks above run again once both locks are held, before anything is written. A run that finds an earlier run still recorded as `running` in the database (its process ended without finishing) records that run as `interrupted`, with a stop reason starting with `stale:`, and says so on stderr.
 
 **How `both` keeps the two copies detectable.** For each channel, the files are first written to temporary files; then the database stores the channel and marks its files `pending`; then the temporary files replace the channel's files; then the mark becomes `written`. The aggregate files follow the same order after the last channel. If channel staging or its database transaction fails, that channel's previous payloads stay in both copies; run status can still record the failure. A failure while replacing the files stops the run (exit 1), records that channel as failed in the database, and leaves the `pending` mark. On Windows, a replace that another program briefly refuses (an antivirus scanner, a file indexer) is retried up to 5 attempts, with 0.75 s of total configured retry delays per file, in `both` mode only; filesystem calls take additional time.
 
@@ -585,7 +587,7 @@ Each collection writes `collection-status.json` in the output folder. It records
 | `partial` | Finished; some targets failed | Run, with a note naming the failed targets |
 | `interrupted` | Stopped early (Ctrl+C, a flood-wait or session stop, a storage error, or another fatal error); completed channels are saved | Refuse |
 
-`build-dataset` also notes when the last collection used a history window or `--update`. Folders without a status file (from earlier versions) are accepted.
+`build-dataset` also notes when the last collection used a history window or `--update`. Folders without a status file (from earlier versions) are accepted when the builders read files; reading a database needs one.
 
 **One collection per folder.** A run acquires `.collection.lock` in the output folder after login and removes it when it ends. An existing lock is checked before connecting and causes exit 1 with `<folder> is in use by another collection (pid ..., started ...)`. If two runs pass that check before either acquires the lock, both can reach login; only one can hold the lock and write collection output at a time. The lock protects the folder; the session lease and the account lease (see [Account profiles](#account-profiles)) keep a second collection off the same session or Telegram account, even into another folder.
 
@@ -613,16 +615,53 @@ python main.py build-dataset --data-path ./output/data
 python main.py build-network --data-path ./output/data
 ```
 
-Without `--data-path` (or `-d`), both use `./output/data`. They read local files only, need no credentials or session, and can run without a network connection.
+Without `--data-path` (or `-d`), both use `./output/data`. They read local data only, need no credentials or session, and can run without a network connection.
 
-**`build-dataset`** reads every `<channel>_messages.json` (in sorted path order) and `collected_chats.csv`, and writes:
+**What they read (`--source`).** Each builder reads one source, never a mix of the two:
 
-- `msgs_dataset.csv`: one row per post. Rows are **appended** to an existing file, so building twice, or again after `--update`, duplicates rows. To get each post once, delete or move `msgs_dataset.csv` before building, or build from a fresh collection folder.
+| Folder | `--source auto` (default) | `--source files` | `--source sqlite` |
+|---|---|---|---|
+| `files` (or an earlier version's folder) | the files | the files | refused (exit 1) |
+| `sqlite` | the database | refused (exit 1) | the database |
+| `both` | the files | the files | the database |
+
+A source that cannot be read is refused; the builders never fall back to the other copy. A `sqlite` folder builds the same way as a files folder:
+
+```
+python main.py collect --batch-file ./channels.txt --output ./output/project-s --storage sqlite
+python main.py build-dataset --data-path ./output/project-s
+python main.py build-network --data-path ./output/project-s
+```
+
+**`build-dataset`** reads every saved message history and the collected chats, and writes:
+
+- `msgs_dataset.csv`: one row per post. Rows are **appended** to an existing file, so building twice, or again after `--update`, duplicates rows; the build says so on stderr when the file already exists. To get each post once, delete or move `msgs_dataset.csv` before building, or build from a fresh collection folder.
 - `collected_chats.xlsx`: replaced on every build.
+- `dataset-build.json`: replaced on every build; see below.
 
-**`build-network`** reads `collected_chats.csv` (`username`, `counter`, `source`) and writes `Graph.gexf`, a directed, unweighted graph from each source channel to the chats found in its data (e.g., forwards), and `network.png`, a preview with Louvain communities. Both are replaced on every build. Open the GEXF file in tools such as [Gephi](https://gephi.org/).
+From the files, the histories are every `<channel>_messages.json` in sorted path order, and the collected chats are `collected_chats.csv`. From the database, the histories are the current stored ones, each under the collection target name it was last saved with, in the order the files would sort, and newest message first. The collected chats are rebuilt from the stored runs, oldest first, exactly as `collected_chats.csv` appends them: earlier rows as written, each run's rows with that run's counts, and rows repeated across runs kept. The record of each run (run tables) never adds dataset rows.
 
-Both builders refuse a folder whose `collection-status.json` says `running` or `interrupted` (exit 1, with the recovery steps above), and a folder collected with `--storage sqlite`, which has no file outputs (exit 1). A `both` folder is built from its files; the builders never open the database. Missing or malformed input files stop the build with exit 1 before anything is written. With no messages and no existing `msgs_dataset.csv`, the dataset has a header only; an existing dataset keeps its earlier rows. With no edges, the graph is empty and the image blank.
+**`build-network`** reads the collected chats (`username`, `counter`, `source`) and writes `Graph.gexf`, a directed, unweighted graph from each source channel to the chats found in its data (e.g., forwards), and `network.png`, a preview with Louvain communities, plus `network-build.json`. All are replaced on every build. Open the GEXF file in tools such as [Gephi](https://gephi.org/).
+
+**Build records.** `dataset-build.json` and `network-build.json` record what a build read: the source (`files` or `sqlite`), the folder's storage mode, the database's dataset ID and schema version (for the database), the last run (state, mode, times, profile; the run ID only from the database), and the output counts. `dataset-build.json` also lists each history read: its channel name and ID, message count, and provenance: the profile name and ID that last wrote it, how (`replaced`, `created`, or `merged`), and whether that was a takeover. From the files, provenance comes from `<channel>_provenance.json` (unknown, `null`, without one); from the database, from the stored history, with the ID of the run that last changed it. Collected-chat rows carry no profile in either source. Profile names and IDs are local labels, not verified accounts. The records hold no message text or credentials.
+
+**Same data, same outputs.** A `both` folder gives the same `msgs_dataset.csv`, workbook and graph from either source, on a first build and on repeated builds. Two differences come from what each copy keeps:
+
+- **Renamed channels.** A channel collected under an old and then a new username has a messages file under each name, and the files builder reads both (the old one is no longer updated). The database keeps one current history per channel, under the newest name. The collected chats and the network are the same; the dataset from the database has no rows, and the workbook no statistics, for the old name.
+- **Nested dates in the workbook.** A date inside an object column of the collected chats (for example `until_date` in `default_banned_rights`) reads `datetime.datetime(2038, 1, 19, ...)` from the files and `'2038-01-19 03:14:07+00:00'` from the database, which stores JSON text. Top-level columns such as `date` read the same.
+
+**Checks before a build.** Both builders refuse a folder whose `collection-status.json` says `running` or `interrupted` (exit 1, with the recovery steps above). Reading a database also needs:
+
+- `collection-status.json` to exist: a database folder without one is refused, not taken as finished;
+- the database to exist and be a Telegram Tracker database of the current schema version, the one named in `collection-storage.json` (dataset ID); the builders never create, repair or upgrade it;
+- its last run to be the one `collection-status.json` describes, and finished (`complete` or `partial`);
+- no `pending` mark (see [Recovering a blocked folder](#storage-modes---storage)); a `both` folder with one still builds from its files.
+
+A folder moved or copied after collection is read, with a note. While it reads, a builder holds `telegram-tracker.sqlite3.lock` and reads through a read-only connection in one read transaction, so it sees one consistent state; a collection started meanwhile exits with `The database ... is in use by another collection or upgrade, or a build reading it`. The lock is removed before the outputs are written, and when a build fails. A lock left by a killed build is reported like a collection's: make sure no build or collection is running, then delete it.
+
+Missing or malformed inputs stop the build with exit 1 before anything is written. With no messages and no existing `msgs_dataset.csv`, the dataset has a header only; an existing dataset keeps its earlier rows. With no edges, the graph is empty and the image blank.
+
+**Memory.** The files builder holds one messages file at a time while reading and all dataset rows until it writes them; reading the database is the same, with messages fetched in batches of 500. The collected chats are held in memory whole, and rebuilding them from the database reads the rows kept so far again for each later run.
 
 ## Known limits
 
@@ -632,7 +671,7 @@ The behavior in this README is validated by the offline test suite, with synthet
 - **Ctrl+C.** Interruption is tested by cancelling the collection inside the process, not by sending a real Ctrl+C (SIGINT) to a running command.
 - **Database modes and profiles against Telegram.** `--storage sqlite` and `both`, and named profiles, are validated offline; this validation includes no collection from Telegram in those modes or profiles.
 - **Request rates.** The concurrency and request-interval defaults are project limits. The rates that Telegram accepts for an account were not measured.
-- **Builders.** `build-dataset` and `build-network` read the files only. A `sqlite` folder has nothing for them until builders that read the database exist.
+- **Builders on a database.** Read from the database, a renamed channel's old-name history is not built, and a date nested in an object column of the collected chats reads as stored text (see [Building the dataset and the network](#building-the-dataset-and-the-network)). Rebuilding the collected chats from a database rereads the rows kept so far for each later run, so builds of folders with many runs take longer.
 - **Dataset appends.** `build-dataset` appends to `msgs_dataset.csv`, so building twice, or again after `--update`, duplicates rows (see [Building the dataset and the network](#building-the-dataset-and-the-network)).
 
 ## Running the tests

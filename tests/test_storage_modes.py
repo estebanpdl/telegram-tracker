@@ -217,16 +217,31 @@ class BuilderTests(storage_modes_support.ModesCase):
 	def build(self, command, out):
 		return self.run_cli([command, '--data-path', out])
 
-	def test_builders_refuse_a_sqlite_folder(self):
-		self.collect(storage='sqlite')
+	def test_builders_read_a_sqlite_folder(self):
+		self.collect(targets=BATCH, storage='sqlite')
 		before = snapshot(self.out)
-		for command in ('build-dataset', 'build-network'):
+		for command, output in (('build-dataset', 'msgs_dataset.csv'), ('build-network', 'Graph.gexf')):
 			with self.subTest(command=command):
-				code, _, err = self.build(command, self.out)
-				self.assertEqual(code, 1)
-				self.assertIn('was collected with --storage sqlite', err)
-				self.assertIn('collect with --storage both', err)
-		self.assertEqual(snapshot(self.out), before)
+				code, out, err = self.build(command, self.out)
+				self.assertEqual(code, 0, err)
+				self.assertIn('Reading the database of', out)
+				self.assertTrue(os.path.isfile(os.path.join(self.out, output)))
+		# the inputs are unchanged and no lease is left
+		after = snapshot(self.out)
+		self.assertEqual({k: v for k, v in after.items() if k in before}, before)
+		self.assertNoLocks()
+
+	def test_builders_refuse_a_source_the_folder_lacks(self):
+		self.collect(storage='sqlite')
+		code, _, err = self.run_cli(['build-dataset', '-d', self.out, '--source', 'files'])
+		self.assertEqual(code, 1)
+		self.assertIn('was collected with --storage sqlite', err)
+		self.assertIn('Use --source sqlite (or auto)', err)
+		files_out = os.path.join(self.tmp, 'files')
+		self.collect(storage='files', out=files_out)
+		code, _, err = self.run_cli(['build-network', '-d', files_out, '--source', 'sqlite'])
+		self.assertEqual(code, 1)
+		self.assertIn('has no database', err)
 
 	def test_builders_read_a_both_folder(self):
 		self.collect(targets=BATCH, storage='both')
@@ -258,7 +273,8 @@ class HelpTests(storage_modes_support.ModesCase):
 		# argparse may break a line after a hyphen
 		text = re.sub(r'(\w)- (\w)', r'\1-\2', ' '.join(out.split()))
 		for phrase in ('--storage {files,sqlite,both}', 'keeps the mode it was first collected with',
-				'<output>/telegram-tracker.sqlite3', 'build-dataset and build-network have nothing to read',
+				'<output>/telegram-tracker.sqlite3', 'build-dataset and build-network read it',
+				'the builders read the files unless given --source sqlite',
 				'need a new or empty --output'):
 			self.assertIn(phrase, text)
 		self.assertNotIn('--database', text)
@@ -267,7 +283,9 @@ class HelpTests(storage_modes_support.ModesCase):
 		for command in ('build-dataset', 'build-network'):
 			code, out, _ = self.run_cli([command, '--help'])
 			self.assertEqual(code, 0)
-			self.assertIn('--storage sqlite has none', ' '.join(out.split()))
+			text = ' '.join(out.split())
+			self.assertIn('the database of a sqlite folder (--source chooses)', text)
+			self.assertIn('--source {auto,files,sqlite}', text)
 
 	def test_legacy_help_is_unchanged(self):
 		code, out, _ = self.run_cli(['--telegram-channel', 'x', '--help'])

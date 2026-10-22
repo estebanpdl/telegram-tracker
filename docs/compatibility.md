@@ -41,8 +41,8 @@ Legacy forms reach the same handlers:
 |---|---|---|---|
 | `python main.py --telegram-channel NAME` | One target; metadata-only, `--output/-o DIR` (default `./output/data`), `--min-id N` | Channel JSON, messages JSON unless metadata-only, `chats.txt`, `collected_chats.csv`, `counter.csv`, `collection-status.json`; exception logs when needed | `python main.py collect --telegram-channel NAME` |
 | `python main.py --batch-file FILE` | One target per line; same options | Same, one folder per collected channel | `python main.py collect --batch-file FILE` |
-| `python build-datasets.py [--data-path/-d DIR]` | `<DIR>/**/*_messages.json`, `<DIR>/collected_chats.csv` | `msgs_dataset.csv` (append), `collected_chats.xlsx` (replace) | `python main.py build-dataset --data-path DIR` |
-| `python channels-to-network.py [--data-path/-d DIR]` | `<DIR>/collected_chats.csv` (`username`, `counter`, `source`) | `Graph.gexf`, `network.png` | `python main.py build-network --data-path DIR` |
+| `python build-datasets.py [--data-path/-d DIR] [--source S]` | `<DIR>/**/*_messages.json`, `<DIR>/collected_chats.csv`, or the database | `msgs_dataset.csv` (append), `collected_chats.xlsx` (replace), `dataset-build.json` | `python main.py build-dataset --data-path DIR` |
+| `python channels-to-network.py [--data-path/-d DIR] [--source S]` | `<DIR>/collected_chats.csv` (`username`, `counter`, `source`), or the database | `Graph.gexf`, `network.png`, `network-build.json` | `python main.py build-network --data-path DIR` |
 
 - A first token that is an option other than `-h`/`--help` selects the legacy
   collection parser. It accepts only selectors, metadata-only, output, and `--min-id`.
@@ -267,8 +267,7 @@ agree) selects the writer through `storage.destination`:
 - The sidecar gains, for database modes only, `storage`, `database` (file, schema
   version, dataset UUID, run UUID) and, for `both`, `publication` (pending targets,
   aggregate state). Its format stays 1.
-- Builders read `collection-storage.json` only: a `sqlite` folder is refused, `both`
-  passes to the usual sidecar gates. No builder opens the database.
+- Builders choose their source from `collection-storage.json` (see Offline builders).
 
 ### Scheduling and request policy
 
@@ -322,13 +321,34 @@ by default.
 
 ## Offline builders
 
-`datasets.build_dataset` and `network.build_network` read local files without
-Telethon, credentials, or sessions. Plotting loads only when rendering. Builders
-reject running/interrupted status, note partial runs, and accept older folders
-with no sidecar. They refuse a `--storage sqlite` folder (from its manifest, without
-opening the database).
+`datasets.build_dataset` and `network.build_network` read a collection through
+`telegram_tracker.reader`, without Telethon, credentials, or sessions. Plotting
+loads only when rendering. `--source auto` reads the files of a files or both
+folder and the database of a sqlite folder; `files`/`sqlite` choose explicitly and
+a source the folder lacks is refused. The two copies are never combined and a
+failed source never falls back to the other. Builders reject running/interrupted
+status and note partial runs. Reading files accepts older folders with no sidecar
+and loads no database code.
 
-- `msgs_dataset.csv` appends: rebuilding duplicates rows, including after `--update`.
+- Database reads hold the database lease, use a read-only connection and one read
+  transaction, and refuse: a missing sidecar, a missing/older/newer/foreign/damaged
+  database (never created, repaired or migrated), another dataset UUID, a last run
+  that is not the sidecar's or not complete/partial, and any `destination_pending`
+  row. A moved folder is read with a note. Messages are fetched in batches of 500.
+- Histories from the database are the current `histories` rows, named by the run
+  target input that last wrote each one and ordered by the files builder's path key;
+  messages newest first. `collected_chats` is rebuilt by replaying each run's
+  `collected_chat_rows` with its `run_counters` through
+  `storage.aggregates.collected_chats_update`, the function the file writer uses,
+  so equivalent folders give the same text. Known differences: a renamed channel's
+  old-name file has no database history; datetimes or bytes nested in object columns
+  read as stored JSON text.
+- `dataset-build.json` / `network-build.json` (format 1) record the source, storage
+  mode, database identity, last run, output counts and, for datasets, each history's
+  channel, ID, message count and profile/run provenance (null = unknown).
+
+- `msgs_dataset.csv` appends: rebuilding duplicates rows, including after `--update`;
+  a build appending to an existing file says so on stderr.
   `collected_chats.xlsx` is replaced. Message files use sorted paths.
 - The graph is directed and unweighted. Each username's first row supplies its
   sources; duplicate edges collapse. Source order keeps first occurrence.

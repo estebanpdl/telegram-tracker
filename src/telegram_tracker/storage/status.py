@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 # import local submodules
 from telegram_tracker.storage.files import write_json_pretty
-from telegram_tracker.storage.manifest import DATABASE_FILE, SQLITE, ManifestError, recorded_storage
+from telegram_tracker.storage.manifest import ManifestError, recorded_storage
 from telegram_tracker.storage.records import INTERRUPTED, RUNNING, STATUS_FILE, STATUS_FORMAT
 from telegram_tracker.utils import DataInputError
 
@@ -96,31 +96,40 @@ def read_status(data_path):
 
 def check_collection_status(data_path, *, messages=True):
 	'''
-	Builder gate. Raises DataInputError when the last collection into
-	`data_path` is running or was interrupted; returns notes (strings)
-	for a finalized partial run and, when `messages`, for a run whose
-	message files hold a subset (history window or --update). Folders
-	without a sidecar (earlier versions) pass with no notes. A folder
-	collected with --storage sqlite has no file outputs and is refused
-	(its storage manifest says so; the database itself is not opened).
+	Builder gate for the file outputs; see collection_status. Returns
+	the notes.
+	'''
+	return collection_status(data_path, messages=messages)[1]
+
+
+def collection_status(data_path, *, messages=True, required=False, histories='message files'):
+	'''
+	Builder gate. Raises DataInputError when the folder's storage
+	manifest cannot be used, or the last collection into `data_path` is
+	running or was interrupted. Returns (sidecar or None, notes): notes
+	(strings) for a finalized partial run and, when `messages`, for a run
+	whose `histories` hold a subset (history window or --update).
+
+	Folders without a sidecar (earlier versions) pass with no notes,
+	unless `required`: a reader of the database never infers a finished
+	collection from a missing sidecar.
 	'''
 	try:
-		storage = recorded_storage(data_path)
+		recorded_storage(data_path)
 	except ManifestError as exc:
 		raise DataInputError(str(exc)) from None
-	if storage == SQLITE:
-		raise DataInputError(
-			f'{data_path} was collected with --storage sqlite: it holds only the database '
-			f'{DATABASE_FILE}, and the builders read the file outputs. Builders that read the '
-			'database are not available yet; collect with --storage both (into a fresh '
-			'--output) to get files as well.'
-		)
-
-	status = read_status(data_path)
-	if status is None:
-		return []
 
 	path = os.path.join(data_path, STATUS_FILE)
+	status = read_status(data_path)
+	if status is None:
+		if required:
+			raise DataInputError(
+				f'{path} is missing, so it is unknown whether the last collection into '
+				f'{data_path} finished. Keep this folder for inspection and rerun collection '
+				'into a fresh --output.'
+			)
+		return None, []
+
 	state = status['state']
 	recovery = (
 		'Keep this folder for inspection and rerun collection into a fresh '
@@ -156,7 +165,7 @@ def check_collection_status(data_path, *, messages=True):
 	if messages and parameters.get('mode') == 'window':
 		notes.append(
 			'the last collection used a history window '
-			f'({parameters.get("window_description")}); its message files hold '
+			f'({parameters.get("window_description")}); its {histories} hold '
 			'only that selection'
 		)
 	if messages and parameters.get('mode') == 'update':
@@ -164,4 +173,4 @@ def check_collection_status(data_path, *, messages=True):
 			'the last collection ran with --update; rebuilding appends its '
 			'merged histories to msgs_dataset.csv again, duplicating earlier rows'
 		)
-	return notes
+	return status, notes

@@ -163,8 +163,15 @@ def _has_no_rows(csv_path):
 	True when a CSV holds at most a header line.
 	'''
 	with open(csv_path, encoding='utf-8') as reader:
-		reader.readline()
-		return reader.readline() == ''
+		return holds_no_rows(reader)
+
+
+def holds_no_rows(reader):
+	'''
+	True when a CSV text stream holds at most a header line.
+	'''
+	reader.readline()
+	return reader.readline() == ''
 
 
 def empty_collected_chats_columns():
@@ -217,8 +224,6 @@ def aggregate_files(output_folder, agg):
 	contents a file builds on are read just before it is yielded. The
 	exception logs are appended separately (append_logs).
 	'''
-	import pandas as pd
-
 	chats_path = f'{output_folder}/chats.txt'
 	earlier = []
 	if os.path.isfile(chats_path):
@@ -235,20 +240,52 @@ def aggregate_files(output_folder, agg):
 
 	csv_path = f'{output_folder}/collected_chats.csv'
 	has_rows = os.path.isfile(csv_path) and not _has_no_rows(csv_path)
-	if agg.metadata:
-		df = pd.DataFrame(agg.metadata).merge(
+	df = collected_chats_update(
+		agg.metadata, counter_df, has_rows, lambda: earlier_collected_chats(csv_path)
+	)
+	if df is not None:
+		yield (csv_path, lambda tmp: df.to_csv(tmp, index=False, encoding='utf-8'))
+
+
+def earlier_collected_chats(source):
+	'''
+	The rows of an existing collected_chats.csv (a path or a text
+	buffer) as text, exactly as written.
+	'''
+	import pandas as pd
+
+	return pd.read_csv(source, encoding='utf-8', dtype=str, keep_default_na=False)
+
+
+def collected_chats_update(metadata, counter_df, has_rows, read_earlier):
+	'''
+	The collected_chats.csv content after one run, as a DataFrame to
+	write, or None when the file stays as it is.
+
+	metadata -> the run's chat rows (Aggregates.metadata)
+	counter_df -> the run's counter.csv frame (counter_frame)
+	has_rows -> whether the existing file holds rows
+	read_earlier -> returns those rows (earlier_collected_chats); called
+		only when they are kept
+
+	Earlier rows stay as text; this run's rows are merged with this
+	run's counts. A run without rows writes a header-only file when there
+	are no earlier rows. The database reader replays stored runs through
+	this function, so both sources give the same file.
+	'''
+	import pandas as pd
+
+	if metadata:
+		df = pd.DataFrame(metadata).merge(
 			counter_df.drop(columns='username'), how='left', on='id'
 		)
 		if has_rows:
 			# text as written; this run's counts never touch earlier rows
-			earlier_df = pd.read_csv(
-				csv_path, encoding='utf-8', dtype=str, keep_default_na=False
-			)
-			df = pd.concat([earlier_df, df], ignore_index=True)
-		yield (csv_path, lambda tmp: df.to_csv(tmp, index=False, encoding='utf-8'))
-	elif not has_rows:
-		empty = pd.DataFrame(columns=empty_collected_chats_columns())
-		yield (csv_path, lambda tmp: empty.to_csv(tmp, index=False, encoding='utf-8'))
+			df = pd.concat([read_earlier(), df], ignore_index=True)
+		return df
+	if not has_rows:
+		return pd.DataFrame(columns=empty_collected_chats_columns())
+	return None
 
 
 def append_logs(output_folder, agg):

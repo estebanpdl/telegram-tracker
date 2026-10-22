@@ -28,7 +28,7 @@ from telegram_tracker.storage.records import StorageError
 MANIFEST_FILE = 'collection-storage.json'
 MANIFEST_FORMAT = 1
 # the same name as sqlite.schema.DB_FILENAME (that module is not loaded
-# here: the builders read manifests and never load database code)
+# here: builders reading the files check manifests without loading database code)
 DATABASE_FILE = 'telegram-tracker.sqlite3'
 
 FILES = 'files'
