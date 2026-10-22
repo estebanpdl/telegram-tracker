@@ -371,8 +371,8 @@ class CollectTests(ProfileCase):
 			'import sys; sys.path.insert(0, sys.argv[1]); '
 			'from telegram_tracker.credentials import accounts; '
 			'lease = accounts.lease_for(sys.argv[2], int(sys.argv[3]), "bob"); '
-			'lease.__enter__(); print("held", flush=True); sys.stdin.readline(); '
-			'lease.__exit__(None, None, None)'
+			'import os; lease.__enter__(); print("held", os.getpid(), flush=True); '
+			'sys.stdin.readline(); lease.__exit__(None, None, None)'
 		)
 		src = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'src')
 		holder = subprocess.Popen(
@@ -380,10 +380,13 @@ class CollectTests(ProfileCase):
 			stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True
 		)
 		try:
-			self.assertEqual(holder.stdout.readline().strip(), 'held')
+			# the holding interpreter's own pid: Popen may have started a launcher
+			word, owner_pid = holder.stdout.readline().split()
+			self.assertEqual(word, 'held')
 			code, _, err = self.collect()
 			self.assertEqual(code, 1)
-			self.assertIn(f'pid {holder.pid}', err)
+			self.assertIn(f'pid {owner_pid},', err)
+			self.assertNotEqual(int(owner_pid), os.getpid())
 			self.assertEqual(self.channel_calls(), [])
 		finally:
 			holder.communicate('\n', timeout=60)
