@@ -106,7 +106,8 @@ class SessionFailureTests(unittest.TestCase):
 	@classmethod
 	def setUpClass(cls):
 		cls.tmp = tempfile.TemporaryDirectory()
-		cls.errors = sqlite_errors(os.path.realpath(cls.tmp.name))
+		cls.folder = os.path.realpath(cls.tmp.name)
+		cls.errors = sqlite_errors(cls.folder)
 
 	@classmethod
 	def tearDownClass(cls):
@@ -117,7 +118,9 @@ class SessionFailureTests(unittest.TestCase):
 		'busy': ('SQLITE_BUSY', 'is locked by another program'),
 		'readonly': ('SQLITE_READONLY', 'cannot be written'),
 		'cantopen': ('SQLITE_CANTOPEN', 'cannot be opened'),
-		'isdir': ('SQLITE_CANTOPEN_ISDIR', 'is a folder, not a session file'),
+		# the Windows VFS has a result code for a folder; the unix VFS does not
+		'isdir': ('SQLITE_CANTOPEN_ISDIR' if os.name == 'nt' else 'SQLITE_CANTOPEN',
+			'is a folder, not a session file'),
 		'notadb': ('SQLITE_NOTADB', 'is damaged or not a session file'),
 	}
 
@@ -127,10 +130,23 @@ class SessionFailureTests(unittest.TestCase):
 			with self.subTest(kind=kind):
 				exc = self.errors[kind]
 				self.assertEqual(exc.sqlite_errorname, code)
-				message = local_errors.session_failure(exc, 'S:/x.session')
-				self.assertIn('S:/x.session', message)
+				# the folder SQLite was asked to open, or a path that does not exist
+				path = self.folder if kind == 'isdir' else 'S:/x.session'
+				message = local_errors.session_failure(exc, path)
+				self.assertIn(path, message)
 				self.assertIn(phrase, message)
 				self.assertIn(f'(SQLite: {exc})', message)
+
+	def test_a_folder_is_named_whichever_code_reports_it(self):
+		for code in ('SQLITE_CANTOPEN', 'SQLITE_CANTOPEN_ISDIR'):
+			with self.subTest(code=code):
+				exc = sqlite3.OperationalError('unable to open database file')
+				exc.sqlite_errorname = code
+				self.assertIn('is a folder', local_errors.session_failure(exc, self.folder))
+		exc = sqlite3.OperationalError('unable to open database file')
+		exc.sqlite_errorname = 'SQLITE_CANTOPEN'
+		missing = os.path.join(self.folder, 'missing', 'x.session')
+		self.assertIn('cannot be opened', local_errors.session_failure(exc, missing))
 
 	def test_errors_without_a_result_code_use_their_message(self):
 		for text, phrase in (
