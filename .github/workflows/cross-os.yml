@@ -1,6 +1,6 @@
 # Offline tests on native Windows, Linux and macOS runners, an installed
-# wheel's entry points, and the suite on SQLite 3.31.1 (the minimum the
-# database schema supports). Nothing here uses secrets or credentials or
+# wheel's entry points, and the suite on SQLite 3.37.2 (the oldest
+# supported library). Nothing here uses secrets or credentials or
 # contacts Telegram: tests run with synthetic homes and fixtures, under
 # the suite's in-process offline guard and an operating-system block of
 # outbound connections that is checked before the tests run.
@@ -115,7 +115,7 @@ jobs:
           $OFFLINE_RUN python .github/scripts/entry_smoke.py "$OFFLINE_BASE/install-env" "$GITHUB_WORKSPACE" "$OFFLINE_BASE/smoke"
 
   sqlite-minimum:
-    name: ubuntu-24.04 / Python 3.14 / SQLite 3.31.1
+    name: ubuntu-24.04 / Python 3.14 / SQLite 3.37.2
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -135,29 +135,30 @@ jobs:
           mkdir -p "$base/home" "$base/tmp"
           echo "OFFLINE_BASE=$base" >> "$GITHUB_ENV"
 
-      # Ubuntu 20.04's libsqlite3-0 is SQLite 3.31.1 with JSON1. apt checks the
+      # Ubuntu 22.04's libsqlite3-0 is SQLite 3.37.2 with JSON1. Python 3.14's sqlite3
+      # module needs sqlite3_deserialize, which Ubuntu 20.04's 3.31.1 lacks. apt checks the
       # archive signature; the package is unpacked into a private folder, and
       # nothing is installed on the runner.
-      - name: Fetch SQLite 3.31.1 from the Ubuntu 20.04 archive
+      - name: Fetch SQLite 3.37.2 from the Ubuntu 22.04 archive
         run: |
-          apt_dir="$RUNNER_TEMP/focal-apt"
+          apt_dir="$RUNNER_TEMP/jammy-apt"
           mkdir -p "$apt_dir/lists/partial" "$apt_dir/cache/archives/partial" "$apt_dir/parts" "$apt_dir/root"
           : > "$apt_dir/status"
-          echo 'deb [signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] http://archive.ubuntu.com/ubuntu focal-updates main' > "$apt_dir/focal.list"
+          echo 'deb [signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] http://archive.ubuntu.com/ubuntu jammy-updates main' > "$apt_dir/jammy.list"
           # an empty package status, so the runner's newer libsqlite3-0 is not the candidate
-          options=(-o "Dir::Etc::SourceList=$apt_dir/focal.list" -o "Dir::Etc::SourceParts=$apt_dir/parts"
+          options=(-o "Dir::Etc::SourceList=$apt_dir/jammy.list" -o "Dir::Etc::SourceParts=$apt_dir/parts"
                    -o "Dir::State::Lists=$apt_dir/lists" -o "Dir::State::status=$apt_dir/status"
                    -o "Dir::Cache=$apt_dir/cache" -o Debug::NoLocking=1)
           apt-get "${options[@]}" update
-          (cd "$apt_dir" && apt-get "${options[@]}" download libsqlite3-0/focal-updates)
-          dpkg-deb -x "$apt_dir"/libsqlite3-0_3.31.1-*.deb "$apt_dir/root"
+          (cd "$apt_dir" && apt-get "${options[@]}" download libsqlite3-0/jammy-updates)
+          dpkg-deb -x "$apt_dir"/libsqlite3-0_3.37.2-*.deb "$apt_dir/root"
           echo "SQLITE_LIB=$apt_dir/root/usr/lib/x86_64-linux-gnu" >> "$GITHUB_ENV"
 
-      - name: Record the platform with SQLite 3.31.1 loaded
+      - name: Record the platform with SQLite 3.37.2 loaded
         run: |
           export LD_LIBRARY_PATH="$SQLITE_LIB"
           python .github/scripts/platform_record.py "$GITHUB_WORKSPACE" "$OFFLINE_BASE/tmp"
-          python -c "import sqlite3, sys; sys.exit(0 if sqlite3.sqlite_version == '3.31.1' else 'sqlite3 loaded SQLite ' + sqlite3.sqlite_version)"
+          python -c "import sqlite3, sys; sys.exit(0 if sqlite3.sqlite_version == '3.37.2' else 'sqlite3 loaded SQLite ' + sqlite3.sqlite_version)"
 
       - name: Install the pinned requirements
         run: |
@@ -167,8 +168,8 @@ jobs:
       - name: Network blocked for the tests' interpreter
         run: bash .github/scripts/offline-linux.sh python .github/scripts/network_probe.py blocked
 
-      - name: Offline test suite on SQLite 3.31.1
+      - name: Offline test suite on SQLite 3.37.2
         run: |
           export HOME="$OFFLINE_BASE/home" TMPDIR="$OFFLINE_BASE/tmp" LD_LIBRARY_PATH="$SQLITE_LIB"
-          bash .github/scripts/offline-linux.sh python -c "import sqlite3, sys; sys.exit(0 if sqlite3.sqlite_version == '3.31.1' else 'sqlite3 loaded SQLite ' + sqlite3.sqlite_version)"
+          bash .github/scripts/offline-linux.sh python -c "import sqlite3, sys; sys.exit(0 if sqlite3.sqlite_version == '3.37.2' else 'sqlite3 loaded SQLite ' + sqlite3.sqlite_version)"
           bash .github/scripts/offline-linux.sh python -m unittest discover -s tests -v
