@@ -1,0 +1,174 @@
+# Offline tests on native Windows, Linux and macOS runners, an installed
+# wheel's entry points, and the suite on SQLite 3.31.1 (the minimum the
+# database schema supports). Nothing here uses secrets or credentials or
+# contacts Telegram: tests run with synthetic homes and fixtures, under
+# the suite's in-process offline guard and an operating-system block of
+# outbound connections that is checked before the tests run.
+name: Cross-OS offline tests
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cross-os-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: '1'
+  PIP_NO_INPUT: '1'
+  PYTHONDONTWRITEBYTECODE: '1'
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  offline:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-15]
+        python: ['3.14']
+    steps:
+      - name: Check out
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Prepare synthetic home and work folders
+        run: |
+          base="$RUNNER_TEMP/offline"
+          mkdir -p "$base/home" "$base/tmp" "$base/dist"
+          echo "OFFLINE_BASE=$base" >> "$GITHUB_ENV"
+          if [ "$RUNNER_OS" = Windows ]; then echo "VENV_BIN=Scripts" >> "$GITHUB_ENV"; else echo "VENV_BIN=bin" >> "$GITHUB_ENV"; fi
+
+      - name: Record the platform
+        run: python .github/scripts/platform_record.py "$GITHUB_WORKSPACE" "$OFFLINE_BASE/tmp"
+
+      - name: Network reachable before the block (control)
+        run: python .github/scripts/network_probe.py open
+
+      - name: Install the pinned requirements
+        run: |
+          python -m pip install -r requirements.txt
+          python -m pip check
+
+      - name: Build the sdist and the wheel
+        run: |
+          python -m venv "$OFFLINE_BASE/build-env"
+          "$OFFLINE_BASE/build-env/$VENV_BIN/python" -m pip install build==1.6.1 setuptools==84.2.0
+          "$OFFLINE_BASE/build-env/$VENV_BIN/python" -m build --no-isolation --outdir "$OFFLINE_BASE/dist" .
+          python -c "import sys, zipfile; names = zipfile.ZipFile(sys.argv[1]).namelist(); assert 'telegram_tracker/storage/sqlite/schema-v1.sql' in names, 'schema-v1.sql missing'; assert not [n for n in names if n.startswith('tests/')], 'tests packaged'; print(sys.argv[1], len(names), 'files')" "$OFFLINE_BASE"/dist/*.whl
+
+      - name: Install the wheel into a fresh environment
+        run: |
+          python -m venv "$OFFLINE_BASE/install-env"
+          "$OFFLINE_BASE/install-env/$VENV_BIN/python" -m pip install "$OFFLINE_BASE"/dist/*.whl
+          "$OFFLINE_BASE/install-env/$VENV_BIN/python" -m pip check
+
+      - name: Block outbound connections (Linux)
+        if: runner.os == 'Linux'
+        run: echo "OFFLINE_RUN=bash $GITHUB_WORKSPACE/.github/scripts/offline-linux.sh" >> "$GITHUB_ENV"
+
+      - name: Block outbound connections (macOS)
+        if: runner.os == 'macOS'
+        run: echo "OFFLINE_RUN=bash $GITHUB_WORKSPACE/.github/scripts/offline-macos.sh" >> "$GITHUB_ENV"
+
+      - name: Block outbound connections (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Set-NetFirewallProfile -All -Enabled True -DefaultOutboundAction Allow
+          $programs = @(python -c "import sys; print(sys.executable); print(sys._base_executable)")
+          $programs += Join-Path $env:OFFLINE_BASE 'install-env\Scripts\python.exe'
+          foreach ($program in ($programs | Sort-Object -Unique)) {
+            New-NetFirewallRule -DisplayName "offline tests: $program" -Direction Outbound -Action Block -Program $program | Out-Null
+            "outbound connections blocked for $program"
+          }
+
+      - name: Network blocked for the tests' interpreters
+        run: |
+          $OFFLINE_RUN python .github/scripts/network_probe.py blocked
+          $OFFLINE_RUN "$OFFLINE_BASE/install-env/$VENV_BIN/python" .github/scripts/network_probe.py blocked
+
+      - name: Offline test suite (source tree)
+        run: |
+          export HOME="$OFFLINE_BASE/home" USERPROFILE="$OFFLINE_BASE/home" TMPDIR="$OFFLINE_BASE/tmp"
+          $OFFLINE_RUN python -m unittest discover -s tests -v
+
+      - name: Entry points of the installed wheel
+        run: |
+          export HOME="$OFFLINE_BASE/home" USERPROFILE="$OFFLINE_BASE/home" TMPDIR="$OFFLINE_BASE/tmp"
+          $OFFLINE_RUN python .github/scripts/entry_smoke.py "$OFFLINE_BASE/install-env" "$GITHUB_WORKSPACE" "$OFFLINE_BASE/smoke"
+
+  sqlite-minimum:
+    name: ubuntu-24.04 / Python 3.14 / SQLite 3.31.1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: '3.14'
+
+      - name: Prepare synthetic home and work folders
+        run: |
+          base="$RUNNER_TEMP/offline"
+          mkdir -p "$base/home" "$base/tmp"
+          echo "OFFLINE_BASE=$base" >> "$GITHUB_ENV"
+
+      # Ubuntu 20.04's libsqlite3-0 is SQLite 3.31.1 with JSON1. apt checks the
+      # archive signature; the package is unpacked into a private folder, and
+      # nothing is installed on the runner.
+      - name: Fetch SQLite 3.31.1 from the Ubuntu 20.04 archive
+        run: |
+          apt_dir="$RUNNER_TEMP/focal-apt"
+          mkdir -p "$apt_dir/lists/partial" "$apt_dir/cache/archives/partial" "$apt_dir/parts" "$apt_dir/root"
+          : > "$apt_dir/status"
+          echo 'deb [signed-by=/usr/share/keyrings/ubuntu-archive-keyring.gpg] http://archive.ubuntu.com/ubuntu focal-updates main' > "$apt_dir/focal.list"
+          # an empty package status, so the runner's newer libsqlite3-0 is not the candidate
+          options=(-o "Dir::Etc::SourceList=$apt_dir/focal.list" -o "Dir::Etc::SourceParts=$apt_dir/parts"
+                   -o "Dir::State::Lists=$apt_dir/lists" -o "Dir::State::status=$apt_dir/status"
+                   -o "Dir::Cache=$apt_dir/cache" -o Debug::NoLocking=1)
+          apt-get "${options[@]}" update
+          (cd "$apt_dir" && apt-get "${options[@]}" download libsqlite3-0/focal-updates)
+          dpkg-deb -x "$apt_dir"/libsqlite3-0_3.31.1-*.deb "$apt_dir/root"
+          echo "SQLITE_LIB=$apt_dir/root/usr/lib/x86_64-linux-gnu" >> "$GITHUB_ENV"
+
+      - name: Record the platform with SQLite 3.31.1 loaded
+        run: |
+          export LD_LIBRARY_PATH="$SQLITE_LIB"
+          python .github/scripts/platform_record.py "$GITHUB_WORKSPACE" "$OFFLINE_BASE/tmp"
+          python -c "import sqlite3, sys; sys.exit(0 if sqlite3.sqlite_version == '3.31.1' else 'sqlite3 loaded SQLite ' + sqlite3.sqlite_version)"
+
+      - name: Install the pinned requirements
+        run: |
+          python -m pip install -r requirements.txt
+          python -m pip check
+
+      - name: Network blocked for the tests' interpreter
+        run: bash .github/scripts/offline-linux.sh python .github/scripts/network_probe.py blocked
+
+      - name: Offline test suite on SQLite 3.31.1
+        run: |
+          export HOME="$OFFLINE_BASE/home" TMPDIR="$OFFLINE_BASE/tmp" LD_LIBRARY_PATH="$SQLITE_LIB"
+          bash .github/scripts/offline-linux.sh python -c "import sqlite3, sys; sys.exit(0 if sqlite3.sqlite_version == '3.31.1' else 'sqlite3 loaded SQLite ' + sqlite3.sqlite_version)"
+          bash .github/scripts/offline-linux.sh python -m unittest discover -s tests -v
