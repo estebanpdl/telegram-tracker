@@ -27,6 +27,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 
@@ -91,9 +92,17 @@ class SignalCase(storage_modes_support.ModesCase):
 
 	def finish(self, process):
 		'''
-		(exit code, all stdout, stderr) once the child ended.
+		(exit code, all stdout, stderr) once the child ended. The rest of
+		stdout is read through process.stdout: on POSIX communicate() reads
+		the pipe itself and misses lines that ready()'s readline() buffered.
 		'''
-		out, _ = process.communicate(timeout=TIMEOUT)
+		watchdog = threading.Timer(TIMEOUT, process.kill)
+		watchdog.start()
+		try:
+			out = process.stdout.read()
+			process.wait()
+		finally:
+			watchdog.cancel()
 		process.errors.seek(0)
 		return process.returncode, ''.join(process.seen) + out, process.errors.read()
 
@@ -164,7 +173,7 @@ class SelfRaisedSigintTests(SignalCase):
 			with self.subTest(storage=storage):
 				self.out = os.path.join(self.tmp, f'write-{storage}')
 				code, out, err = self.interrupt(storage, 'write')
-				self.assertIn('SIGNAL HANDLED', out)
+				self.assertIn('SIGNAL HANDLED', out, err)
 				self.assert_interrupted(code, out, err, storage, written=True)
 				self.assert_next_run_completes(storage)
 
@@ -187,7 +196,7 @@ class ExternalSigintTests(SignalCase):
 
 	def test_during_a_write(self):
 		code, out, err = self.interrupt('both', 'write')
-		self.assertIn('SIGNAL HANDLED', out)
+		self.assertIn('SIGNAL HANDLED', out, err)
 		self.assert_interrupted(code, out, err, 'both', written=True)
 		self.assert_next_run_completes('both')
 
