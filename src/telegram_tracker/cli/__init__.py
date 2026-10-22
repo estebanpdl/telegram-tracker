@@ -6,6 +6,7 @@ Command-line interface for Telegram Tracker.
 	tgtracker collect --batch-file FILE [options]
 	tgtracker build-dataset [--data-path DIR]
 	tgtracker build-network [--data-path DIR]
+	tgtracker build-urls [--data-path DIR]
 
 `python -m telegram_tracker` and, from a source checkout, `python main.py`
 take the same arguments. Legacy forms keep working and reach the same

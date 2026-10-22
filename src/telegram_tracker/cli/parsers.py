@@ -36,6 +36,7 @@ MODULE_PROG = 'python -m telegram_tracker'
 COLLECT = 'collect'
 BUILD_DATASET = 'build-dataset'
 BUILD_NETWORK = 'build-network'
+BUILD_URLS = 'build-urls'
 AUTH = 'auth'
 
 # auth actions
@@ -438,6 +439,17 @@ def build_parsers(prog=SCRIPT_PROG):
 		description='Build Graph.gexf and network.png from collected_chats.csv. Offline. '
 			+ BUILDER_STORAGE_NOTE
 	)
+	subparsers[BUILD_URLS] = commands.add_parser(
+		BUILD_URLS,
+		help='Build urls_dataset.csv and urls.sqlite3: every URL shared in collected messages.',
+		description='Build urls_dataset.csv, urls.sqlite3 and urls-build.json (all '
+			'replaced): one row per URL in collected messages (URL entities, hidden '
+			'text links, URLs in plain text, link previews) with its parsed parts '
+			'and registered domain, and counts per domain and channel. Offline: no '
+			'link is opened, resolved or expanded, and the public suffix list is the '
+			'copy bundled with tldextract. '
+			+ BUILDER_STORAGE_NOTE
+	)
 
 	subparsers[AUTH], actions = add_auth_parsers(commands)
 	subparsers.update({f'{AUTH} {name}': action for name, action in actions.items()})
@@ -445,6 +457,7 @@ def build_parsers(prog=SCRIPT_PROG):
 	add_collect_arguments(subparsers[COLLECT], prog)
 	add_builder_arguments(subparsers[BUILD_DATASET])
 	add_builder_arguments(subparsers[BUILD_NETWORK])
+	add_builder_arguments(subparsers[BUILD_URLS])
 	return parser, subparsers
 
 

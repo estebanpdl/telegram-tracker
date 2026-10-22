@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 '''
-`build-dataset` and `build-network`: one handler for `main.py <command>`
-and the legacy builder scripts. datasets and network are imported only
-when a build runs.
+`build-dataset`, `build-network` and `build-urls`: one handler for
+`main.py <command>` and the legacy builder scripts. datasets, network
+and urls are imported only when a build runs.
 '''
 
 # import modules
@@ -11,13 +11,14 @@ import time
 import warnings
 
 # import local submodules
-from telegram_tracker.cli.parsers import AUTO, BUILD_DATASET, DEFAULT_OUTPUT, build_builder_parser
+from telegram_tracker.cli.parsers import AUTO, BUILD_DATASET, BUILD_URLS, DEFAULT_OUTPUT, \
+	build_builder_parser
 from telegram_tracker.utils import DataInputError, data_folder_from
 
 
 def run_builder(command, args):
 	'''
-	Run build-dataset or build-network on --data-path.
+	Run build-dataset, build-network or build-urls on --data-path.
 	'''
 	data_path = data_folder_from(args['data_path'], DEFAULT_OUTPUT)
 	source = args.get('source') or AUTO
@@ -33,6 +34,16 @@ def run_builder(command, args):
 				outcome = (
 					f'> Wrote {summary.rows_written} rows to {summary.msgs_dataset} '
 					f'and {summary.chats_xlsx}'
+				)
+			elif command == BUILD_URLS:
+				from telegram_tracker.urls.build import build_urls
+
+				summary = build_urls(data_path, source=source)
+				outcome = (
+					f'> Wrote {summary.occurrences} URL '
+					f'{"occurrence" if summary.occurrences == 1 else "occurrences"} from {summary.histories} '
+					f'{"history" if summary.histories == 1 else "histories"} to {summary.urls_dataset} '
+					f'and {summary.urls_database}'
 				)
 			else:
 				from telegram_tracker.network import build_network
