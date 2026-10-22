@@ -25,16 +25,15 @@ never printed.
 # import modules
 import contextlib
 import functools
-import getpass
 import os
 import sqlite3
 import sys
-import warnings
 
 # import local submodules
 from telegram_tracker.cli import profile_checks
 from telegram_tracker.cli.builders import missing_dependency
 from telegram_tracker.cli.parsers import AUTH, CLEAR_CREDENTIALS, LOGIN, LOGOUT, PROFILES, STATUS
+from telegram_tracker.cli.prompts import InputUnavailable, confirm, prompt_secret, prompt_text
 from telegram_tracker.credentials import accounts, profiles
 from telegram_tracker.credentials import home as homes
 from telegram_tracker.credentials import sources
@@ -58,51 +57,9 @@ FIELD_PROMPTS = {
 SAVE, ASK, SKIP, UNCHANGED = 'save', 'ask', 'skip', 'unchanged'
 
 
-class InputUnavailable(Exception):
-	'''
-	A required answer could not be read or was rejected too often.
-	'''
-
-
 def fail(message, code):
 	print(f'> {message}', file=sys.stderr)
 	return code
-
-
-'''
-
-Prompts (replaced in tests)
-
-'''
-
-def prompt_text(prompt):
-	return input(prompt)
-
-
-def prompt_secret(prompt):
-	'''
-	Read a value without echo; refuse getpass's echoing fallback.
-	'''
-	with warnings.catch_warnings():
-		warnings.simplefilter('error', getpass.GetPassWarning)
-		try:
-			return getpass.getpass(prompt)
-		except getpass.GetPassWarning:
-			raise InputUnavailable(
-				'Cannot read the API hash without echo; run the command from an '
-				'interactive terminal.'
-			) from None
-
-
-def confirm(question):
-	'''
-	True for yes, False for anything else, None when input is unavailable.
-	'''
-	try:
-		answer = input(f'{question} [y/N] ')
-	except EOFError:
-		return None
-	return answer.strip().lower() in ('y', 'yes')
 
 
 '''

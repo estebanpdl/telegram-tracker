@@ -330,7 +330,8 @@ failed source never falls back to the other. Builders reject running/interrupted
 status and note partial runs. Reading files accepts older folders with no sidecar
 and loads no database code.
 
-- Database reads hold the database lease, use a read-only connection and one read
+- Database reads reread the manifest and check the current sidecar under the
+  database lease, use a read-only connection and one read
   transaction, and refuse: a missing sidecar, a missing/older/newer/foreign/damaged
   database (never created, repaired or migrated), another dataset UUID, a last run
   that is not the sidecar's or not complete/partial, and any `destination_pending`
@@ -389,8 +390,8 @@ The evidence above is offline and synthetic. Not covered:
 - Interruption: Ctrl+C is tested as `KeyboardInterrupt` raised in the fake client
   and as task cancellation inside the process, not as a SIGINT delivered to a
   running process.
-- Live Telegram: the database modes (`sqlite`, `both`) and named profiles have no
-  live run; collection evidence for them comes from the fake client only.
+- Live Telegram: the tests described here use a fake client for database modes
+  (`sqlite`, `both`) and named profiles; they do not qualify live collection.
 - Request rates: concurrency and request-interval defaults are project limits;
   Telegram's per-account limits were not measured.
 - Readers: SQLite runs in rollback-journal mode. An open read transaction on the
