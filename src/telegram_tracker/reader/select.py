@@ -55,12 +55,7 @@ def open_collection(data_path, source=AUTO, *, messages=True):
 
 	from telegram_tracker.reader.database import DatabaseCollection
 
-	status, notes = collection_status(
-		data_path, messages=messages, required=True, histories='stored histories'
-	)
-	with DatabaseCollection(data_path, manifest, status) as collection:
-		collection.notes = notes + collection.notes
-		collection.storage = storage
+	with DatabaseCollection(data_path, messages=messages) as collection:
 		yield collection
 
 

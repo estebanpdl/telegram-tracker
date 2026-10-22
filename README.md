@@ -159,7 +159,7 @@ Nothing is moved or copied automatically. Once a session exists in the applicati
 
 ### Session, file, and network errors
 
-`collect`, `auth login`, `auth status --check`, and `auth logout` tell problems on this computer apart from login and network failures. Each of the following exits 1 and changes no file. None of them is fixed by logging in again.
+`collect`, `auth login`, `auth status --check`, and `auth logout` tell problems on this computer apart from login and network failures. Each of the following exits 1. None of them is fixed by logging in again.
 
 | Message | Cause |
 |---|---|
@@ -414,7 +414,7 @@ Login and the subsequent account check run before this policy is created; neithe
 
 The summary prints the counts (given, after removing duplicates, succeeded, failed, duplicates, cancelled) and, per kind of request (`resolve`, `channel`, `history`, `enrichment`), the policy attempts sent, retries, flood waits, and flood-wait seconds. `collection-status.json` records the same numbers.
 
-After the other summary lines, which keep their wording and order, the summary lists the messages saved per channel. It shows the size of each saved history after a full or window run, and also the messages added after `--update`:
+The collection summary lists the messages saved per channel. It shows the size of each saved history after a full or window run, and also the messages added after `--update`:
 
 ```
 > Messages saved: 50 in 1 channel(s)
@@ -657,7 +657,7 @@ From the files, the histories are every `<channel>_messages.json` in sorted path
 - its last run to be the one `collection-status.json` describes, and finished (`complete` or `partial`);
 - no `pending` mark (see [Recovering a blocked folder](#storage-modes---storage)); a `both` folder with one still builds from its files.
 
-A folder moved or copied after collection is read, with a note. While it reads, a builder holds `telegram-tracker.sqlite3.lock` and reads through a read-only connection in one read transaction, so it sees one consistent state; a collection started meanwhile exits with `The database ... is in use by another collection or upgrade, or a build reading it`. The lock is removed before the outputs are written, and when a build fails. A lock left by a killed build is reported like a collection's: make sure no build or collection is running, then delete it.
+A folder moved or copied after collection is read, with a note. A database builder holds `telegram-tracker.sqlite3.lock`, rereads the manifest and checks the current sidecar under that lock, then reads through a read-only connection in one read transaction, so it sees one consistent state; a collection started meanwhile exits with `The database ... is in use by another collection or upgrade, or a build reading it`. The lock is removed before the outputs are written, and when a build fails. A lock left by a killed build is reported like a collection's: make sure no build or collection is running, then delete it.
 
 Missing or malformed inputs stop the build with exit 1 before anything is written. With no messages and no existing `msgs_dataset.csv`, the dataset has a header only; an existing dataset keeps its earlier rows. With no edges, the graph is empty and the image blank.
 

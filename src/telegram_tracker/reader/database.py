@@ -31,8 +31,9 @@ import os
 # import local submodules
 from telegram_tracker.reader.records import SQLITE, ChannelHistory, ChatsInput, HistoryProvenance
 from telegram_tracker.storage.destination import same_folder
-from telegram_tracker.storage.manifest import DATABASE_FILE, MANIFEST_FILE
+from telegram_tracker.storage.manifest import DATABASE_FILE, MANIFEST_FILE, ManifestError, read_manifest
 from telegram_tracker.storage.records import COMPLETE, PARTIAL, STATUS_FILE, StorageError
+from telegram_tracker.storage.status import collection_status
 from telegram_tracker.utils import DataInputError
 
 
@@ -61,15 +62,17 @@ def history_order(data_path, name):
 class DatabaseCollection:
 	'''
 	The database of `data_path`, for use as a context manager; see the
-	module docstring. `manifest` and `status` are the folder's storage
-	manifest and sidecar, read before the lease was taken.
+	module docstring. The manifest and sidecar are read under the lease;
+	`messages` controls notes about message histories.
 	'''
 	source = SQLITE
 
-	def __init__(self, data_path, manifest, status):
+	def __init__(self, data_path, *, messages=True):
 		self.data_path = data_path
-		self.manifest = manifest
-		self.status = status
+		self.messages = messages
+		self.manifest = None
+		self.status = None
+		self.storage = None
 		self.path = os.path.join(data_path, DATABASE_FILE)
 		self.notes = []
 		self.lease = None
@@ -86,6 +89,7 @@ class DatabaseCollection:
 			raise DataInputError(str(exc)) from None
 		self.lease = lease
 		try:
+			self._read_metadata()
 			self._open()
 			self._check()
 		except BaseException:
@@ -103,6 +107,22 @@ class DatabaseCollection:
 				self.lease.__exit__(None, None, None)
 				self.lease = None
 		return False
+
+	def _read_metadata(self):
+		# A collection may finish between source selection and the lease.
+		try:
+			self.manifest = read_manifest(self.data_path)
+		except ManifestError as exc:
+			raise DataInputError(str(exc)) from None
+		if self.manifest is None:
+			raise DataInputError(
+				f'{self.data_path}/{MANIFEST_FILE} is missing; the database cannot be '
+				'identified. Keep the folder for inspection.'
+			)
+		self.storage = self.manifest['storage']
+		self.status, self.notes = collection_status(
+			self.data_path, messages=self.messages, required=True, histories='stored histories'
+		)
 
 	def _open(self):
 		from telegram_tracker.storage.sqlite.connection import open_database
