@@ -171,10 +171,14 @@ def open_staging(path):
 	inside one open transaction.
 	'''
 	con = sqlite3.connect(path, isolation_level=None)
-	con.execute('PRAGMA journal_mode = MEMORY')
-	con.execute(f'PRAGMA user_version = {OUTPUT_FORMAT}')
-	con.executescript(schema_sql())
-	con.execute('BEGIN')
+	try:
+		con.execute('PRAGMA journal_mode = MEMORY')
+		con.execute(f'PRAGMA user_version = {OUTPUT_FORMAT}')
+		con.executescript(schema_sql())
+		con.execute('BEGIN')
+	except BaseException:
+		con.close()
+		raise
 	return con
 
 
