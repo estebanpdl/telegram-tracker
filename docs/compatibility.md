@@ -20,11 +20,14 @@ Direct dependencies are pinned in `requirements.txt`:
 | networkx | 3.7 | Graph construction and GEXF export. |
 | matplotlib | 3.11.2 | Uses `matplotlib.colormaps`, not the removed `cm.get_cmap`. |
 | python-louvain | 0.16 | Imported as `community`. |
+| tldextract | 5.4.0 | Registered domains for `build-urls`, from its bundled public suffix list (private section included); constructed with `suffix_list_urls=()` and `cache_dir=None`, so it neither downloads nor writes a cache. |
 
 Transitive set resolved on 2026-10-16 (`pip freeze`): colorama 0.4.6, contourpy 1.4.0,
 cycler 0.12.1, et_xmlfile 2.0.0, fonttools 4.67.0, kiwisolver 1.5.1, numpy 2.5.4,
 packaging 26.3, pillow 12.3.0, pyaes 1.6.1, pyasn1 0.6.4, pyparsing 3.3.3,
 python-dateutil 2.9.0.post0, rsa 4.9.1, six 1.17.0, tzdata 2026.5.
+tldextract 5.4.0 adds (environment as of 2026-10-22): certifi 2026.10.19, charset-normalizer 3.5.2,
+filelock 4.2.4, idna 3.20, requests 2.34.2, requests-file 3.0.1, urllib3 2.8.0.
 
 The tests establish synthetic offline contracts, not live Telegram compatibility
 or an account-specific safe request rate. The README contains option examples.
@@ -356,6 +359,16 @@ and loads no database code.
 - Malformed input is rejected before output writes. Empty inputs produce header-only
   datasets or an empty GEXF and blank PNG. Equal-degree nodes use size 275.
 - Outputs are staged and replaced separately; there is no multi-file transaction.
+- `urls.build.build_urls` (`build-urls`) reads through the same reader and gates
+  and writes `urls_dataset.csv`, `urls.sqlite3` and `urls-build.json`, all replaced
+  (format 1, normalization version 1; see [urls-dataset.md](urls-dataset.md)). It
+  holds `urls.sqlite3.lock` from before reading until the outputs are replaced, so
+  two URL builds of a folder refuse each other in every mode; histories load inside
+  the reader's database lease. The CSV is written from the staged database, and the
+  record, replaced last, carries the build UUID and CSV SHA-256 by which a later
+  build detects outputs of different builds. It makes no network request, including
+  on the suffix library's first use, and needs none of the dataset or network
+  libraries.
 
 ## Offline test harness
 

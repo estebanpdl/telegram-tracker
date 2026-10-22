@@ -7,3 +7,4 @@ tqdm==4.70.1
 networkx==3.7
 matplotlib==3.11.2
 python-louvain==0.16
+tldextract==5.4.0

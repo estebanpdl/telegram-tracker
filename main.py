@@ -7,6 +7,7 @@ the installed `tgtracker` command.
 	python main.py collect --batch-file FILE [options]
 	python main.py build-dataset [--data-path DIR]
 	python main.py build-network [--data-path DIR]
+	python main.py build-urls [--data-path DIR]
 
 The legacy collection form `python main.py --telegram-channel NAME ...`
 (or `--batch-file FILE`) keeps working. The parser, validation, and

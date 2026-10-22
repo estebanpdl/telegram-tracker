@@ -35,6 +35,7 @@ from telegram_tracker.storage.records import STATUS_FILE
 from telegram_tracker.storage.sqlite.connection import create_database
 from telegram_tracker.storage.sqlite.lease import DatabaseLocked, check_free, database_lease_path
 from telegram_tracker.storage.sqlite.schema import DB_FILENAME
+from telegram_tracker.urls.build import build_urls
 from telegram_tracker.utils import DataInputError
 
 
@@ -234,16 +235,19 @@ class GateTests(ReaderCase):
 			fh.write(b'earlier\n')
 		before = inputs(out)
 		locks = leases(out)
-		for builder in (build_dataset, build_network):
+		for builder in (build_dataset, build_network, build_urls):
 			with self.subTest(builder=builder.__name__):
 				with self.assertRaisesRegex(DataInputError, pattern), quiet():
 					if builder is build_dataset:
 						builder(out, source=source, progress=False)
-					else:
+					elif builder is build_network:
 						builder(out, source=source, image=False)
+					else:
+						builder(out, source=source)
 		self.assertEqual(inputs(out), before)
 		self.assertEqual(read_bytes(earlier), b'earlier\n')
-		for name in ('collected_chats.xlsx', 'Graph.gexf', 'dataset-build.json', 'network-build.json'):
+		for name in ('collected_chats.xlsx', 'Graph.gexf', 'dataset-build.json', 'network-build.json',
+				'urls_dataset.csv', 'urls.sqlite3', 'urls-build.json'):
 			self.assertFalse(os.path.exists(os.path.join(out, name)), name)
 		self.assertEqual(leases(out), locks if lease_kept else [])
 		self.assertEqual([n for n in os.listdir(out) if '.tmp' in n], [])

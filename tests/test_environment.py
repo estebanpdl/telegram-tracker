@@ -28,6 +28,7 @@ IMPORT_NAMES = {
 	'networkx': 'networkx',
 	'matplotlib': 'matplotlib',
 	'python-louvain': 'community',
+	'tldextract': 'tldextract',
 }
 
 
