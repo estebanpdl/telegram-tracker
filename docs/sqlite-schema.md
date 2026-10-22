@@ -37,7 +37,9 @@ phone numbers, access hashes, file references, names, photos and online status. 
 
 - SQLite 3.31 or newer with the JSON1 functions (`json_extract`, `json_valid`,
   `json_type`). Python's `sqlite3` module reports the library version in
-  `sqlite3.sqlite_version`.
+  `sqlite3.sqlite_version`. This is what the schema needs; a Python 3.14 build's
+  `sqlite3` module can need a newer library before it loads at all. The oldest
+  library tested is listed under Platform support in `docs/compatibility.md`.
 - Every connection sets `PRAGMA foreign_keys = ON` and `PRAGMA busy_timeout = 5000`.
   The journal mode is SQLite's default rollback journal (`DELETE`).
 - `PRAGMA application_id` is `1413960786` (`0x54475452`, the ASCII bytes `TGTR`).

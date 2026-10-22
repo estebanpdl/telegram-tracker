@@ -61,7 +61,8 @@ system, CPU, file system, and library versions; each CI job prints them first.
 |---|---|
 | 3.54.0 | supported |
 | The runners' own libraries (printed by each job) | pending CI evidence |
-| 3.31.1 (Ubuntu 20.04's build, loaded on the Ubuntu 24.04 runner) | pending CI evidence for the whole suite |
+| 3.37.2 (Ubuntu 22.04's build, loaded on the Ubuntu 24.04 runner) | pending CI evidence for the whole suite |
+| 3.31 to 3.37.1 | unknown: the database accepts 3.31 and newer, but Python 3.14's `sqlite3` module may not load with these libraries. The runner's Python 3.14 could not import `sqlite3` with Ubuntu 20.04's 3.31.1 (`undefined symbol: sqlite3_deserialize`) |
 | Older than 3.31, or without JSON1 | refused: `--storage sqlite`/`both` and database reads stop before opening the database; `--storage files` does not use SQLite |
 
 Behavior that differs by platform, and its evidence:
@@ -460,9 +461,11 @@ and loads no database code.
   `test_posix_permissions.py` (modes, permission errors, symlinked lock files) and the
   external-SIGINT and terminal Ctrl+C cases of `test_signals.py` run on Linux and
   macOS only; Unicode-normalization and case cases of `test_platform_paths.py` run
-  where the temporary folder's file system ignores them.
+  where the temporary folder's file system ignores them. The check that the
+  interpreter is the registered `telegram-tracker` environment runs only in a conda
+  environment.
 - `.github/workflows/cross-os.yml` runs the suite on Windows, Linux and macOS
-  runners and on SQLite 3.31.1, builds and installs the wheel, and compares the
+  runners and on SQLite 3.37.2, builds and installs the wheel, and compares the
   installed entry points (`.github/scripts/`). Its tests run under an operating-system
   block of outbound connections (a network namespace on Linux, `sandbox-exec` on
   macOS, a firewall rule for the Python executables on Windows), checked by a probe
