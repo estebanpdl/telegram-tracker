@@ -89,7 +89,7 @@ class HelpTests(CliTestCase):
 		for argv in (['--help'], ['-h']):
 			code, out, _ = self.run_cli(argv, client_factory=None)
 			self.assertEqual(code, 0)
-			for text in ('collect', 'build-dataset', 'build-network', 'legacy forms',
+			for text in ('collect', 'build-dataset', 'build-network', 'build-urls', 'legacy forms',
 					'--telegram-channel', '--batch-file', '--min-id', '--output',
 					'build-datasets.py', 'channels-to-network.py'):
 				self.assertIn(text, out)
@@ -106,6 +106,8 @@ class HelpTests(CliTestCase):
 				'excludes 1 October', '--update', 'not a safe rate guaranteed'),
 			'build-dataset': ('--data-path', '-d'),
 			'build-network': ('--data-path', '-d'),
+			'build-urls': ('--data-path', '-d', '--source', 'urls_dataset.csv', 'urls.sqlite3',
+				'urls-build.json', 'no link is opened, resolved or expanded'),
 		}
 		for command, texts in expected.items():
 			with self.subTest(command=command):
@@ -179,7 +181,7 @@ class HelpWithoutDependenciesTests(offline_guard.OfflineTestCase):
 	PROBE = '''
 	import importlib.abc, runpy, sys
 	sys.path[:0] = [{tests!r}, {root!r}]
-	BLOCKED = ('telethon', 'pandas', 'networkx', 'matplotlib', 'community', 'tqdm', 'openpyxl')
+	BLOCKED = ('telethon', 'pandas', 'networkx', 'matplotlib', 'community', 'tqdm', 'openpyxl', 'tldextract')
 	class Block(importlib.abc.MetaPathFinder):
 		def find_spec(self, name, path=None, target=None):
 			if name.split('.')[0] in BLOCKED:
@@ -209,6 +211,7 @@ class HelpWithoutDependenciesTests(offline_guard.OfflineTestCase):
 					('main.py', ['collect', '--help']),
 					('main.py', ['build-dataset', '--help']),
 					('main.py', ['build-network', '--help']),
+					('main.py', ['build-urls', '--help']),
 					('main.py', ['--telegram-channel', 'x', '--help']),
 					('build-datasets.py', ['--help']),
 					('channels-to-network.py', ['--help'])):
@@ -222,6 +225,14 @@ class HelpWithoutDependenciesTests(offline_guard.OfflineTestCase):
 			out, err = self.run_blocked('main.py', ['build-network', '-d', cwd], cwd)
 		self.assertIn('EXIT 1', out, err)
 		self.assertIn("> build-network: missing dependency 'networkx'", err)
+		self.assertNotIn('Traceback', err)
+
+	def test_build_urls_reports_a_missing_suffix_library(self):
+		with tempfile.TemporaryDirectory() as cwd:
+			out, err = self.run_blocked('main.py', ['build-urls', '-d', cwd], cwd)
+			self.assertEqual(os.listdir(cwd), [])
+		self.assertIn('EXIT 1', out, err)
+		self.assertIn("> build-urls: missing dependency 'tldextract'", err)
 		self.assertNotIn('Traceback', err)
 
 
