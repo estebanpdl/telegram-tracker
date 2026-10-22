@@ -26,6 +26,10 @@ environment the suite was started from.
 Loopback connections made inside `socket.socketpair()` stay allowed: on
 Windows, asyncio builds its event-loop self-pipe that way.
 
+The guard also makes the temporary directory canonical (links and short
+names resolved) for this process and its subprocesses, so temporary paths
+compare equal to the resolved paths the code under test reports.
+
 Every blocked attempt is appended to `VIOLATIONS` even when the code under
 test swallows the exception, so `OfflineTestCase` fails the test anyway.
 '''
@@ -45,6 +49,7 @@ import socket
 import sqlite3
 import tempfile
 import threading
+import unicodedata
 import unittest
 
 from urllib.parse import unquote
@@ -110,18 +115,32 @@ def _is_protected(path):
 	return name in _PROTECTED_NAMES or name.endswith(_PROTECTED_SUFFIXES)
 
 
+def _fold(path):
+	'''
+	The form in which paths are compared with the home: normcase, and on
+	POSIX also case-folded and NFC-normalized, because macOS file systems
+	are usually case- and normalization-insensitive while normcase changes
+	nothing there. On a case-sensitive file system this can only refuse
+	more paths, never fewer.
+	'''
+	path = _normcase(path)
+	if os.name != 'nt':
+		path = unicodedata.normalize('NFC', path).casefold()
+	return path
+
+
 def _identities(path):
 	'''
-	Normalized absolute forms of `path`: lexical, and with Windows short
+	Comparison forms (_fold) of `path`: lexical, and with Windows short
 	names expanded (looked up in each parent directory). Links are not
 	followed, so `path` itself is never opened.
 	'''
-	lexical = _normcase(_abspath(path))
+	lexical = _abspath(path)
 	drive, rest = os.path.splitdrive(lexical)
 	expanded = drive + os.sep
 	for part in (p for p in rest.split(os.sep) if p):
-		expanded = _normcase(_long_name(os.path.join(expanded, part)))
-	return {lexical, expanded}
+		expanded = _long_name(os.path.join(expanded, part))
+	return {_fold(lexical), _fold(expanded)}
 
 
 def _long_name(path):
@@ -160,9 +179,11 @@ def _resolves_into_home(value, hops=0):
 	Walk `value` one component at a time: check each prefix lexically
 	before touching it, expand short names, and follow symlinks/junctions
 	by reading the link itself. A prefix inside the home is never opened.
+	Prefixes are compared in their _fold form but looked up as spelled, so
+	a case-sensitive file system finds them.
 	'''
-	path = _normcase(_abspath(value))
-	if _inside_home(path):
+	path = _abspath(value)
+	if _inside_home(_fold(path)):
 		return True
 	if hops > _MAX_HOPS:
 		return False
@@ -171,8 +192,8 @@ def _resolves_into_home(value, hops=0):
 	parts = [p for p in rest.split(os.sep) if p]
 	current = drive + os.sep
 	for index, part in enumerate(parts):
-		candidate = _normcase(_long_name(os.path.join(current, part)))
-		if _inside_home(candidate):
+		candidate = _long_name(os.path.join(current, part))
+		if _inside_home(_fold(candidate)):
 			return True
 		try:
 			info = _lstat(candidate)
@@ -414,6 +435,19 @@ def _install_home_guards():
 	os.environ.pop(PROFILE_ENV, None)
 
 
+def _use_canonical_tempdir():
+	'''
+	Point tempfile (and subprocesses, through TMPDIR) at the canonical form
+	of the temporary directory. The code under test resolves links and
+	short names (realpath), so paths built from a non-canonical temporary
+	directory would not compare equal: macOS's /var is a link to
+	/private/var, and a Windows TEMP can hold an 8.3 short name.
+	'''
+	canonical = os.path.realpath(tempfile.gettempdir())
+	tempfile.tempdir = canonical
+	os.environ['TMPDIR'] = canonical
+
+
 def install():
 	'''
 	Install all guards once per process.
@@ -422,6 +456,7 @@ def install():
 	if _installed:
 		return
 
+	_use_canonical_tempdir()
 	_install_socket_guards()
 	_install_asyncio_guards()
 	_install_telethon_guards()
