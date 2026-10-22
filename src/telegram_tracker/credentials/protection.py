@@ -28,12 +28,17 @@ class ProtectionError(Exception):
 
 def reject_link(path):
 	'''
-	Raise ProtectionError when `path` exists as a symlink or junction.
+	Raise ProtectionError when `path` exists as a symlink or junction, or
+	when it cannot be inspected.
 	'''
 	try:
 		info = os.lstat(path)
-	except FileNotFoundError:
+	except (FileNotFoundError, NotADirectoryError):
+		# POSIX reports a file in place of a parent folder as ENOTDIR,
+		# Windows as not found: either way nothing exists at `path`
 		return
+	except OSError as exc:
+		raise ProtectionError(f'cannot check {path} ({exc.strerror or type(exc).__name__})') from None
 	tag = getattr(info, 'st_reparse_tag', 0)
 	if stat.S_ISLNK(info.st_mode) or tag:
 		raise ProtectionError(f'{path} is a link; refusing to use it')
