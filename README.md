@@ -237,6 +237,7 @@ python main.py collect --telegram-channel NAME [options]
 python main.py collect --batch-file FILE [options]
 python main.py build-dataset [--data-path DIR] [--source auto|files|sqlite]
 python main.py build-network [--data-path DIR] [--source auto|files|sqlite]
+python main.py build-urls [--data-path DIR] [--source auto|files|sqlite]
 python main.py auth login | status | logout | clear-credentials | profiles
 ```
 
@@ -663,6 +664,22 @@ Missing or malformed inputs stop the build with exit 1 before anything is writte
 
 **Memory.** The files builder holds one messages file at a time while reading and all dataset rows until it writes them; reading the database is the same, with messages fetched in batches of 500. The collected chats are held in memory whole, and rebuilding them from the database reads the rows kept so far again for each later run.
 
+## Listing shared URLs
+
+`build-urls` lists every URL in the collected messages: URLs marked in the text, the hidden targets of hyperlinks, URLs found in plain text, and link previews. It reads the same sources as the other builders, with the same `--source` choice and checks:
+
+```
+python main.py build-urls --data-path ./output/data
+```
+
+It writes three files to the folder and replaces them on every build:
+
+- `urls_dataset.csv`: one row per occurrence, with the message, the URL as found and normalized, its parts, and its registered domain (`bbc.co.uk`, `foo.blogspot.com`; IP addresses and unknown suffixes go into buckets such as `[ipv4]`);
+- `urls.sqlite3`: the same rows, plus counts per domain, per channel, and per channel and domain;
+- `urls-build.json`: the build record.
+
+Nothing is fetched: links are not opened, resolved or expanded, and the public suffix list is the copy bundled with `tldextract`. Two `build-urls` runs on one folder refuse each other (`urls.sqlite3.lock`). [docs/urls-dataset.md](docs/urls-dataset.md) gives the evidence and counting rules, every column, and example queries.
+
 ## Known limits
 
 The behavior in this README is validated by the offline test suite, with synthetic data and a fake Telegram client, plus an install check of the built package. What that validation does not cover:
@@ -673,6 +690,7 @@ The behavior in this README is validated by the offline test suite, with synthet
 - **Request rates.** The concurrency and request-interval defaults are project limits. The rates that Telegram accepts for an account were not measured.
 - **Builders on a database.** Read from the database, a renamed channel's old-name history is not built, and a date nested in an object column of the collected chats reads as stored text (see [Building the dataset and the network](#building-the-dataset-and-the-network)). Rebuilding the collected chats from a database rereads the rows kept so far for each later run, so builds of folders with many runs take longer.
 - **Dataset appends.** `build-dataset` appends to `msgs_dataset.csv`, so building twice, or again after `--update`, duplicates rows (see [Building the dataset and the network](#building-the-dataset-and-the-network)).
+- **URLs.** `build-urls` finds only URLs that are in the collected messages; it does not read URL buttons, and it checks no link against the web. Its public suffix list is as current as the pinned `tldextract` release.
 
 ## Running the tests
 
