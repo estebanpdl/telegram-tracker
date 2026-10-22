@@ -13,16 +13,13 @@ import argparse
 
 # import local submodules
 from telegram_tracker.cli.argument_types import bounded_float, bounded_int, utc_datetime
+from telegram_tracker.cli.builder_parsers import AUTO, DEFAULT_OUTPUT, SOURCES, \
+	add_builder_arguments, build_builder_parser
 
-
-DEFAULT_OUTPUT = './output/data'
 
 # --storage values (storage.manifest); importing that module would load
 # storage code, which parsers avoid
 STORAGE_CHOICES = ('files', 'sqlite', 'both')
-# builder --source values (reader.records), for the same reason
-AUTO = 'auto'
-SOURCES = (AUTO, 'files', 'sqlite')
 
 BUILDER_STORAGE_NOTE = (
 	'Reads the file outputs of a files or both folder and the database of a '
@@ -378,25 +375,6 @@ def add_collect_arguments(parser, prog=SCRIPT_PROG):
 	add_session_arguments(login)
 
 
-def add_builder_arguments(parser):
-	parser.add_argument(
-		'--data-path',
-		'-d',
-		type=str,
-		required=False,
-		help=f'Path where data is located. Will use `{DEFAULT_OUTPUT}` if not given.'
-	)
-	parser.add_argument(
-		'--source',
-		choices=SOURCES,
-		default=AUTO,
-		help='What to read: files (the file outputs), sqlite (the database '
-			'telegram-tracker.sqlite3) or auto (default: the database of a folder '
-			'collected with --storage sqlite, the files otherwise). The two are '
-			'never combined; a source the folder lacks is refused.'
-	)
-
-
 def build_parser(prog=SCRIPT_PROG):
 	'''
 	The canonical parser: `<prog> <command> ...`.
@@ -441,9 +419,9 @@ def build_parsers(prog=SCRIPT_PROG):
 	)
 	subparsers[BUILD_URLS] = commands.add_parser(
 		BUILD_URLS,
-		help='Build urls_dataset.csv and urls.sqlite3: every URL shared in collected messages.',
+		help='Build urls_dataset.csv and urls.sqlite3: URL occurrences from collected messages.',
 		description='Build urls_dataset.csv, urls.sqlite3 and urls-build.json (all '
-			'replaced): one row per URL in collected messages (URL entities, hidden '
+			'replaced): one row per detected URL occurrence (URL entities, hidden '
 			'text links, URLs in plain text, link previews) with its parsed parts '
 			'and registered domain, and counts per domain and channel. Offline: no '
 			'link is opened, resolved or expanded, and the public suffix list is the '
@@ -481,18 +459,6 @@ def build_legacy_parser(prog=SCRIPT_PROG):
 		f'The other history window options and --update need `{run} collect`.'
 	)
 	add_min_id_argument(window)
-	return parser
-
-
-def build_builder_parser(command, prog):
-	'''
-	Standalone parser for a legacy builder script.
-	'''
-	parser = argparse.ArgumentParser(
-		prog=prog,
-		description=f'Arguments. (Same as `python main.py {command}`.)'
-	)
-	add_builder_arguments(parser)
 	return parser
 
 

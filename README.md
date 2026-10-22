@@ -666,7 +666,7 @@ Missing or malformed inputs stop the build with exit 1 before anything is writte
 
 ## Listing shared URLs
 
-`build-urls` lists every URL in the collected messages: URLs marked in the text, the hidden targets of hyperlinks, URLs found in plain text, and link previews. It reads the same sources as the other builders, with the same `--source` choice and checks:
+`build-urls` extracts URL occurrences from collected message text, the hidden targets of hyperlinks, and stored link previews. It reads the same sources as the other builders, with the same `--source` choice and checks:
 
 ```
 python main.py build-urls --data-path ./output/data

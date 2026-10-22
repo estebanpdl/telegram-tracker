@@ -1,6 +1,6 @@
 # URL occurrences (`build-urls`)
 
-`build-urls` lists every URL shared in the collected messages of a data folder, with its parsed parts and registered domain, and counts per domain and channel. It reads the same sources as `build-dataset` and `build-network`, with the same `--source` choice and the same checks (see the README, "Building the dataset and the network").
+`build-urls` extracts URL occurrences from collected message text, hyperlink targets and stored previews, with parsed parts, registered domains and counts per domain and channel. Extraction follows the evidence rules below; unsupported forms such as URL buttons are omitted. It reads the same sources as `build-dataset` and `build-network`, with the same `--source` choice and the same checks (see the README, "Building the dataset and the network").
 
 ```
 python main.py build-urls --data-path ./output/data

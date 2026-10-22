@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 '''
-build-urls: every URL occurrence in the collected messages of a data
-folder, offline, into urls_dataset.csv, urls.sqlite3 and urls-build.json
+build-urls: URL occurrences extracted from collected messages, offline,
+into urls_dataset.csv, urls.sqlite3 and urls-build.json
 (urls.outputs).
 
 The collection is read through telegram_tracker.reader (the same source
