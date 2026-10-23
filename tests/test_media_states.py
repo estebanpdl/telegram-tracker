@@ -454,6 +454,28 @@ class RunTests(StateTestCase):
 			with self.subTest(bad=bad):
 				self.assertRaises(ValueError, self.ledger.add_counters, RUN_A, **bad)
 
+	def test_counters_with_the_final_item_write(self):
+		attempt = self.put(DOWNLOADING)
+		with self.assertRaises(ValueError):
+			self.ledger.fail(RUN_A, KEY, 'request_failed', attempt=attempt, counters={'bytes': 1})
+		self.assertEqual(self.state(), DOWNLOADING)
+		self.ledger.fail(RUN_A, KEY, 'request_failed', attempt=attempt, counters={'app_requests': 4, 'retries': 3})
+		other = (CHANNEL, 4, 5002)
+		self.put(REQUESTED, key=other)
+		self.ledger.skip(RUN_A, other, 'over_run_limit', counters={'app_requests': 0})
+		attempt = self.put(DOWNLOADING, key=(CHANNEL, 5, 5002))
+		self.ledger.complete(RUN_A, (CHANNEL, 5, 5002), sha256=SHA_A, actual_bytes=9, attempt=attempt,
+			counters={'app_requests': 1, 'bytes_received': 9})
+		run = self.ledger.run(RUN_A)
+		self.assertEqual(
+			[run[c] for c in ('app_requests', 'retries', 'flood_waits', 'refreshes', 'bytes_received')],
+			[5, 3, 0, 0, 9]
+		)
+		# a write the ledger refuses adds nothing either
+		with self.assertRaises(InvalidTransition):
+			self.ledger.fail(RUN_A, KEY, 'request_failed', counters={'app_requests': 7})
+		self.assertEqual(self.ledger.run(RUN_A)['app_requests'], 5)
+
 	def test_finish_interrupts_its_own_downloads(self):
 		self.put(DOWNLOADING)
 		self.put(REQUESTED, (CHANNEL, 4, 5002))

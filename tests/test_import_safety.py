@@ -37,8 +37,10 @@ STORAGE_MODULES = qualified(
 )
 MEDIA_MODULES = qualified(
 	'media', 'media.classify', 'media.layout', 'media.ledger_schema', 'media.ledger', 'media.identity',
-	'media.partials', 'media.limits'
+	'media.partials', 'media.limits', 'media.staging'
 )
+# the download adapter talks to Telegram, so it may load Telethon
+MEDIA_DOWNLOAD_MODULES = qualified('media.location', 'media.stream', 'media.download')
 
 PROBE = '''
 import asyncio, json, sys
@@ -173,6 +175,15 @@ class ImportSafetyTests(offline_guard.OfflineTestCase):
 			capture_output=True, text=True, timeout=120
 		)
 		self.assertEqual(completed.stdout.strip(), '[]', completed.stderr)
+
+	def test_media_download_modules_import_inertly(self):
+		report, output, stderr, listing = import_in_fresh_process(MEDIA_DOWNLOAD_MODULES)
+		self.assertIsNone(report['error'])
+		self.assertEqual(report['imported'], MEDIA_DOWNLOAD_MODULES)
+		self.assertEqual(report['loops'], [])
+		self.assertEqual(report['current_loop'], 'absent')
+		self.assertEqual(report['violations'], [])
+		self.assertEqual((output, stderr, listing), ([], '', []))
 
 	def test_cli_modules_load_no_services_at_import(self):
 		code = textwrap.dedent(f'''
