@@ -35,6 +35,10 @@ STORAGE_MODULES = qualified(
 	'storage', 'storage.records', 'storage.files', 'storage.aggregates',
 	'storage.status', 'storage.writer'
 )
+MEDIA_MODULES = qualified(
+	'media', 'media.classify', 'media.layout', 'media.ledger_schema', 'media.ledger', 'media.identity',
+	'media.partials', 'media.limits'
+)
 
 PROBE = '''
 import asyncio, json, sys
@@ -138,6 +142,29 @@ class ImportSafetyTests(offline_guard.OfflineTestCase):
 			import sys
 			sys.path[:0] = [{TESTS!r}, {SRC!r}]
 			import {modules}
+			watched = {['telethon', *qualified('api', 'collector', 'request_policy'), 'asyncio', 'pandas']!r}
+			print(sorted(m for m in watched if m in sys.modules))
+		''')
+		completed = subprocess.run(
+			[sys.executable, '-I', '-c', code],
+			capture_output=True, text=True, timeout=120
+		)
+		self.assertEqual(completed.stdout.strip(), '[]', completed.stderr)
+
+	def test_media_modules_import_inertly_and_load_no_services(self):
+		# the offline media modules (layout, ledger, limits) must not reach
+		# Telethon, the collector or an event loop
+		report, output, stderr, listing = import_in_fresh_process(MEDIA_MODULES)
+		self.assertIsNone(report['error'])
+		self.assertEqual(report['imported'], MEDIA_MODULES)
+		self.assertEqual(report['loops'], [])
+		self.assertEqual(report['violations'], [])
+		self.assertEqual((output, stderr, listing), ([], '', []))
+
+		code = textwrap.dedent(f'''
+			import sys
+			sys.path[:0] = [{TESTS!r}, {SRC!r}]
+			import {', '.join(MEDIA_MODULES)}
 			watched = {['telethon', *qualified('api', 'collector', 'request_policy'), 'asyncio', 'pandas']!r}
 			print(sorted(m for m in watched if m in sys.modules))
 		''')
