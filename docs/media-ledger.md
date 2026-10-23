@@ -231,8 +231,8 @@ One row per run that wrote to the ledger. Rows are never deleted (trigger
 | `started_at`, `finished_at` | UTC. `finished_at` stays NULL for a run whose process ended. |
 | `selection` | JSON: `types`, `max_media_size`, `max_media_total` (bytes or null). |
 | `channels` | JSON array of the channel IDs whose selected media the run recorded. |
-| `app_requests` | File and lookup requests the application made. |
-| `retries`, `flood_waits`, `refreshes` | Retried requests, flood waits, file reference refreshes. |
+| `app_requests` | File and lookup requests the application sent, retries included (see [Downloads](#downloads)). |
+| `retries`, `flood_waits`, `refreshes` | Requests sent again, flood waits, file reference refreshes. |
 | `bytes_received` | Every byte received, restarts included. |
 | `app_version` | The Telegram Tracker version of the run. |
 
@@ -357,6 +357,52 @@ number of bytes or with K, M or G (KiB, MiB, GiB).
   reserved, so the bytes received never exceed the limit. Up to one pull's worth of
   the limit can stay unused, and with several downloads at once which files fit can
   differ from run to run; each skip is recorded.
+
+## Downloads
+
+A run downloads only items it has recorded as `requested`, one attempt at a time:
+
+1. A complete item of the same media in the channel is reused with no request, once
+   its stored file is verified (size and SHA-256, once per run per file). If that
+   file has changed, the item fails with `stored_file_differs` and the file is kept.
+2. The per-file and per-run limits are applied (see [Byte limits](#byte-limits)).
+3. The item becomes `downloading` and an attempt starts. The file is requested in
+   512 KiB pulls into `.partial/<run_uuid>/`, hashed as it arrives, and synced to
+   disk. Each pull is one application request, paced like every other request of
+   the account. A pull that fails is sent again from the same offset, with the
+   same file reference.
+4. An expired file reference is refreshed once per attempt by fetching the message
+   again; the file then starts over from zero, and a known size reserves again. A
+   second expiry fails the item (`reference_expired`); a message that is gone, or
+   whose media is no longer the same, fails it with `message_gone` or
+   `media_changed`.
+5. A known size must match exactly (`size_mismatch` otherwise), and no pull starts
+   at or after it. So a file longer than its reported size is noticed only when the
+   extra bytes arrive in its last pull; when the reported size is a whole number of
+   pulls, they are never requested.
+6. Content already stored in the channel is reused (its file verified); otherwise
+   the file is published at its generated name without replacing anything (see
+   [Folder layout](#folder-layout)). The blob, the item, the attempt and the run's
+   counters are written in one transaction. The partial file is removed whatever
+   the outcome.
+
+Requests made inside the network library are not counted in `app_requests`: the
+request repeated after a `FILE_MIGRATE` answer, the library's own retry of a
+timeout, and connecting to another data center.
+
+| Event | Item | The run |
+|---|---|---|
+| Flood wait within `--max-flood-wait` | waits, then the pull is sent again | all requests wait |
+| Flood wait over it, or retries used up by flood waits | `failed`, `flood_stop` | stops; items not yet attempted stay `requested` |
+| Errors that persist after the retries, other request errors | `failed`, `request_failed` | goes on |
+| Disk full | `failed`, `disk_full` | media stops; items not yet attempted stay `requested` |
+| `.partial` cannot be used (a link, not a folder) | `failed`, `storage_error` | media stops, as for a full disk |
+| Another local file error | `failed`, `storage_error` | goes on |
+| Cancelled (Ctrl+C) | `failed`, `interrupted` | stops |
+
+Two messages of a run that carry the same media are not downloaded at the same
+time: the second waits for the first, then reuses its file, so the file is requested
+and counted against the per-run limit once.
 
 ## Example queries
 
