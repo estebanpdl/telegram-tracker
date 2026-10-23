@@ -31,7 +31,7 @@ import uuid
 from dataclasses import dataclass
 
 # import local submodules
-from telegram_tracker.media.layout import is_link, lstat_or_none
+from telegram_tracker.media.layout import MediaLayout, is_link, lstat_or_none
 from telegram_tracker.media.ledger_schema import LedgerRefused
 from telegram_tracker.storage.files import pretty_json_text
 from telegram_tracker.storage.manifest import FILES, MANIFEST_FILE, read_manifest
@@ -125,17 +125,30 @@ def ensure_identity(output_folder):
 	The folder's FolderIdentity, writing collection-identity.json first
 	for a files folder that has none. Called with the output folder
 	locked, before its ledger is created; an existing record is never
-	replaced.
+	replaced. A files folder that already has a ledger but no record is
+	refused (LedgerRefused) and nothing is written.
 	'''
 	identity = folder_identity(output_folder)
 	if identity.dataset_uuid is not None:
 		return identity
 	path = identity_path(output_folder)
+	ledger_path = MediaLayout(output_folder).ledger_path
+	if lstat_or_none(ledger_path) is not None:
+		# A new record would bind nothing here, and since a record is never
+		# replaced, it would rule out restoring the lost one for good.
+		raise LedgerRefused(
+			f'{ledger_path} exists but {path} is missing, so the ledger cannot be tied to the '
+			f'collected data here. Restore {IDENTITY_FILE} from a backup of this folder; '
+			'nothing was written.'
+		)
 	tmp = os.path.join(output_folder, f'.{IDENTITY_FILE}.{uuid.uuid4().hex}.creating')
 	record = {'format': IDENTITY_FORMAT, 'dataset_uuid': str(uuid.uuid4()), 'created_at': utc_now()}
 	try:
 		with open(tmp, mode='x', encoding='utf-8') as writer:
 			writer.write(pretty_json_text(record))
+			# written once and never replaced: it must be on disk before it is published
+			writer.flush()
+			os.fsync(writer.fileno())
 		link_new(tmp, path)
 	except DatabaseRefused:
 		# written meanwhile: the existing record stands

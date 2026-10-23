@@ -1,6 +1,7 @@
 -- Telegram Tracker media ledger, version 1: <output>/downloaded-media/media.sqlite3.
 -- Requires SQLite >= 3.31 with JSON1 (json_valid), like the data database.
--- Per connection: PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000.
+-- Per connection: PRAGMA foreign_keys = ON; PRAGMA recursive_triggers = ON (so REPLACE fires
+-- the never-delete triggers); PRAGMA busy_timeout = 5000.
 -- Journal mode: DELETE (the default rollback journal).
 -- Timestamps written by the application: UTC ISO 8601 text.
 -- Paths: relative to downloaded-media, '/' separators, generated names only.

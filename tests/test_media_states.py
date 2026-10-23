@@ -231,6 +231,46 @@ class ImmutableRowTests(StateTestCase):
 					self.ledger.con.execute(sql)
 				self.assertIn('never changes', str(caught.exception))
 
+	def test_replace_cannot_rewrite_kept_rows(self):
+		'''
+		REPLACE removes a conflicting row by itself; with recursive
+		triggers that removal meets the never-delete triggers.
+		'''
+		self.put(COMPLETE)
+		sha = f'{KEY[1]:064x}'
+		blob_columns = 'channel_id, sha256, bytes, type, mime_type, ext, path, first_run_uuid, created_at'
+		statements = {
+			'blob, INSERT OR REPLACE': (
+				f'INSERT OR REPLACE INTO blobs ({blob_columns}) '
+				f"VALUES ({CHANNEL}, '{sha}', 99, 'file', 'application/pdf', 'pdf', "
+				f"'{CHANNEL}/files/3-{sha[:16]}.bin', '{RUN_A}', 'x')"),
+			'blob, REPLACE': (
+				f'REPLACE INTO blobs ({blob_columns}) '
+				f"VALUES ({CHANNEL}, '{sha}', 99, 'file', 'application/pdf', 'pdf', "
+				f"'{CHANNEL}/files/9-{sha[:16]}.pdf', '{RUN_A}', 'x')"),
+			'complete item, INSERT OR REPLACE': (
+				'INSERT OR REPLACE INTO items (channel_id, message_id, media_id, media_type, media_kind, type, '
+				'subtype, ext, state, first_run_uuid, last_run_uuid, updated_at) '
+				f"VALUES ({CHANNEL}, 3, 5002, 'MessageMediaDocument', 'document', 'file', 'document', 'pdf', "
+				f"'requested', '{RUN_A}', '{RUN_A}', 'x')"),
+			'complete item, REPLACE': (
+				'REPLACE INTO items (channel_id, message_id, media_id, media_type, media_kind, type, subtype, ext, '
+				'state, first_run_uuid, last_run_uuid, updated_at) '
+				f"VALUES ({CHANNEL}, 3, 5002, 'MessageMediaDocument', 'document', 'file', 'document', 'pdf', "
+				f"'requested', '{RUN_A}', '{RUN_A}', 'x')")
+		}
+		blobs = self.ledger.con.execute('SELECT * FROM blobs').fetchall()
+		items = self.ledger.con.execute('SELECT * FROM items').fetchall()
+		self.assertEqual(self.state(), COMPLETE)
+		for label, sql in statements.items():
+			with self.subTest(label):
+				with self.assertRaises(sqlite3.IntegrityError) as caught:
+					self.ledger.con.execute(sql)
+				self.assertIn('never deleted', str(caught.exception))
+				self.assertEqual(self.ledger.con.execute('SELECT * FROM blobs').fetchall(), blobs)
+				self.assertEqual(self.ledger.con.execute('SELECT * FROM items').fetchall(), items)
+				self.assertFalse(self.ledger.con.in_transaction)
+
 
 class RequestTests(StateTestCase):
 

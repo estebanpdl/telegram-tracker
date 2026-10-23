@@ -55,9 +55,63 @@ class CreationTests(MediaTestCase):
 		self.assertEqual(ledger.con.execute('PRAGMA application_id').fetchone(), (LEDGER_APPLICATION_ID,))
 		self.assertEqual(ledger.con.execute('PRAGMA user_version').fetchone(), (1,))
 		self.assertEqual(ledger.con.execute('PRAGMA foreign_keys').fetchone(), (1,))
+		self.assertEqual(ledger.con.execute('PRAGMA recursive_triggers').fetchone(), (1,))
 		self.assertEqual(sorted(os.listdir(self.layout.root)), ['media.sqlite3'])
 		ledger.close()
 		self.assertEqual(self.reopen().meta, ledger.meta)
+
+	def test_every_connection_has_recursive_triggers(self):
+		'''
+		The creating connection, a writer and a reader: each one has the
+		pragma on when it is closed.
+		'''
+		seen = []
+
+		class Recorded(sqlite3.Connection):
+			closed = False
+
+			def close(self):
+				# in-memory probes (library and DDL checks) hold no ledger
+				if not self.closed and self.execute('PRAGMA database_list').fetchone()[2]:
+					seen.append(self.execute('PRAGMA recursive_triggers').fetchone())
+				self.closed = True
+				super().close()
+
+		real_connect = sqlite3.connect
+
+		def recording_connect(*args, **kwargs):
+			return real_connect(*args, factory=Recorded, **kwargs)
+
+		with mock.patch.object(sqlite3, 'connect', recording_connect):
+			self.files_ledger().close()
+			self.reopen().close()
+			self.reopen(readonly=True).close()
+		# creation (1), the new ledger's connection, the writer, the reader
+		self.assertEqual(seen, [(1,)] * 4)
+
+	def test_a_library_without_recursive_triggers_is_refused(self):
+		real_connect = ledger_schema.connect
+		closed = []
+
+		class Ignoring:
+			def __init__(self, con):
+				self.con = con
+
+			def execute(self, sql, *args):
+				if sql == 'PRAGMA recursive_triggers':
+					return self.con.execute('SELECT 0')
+				return self.con.execute(sql, *args)
+
+			def close(self):
+				closed.append(True)
+				self.con.close()
+
+		with mock.patch.object(ledger_schema, 'connect', lambda *a, **k: Ignoring(real_connect(*a, **k))):
+			with self.assertRaises(LedgerRefused) as caught:
+				self.files_ledger()
+		self.assertIn('recursive triggers', str(caught.exception))
+		self.assertEqual(closed, [True])
+		self.assertFalse(os.path.exists(self.layout.ledger_path))
 
 	def test_a_missing_ledger_is_created_only_when_asked(self):
 		identity = ensure_identity(self.out)
@@ -327,6 +381,47 @@ class IdentityRecordTests(MediaTestCase):
 				for call in (read_identity_record, folder_identity, ensure_identity):
 					self.assertRaises(IdentityError, call, self.out)
 				self.assertEqual(read_bytes(path).decode(), text)
+
+	def test_a_ledger_that_lost_its_record_gets_no_new_one(self):
+		self.files_ledger().close()
+		record_path = os.path.join(self.out, IDENTITY_FILE)
+		record = read_bytes(record_path)
+		os.remove(record_path)
+		ledger_bytes = read_bytes(self.layout.ledger_path)
+		with self.assertRaises(LedgerRefused) as caught:
+			ensure_identity(self.out)
+		self.assertIn(f'{IDENTITY_FILE} is missing', str(caught.exception))
+		self.assertEqual(sorted(os.listdir(self.out)), ['downloaded-media'])
+		self.assertEqual(read_bytes(self.layout.ledger_path), ledger_bytes)
+		# the lost record, restored, binds the ledger again
+		with open(record_path, 'wb') as writer:
+			writer.write(record)
+		self.assertEqual(ensure_identity(self.out).dataset_uuid, self.reopen().meta.dataset_uuid)
+
+	def test_anything_at_the_ledger_path_blocks_a_new_record(self):
+		os.makedirs(self.layout.ledger_path)
+		self.assertRaises(LedgerRefused, ensure_identity, self.out)
+		self.assertEqual(os.listdir(self.out), ['downloaded-media'])
+
+	def test_the_record_reaches_the_disk_before_it_is_published(self):
+		events = []
+		real_fsync = os.fsync
+		real_link = identity_module.link_new
+
+		def fsync(fd):
+			events.append(('fsync', os.fstat(fd).st_size))
+			real_fsync(fd)
+
+		def link(tmp, path):
+			events.append(('link', os.path.getsize(tmp)))
+			return real_link(tmp, path)
+
+		with mock.patch.object(identity_module.os, 'fsync', fsync), \
+				mock.patch.object(identity_module, 'link_new', link):
+			ensure_identity(self.out)
+		size = os.path.getsize(os.path.join(self.out, IDENTITY_FILE))
+		self.assertGreater(size, 0)
+		self.assertEqual(events, [('fsync', size), ('link', size)])
 
 	def test_a_link_at_the_record_is_refused(self):
 		target = os.path.join(self.tmp, 'target')

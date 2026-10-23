@@ -7,8 +7,9 @@ classified from its SQLite header before any connection (application_id
 'TGTM', user_version 1), so a file that is not a ledger is never opened
 for writing. A new ledger is built in a sibling temporary file with its
 ledger_meta row, checked, and published without replacing anything at
-the path. Every connection is then checked against the DDL, object by
-object, and must hold exactly one ledger_meta row.
+the path. Every connection, the creating one included, turns on foreign
+keys and recursive triggers; it is then checked against the DDL, object
+by object, and must hold exactly one ledger_meta row.
 '''
 
 # import modules
@@ -74,6 +75,26 @@ def expected_objects():
 		con.close()
 
 
+def ledger_connection(path, *, readonly=False):
+	'''
+	connect() with PRAGMA recursive_triggers on as well. Without it,
+	REPLACE conflict resolution deletes the old row without firing the
+	DELETE triggers, so INSERT OR REPLACE could rewrite a blob or a
+	complete item that the triggers otherwise keep.
+	'''
+	con = connect(path, readonly=readonly)
+	try:
+		con.execute('PRAGMA recursive_triggers = ON')
+		if con.execute('PRAGMA recursive_triggers').fetchone() != (1,):
+			raise LedgerRefused('this SQLite library does not support recursive triggers')
+	except BaseException as exc:
+		con.close()
+		if isinstance(exc, sqlite3.Error):
+			raise storage_error(exc, f'open {path}') from None
+		raise
+	return con
+
+
 def classify_ledger(path):
 	'''
 	The schema.Classification of the file at `path` as a media ledger.
@@ -135,7 +156,7 @@ def create_ledger(path, *, dataset_uuid, storage, output_binding, created_at):
 	parent = os.path.dirname(os.path.abspath(path))
 	tmp = os.path.join(parent, f'.{os.path.basename(path)}.{uuid.uuid4().hex}.creating')
 	try:
-		con = connect(tmp)
+		con = ledger_connection(tmp)
 		try:
 			check_library(con)
 			# one transaction for the whole DDL, not one per statement
@@ -170,7 +191,7 @@ def connect_ledger(path, *, readonly=False):
 		raise LedgerRefused(f'{path} does not exist')
 	if found.kind != CURRENT:
 		raise LedgerRefused(refusal(path, found))
-	con = connect(path, readonly=readonly)
+	con = ledger_connection(path, readonly=readonly)
 	try:
 		return con, verify(con, path)
 	except BaseException:

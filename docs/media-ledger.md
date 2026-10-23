@@ -132,7 +132,10 @@ MIME types are compared in lower case, without parameters (`; charset=...`).
 ## Requirements and identity
 
 - SQLite 3.31 or newer with the JSON functions, as for the data database. Each
-  connection turns on `PRAGMA foreign_keys` and a busy timeout.
+  connection, the creating one included, turns on `PRAGMA foreign_keys`,
+  `PRAGMA recursive_triggers` and a busy timeout. Recursive triggers make `REPLACE`
+  conflict resolution fire the never-delete triggers, so `INSERT OR REPLACE` cannot
+  rewrite a blob or a complete item.
 - `PRAGMA application_id` is `1413960781` (`0x5447544D`, 'TGTM'). A file is
   classified from its header before any connection, so a file that is not a ledger
   (a data database, a Telethon session, anything else) is never opened.
@@ -162,7 +165,9 @@ data of its folder:
 
   It is written once, before the folder's ledger is created, and never changed. It
   is not a storage manifest: the folder stays a `files` folder. It is read only in
-  folders without `collection-storage.json`.
+  folders without `collection-storage.json`. A `files` folder that has a ledger but
+  has lost its record gets no new one: a new UUID would never match the ledger, and
+  since the record is never replaced, the original could no longer be restored.
 
 The ledger is refused, and left untouched, when its `dataset_uuid` differs from the
 folder's, when its `storage` differs from the folder's mode, or when a `files`
