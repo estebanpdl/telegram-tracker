@@ -37,10 +37,10 @@ STORAGE_MODULES = qualified(
 )
 MEDIA_MODULES = qualified(
 	'media', 'media.classify', 'media.layout', 'media.ledger_schema', 'media.ledger', 'media.identity',
-	'media.partials', 'media.limits', 'media.staging'
+	'media.partials', 'media.limits', 'media.staging', 'media.selection'
 )
 # the download adapter talks to Telegram, so it may load Telethon
-MEDIA_DOWNLOAD_MODULES = qualified('media.location', 'media.stream', 'media.download')
+MEDIA_DOWNLOAD_MODULES = qualified('media.location', 'media.stream', 'media.download', 'media.collect')
 
 PROBE = '''
 import asyncio, json, sys
