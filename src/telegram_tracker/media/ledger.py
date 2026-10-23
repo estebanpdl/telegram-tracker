@@ -150,6 +150,17 @@ def rows(cursor):
 	return [dict(zip(names, row)) for row in cursor.fetchall()]
 
 
+def check_counters(deltas):
+	'''
+	The non-zero entries of a COUNTERS mapping; ValueError for an unknown
+	name or a value that is not a non-negative int.
+	'''
+	for name, value in (deltas or {}).items():
+		if name not in COUNTERS or type(value) is not int or value < 0:
+			raise ValueError(f'bad counter {name}={value!r}')
+	return {name: value for name, value in (deltas or {}).items() if value}
+
+
 def check_reason(state, reason):
 	allowed = {SKIPPED: SKIP_REASONS, FAILED: FAIL_REASONS}.get(state, (None,))
 	if reason not in allowed:
@@ -262,15 +273,17 @@ class Ledger:
 		'''
 		Add non-negative amounts to the run's COUNTERS.
 		'''
-		for name, value in deltas.items():
-			if name not in COUNTERS or type(value) is not int or value < 0:
-				raise ValueError(f'bad counter {name}={value!r}')
+		deltas = check_counters(deltas)
 		if not deltas:
 			return
-		assignments = ', '.join(f'{name} = {name} + ?' for name in deltas)
-		with self._write('count the media run') as con:
+		with self._write('count the media run'):
 			self._running(run_uuid)
-			con.execute(f'UPDATE media_runs SET {assignments} WHERE run_uuid = ?', (*deltas.values(), run_uuid))
+			self._count(run_uuid, deltas)
+
+	def _count(self, run_uuid, deltas):
+		if deltas:
+			assignments = ', '.join(f'{name} = {name} + ?' for name in deltas)
+			self.con.execute(f'UPDATE media_runs SET {assignments} WHERE run_uuid = ?', (*deltas.values(), run_uuid))
 
 	'''
 
@@ -361,14 +374,16 @@ class Ledger:
 			raise LedgerError(f'no media item {tuple(key)} in {self.path}')
 		return relative_path(key.channel_id, item['type'], key.message_id, sha256, item['ext'])
 
-	def complete(self, run_uuid, key, *, sha256, actual_bytes, attempt=None, stats=AttemptStats()):
+	def complete(self, run_uuid, key, *, sha256, actual_bytes, attempt=None, stats=AttemptStats(), counters=None):
 		'''
 		Record the item complete with content `sha256`: a downloading item
 		ends `attempt`; a requested one can only reuse a stored blob (no
-		attempt). A new blob is recorded at blob_path(). Returns the blob's
-		path.
+		attempt). A new blob is recorded at blob_path(). `counters` are
+		added to the run's COUNTERS in the same transaction. Returns the
+		blob's path.
 		'''
 		key = ItemKey(*key)
+		counters = check_counters(counters)
 		with self._write('record a complete media item') as con:
 			self._running(run_uuid)
 			item = self._transition_check(key, COMPLETE)
@@ -390,21 +405,24 @@ class Ledger:
 				)
 			self._settle(run_uuid, key, item, COMPLETE, None, attempt, stats, sha256=sha256,
 				actual_bytes=actual_bytes)
+			self._count(run_uuid, counters)
 		return path
 
-	def skip(self, run_uuid, key, reason, *, attempt=None, stats=AttemptStats()):
-		self._end(run_uuid, key, SKIPPED, reason, attempt, stats)
+	def skip(self, run_uuid, key, reason, *, attempt=None, stats=AttemptStats(), counters=None):
+		self._end(run_uuid, key, SKIPPED, reason, attempt, stats, counters)
 
-	def fail(self, run_uuid, key, reason, *, attempt=None, stats=AttemptStats()):
-		self._end(run_uuid, key, FAILED, reason, attempt, stats)
+	def fail(self, run_uuid, key, reason, *, attempt=None, stats=AttemptStats(), counters=None):
+		self._end(run_uuid, key, FAILED, reason, attempt, stats, counters)
 
-	def _end(self, run_uuid, key, state, reason, attempt, stats):
+	def _end(self, run_uuid, key, state, reason, attempt, stats, counters):
 		check_reason(state, reason)
 		key = ItemKey(*key)
+		counters = check_counters(counters)
 		with self._write(f'record a {state} media item'):
 			self._running(run_uuid)
 			item = self._transition_check(key, state)
 			self._settle(run_uuid, key, item, state, reason, attempt, stats)
+			self._count(run_uuid, counters)
 
 	def _transition_check(self, key, state):
 		item = self.item(key)
