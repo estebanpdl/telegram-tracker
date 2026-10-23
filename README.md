@@ -47,6 +47,7 @@ Contents:
 ## Requirements
 
 - [Python 3.14](https://www.python.org/). The project is tested with Python 3.14.7. Pinned library versions and the tested environment are in [docs/compatibility.md](docs/compatibility.md).
+- For `--storage sqlite` or `both` and for builds from a database: an SQLite library of 3.37.2 or newer with JSON1, the one Python's `sqlite3` module loads (`python -c "import sqlite3; print(sqlite3.sqlite_version)"`). Libraries from 3.31 to 3.37.1 are accepted but unsupported and untested; older ones are refused. `--storage files` does not use SQLite.
 - [Telegram API credentials](https://my.telegram.org/auth?to=apps): a Telegram account, plus an app `api_id` and `api_hash`.
 - The libraries in `requirements.txt`: [Telethon](https://docs.telethon.dev/en/stable/) 1.x, [pandas](https://pandas.pydata.org/), [openpyxl](https://openpyxl.readthedocs.io/en/stable/), [tqdm](https://tqdm.github.io/), [NetworkX](https://networkx.org/), [Matplotlib](https://matplotlib.org/), and [python-louvain](https://github.com/taynaud/python-louvain) for community detection.
 
@@ -684,8 +685,8 @@ Nothing is fetched: links are not opened, resolved or expanded, and the public s
 
 The behavior in this README is validated by the offline test suite, with synthetic data and a fake Telegram client, plus an install check of the built package. What that validation does not cover:
 
-- **Platforms.** Tested on Windows, on local NTFS drives only. Linux and macOS (permissions, locks, path spellings, Ctrl+C) are covered by a cross-platform workflow whose results are pending; network file systems are untested. [docs/compatibility.md](docs/compatibility.md#platform-support) lists the supported, pending, unknown, and refused combinations of system, Python, installation, and SQLite version.
-- **Ctrl+C.** On Windows, interruption is tested with a real SIGINT that the collecting process raises itself; Ctrl+C typed on a terminal and SIGINT sent by another process are tested on Linux and macOS only, with results pending.
+- **Platforms.** Tested on Windows 11 on local NTFS drives, and on GitHub-hosted Windows Server 2025, Ubuntu 24.04 and macOS 15 runners (permissions, locks, path spellings, interruption, and the installed commands). Other systems, network file systems, and runs as root are untested. [docs/compatibility.md](docs/compatibility.md#platform-support) lists the supported, unknown, and refused combinations of system, Python, installation, and SQLite version, with the evidence for each.
+- **Ctrl+C.** On Windows, interruption is tested with a real SIGINT that the collecting process raises itself; Ctrl+C sent to a Windows console is untested. Ctrl+C typed on a terminal (a pseudo-terminal in the tests) and SIGINT sent by another process are tested on Linux and macOS.
 - **Database modes and profiles against Telegram.** `--storage sqlite` and `both`, and named profiles, are validated offline; this validation includes no collection from Telegram in those modes or profiles.
 - **Request rates.** The concurrency and request-interval defaults are project limits. The rates that Telegram accepts for an account were not measured.
 - **Builders on a database.** Read from the database, a renamed channel's old-name history is not built, and a date nested in an object column of the collected chats reads as stored text (see [Building the dataset and the network](#building-the-dataset-and-the-network)). Rebuilding the collected chats from a database rereads the rows kept so far for each later run, so builds of folders with many runs take longer.
