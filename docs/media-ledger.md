@@ -194,8 +194,10 @@ names the collection run whose history the item was selected from.
 media are never one transaction: they live in different files. Ledger rows are
 written only after the history they refer to is saved, so a row never names a
 message that was not saved. A stop between the two leaves media references with no
-ledger row; `media_runs.channels` records which channels a run wrote rows for, so
-the two cases (not selected, and selected by a run that stopped) can be told apart.
+ledger row. `media_runs.channels` cannot show them, because it is written in the same
+transaction as the rows; `download-media --check` tells them apart from references
+that nothing selected through the run that wrote each message (see
+[Checking a folder](#checking-a-folder)), and `download-media` requests them.
 
 ## Tables
 
@@ -224,13 +226,13 @@ One row per run that wrote to the ledger. Rows are never deleted (trigger
 |---|---|
 | `run_uuid` | The run's UUID. |
 | `command` | `collect` (collection with media) or `download-media`. |
-| `collection_run` | For `collect`: the collection run, by its `run_uuid` in `sqlite`/`both` folders or its `started_at` in `files` folders. |
+| `collection_run` | The collection run, by its `run_uuid` in `sqlite`/`both` folders or its `started_at` in `files` folders: for `collect`, the run itself; for `download-media`, the folder's last collection run when it started. |
 | `profile_name`, `profile_id` | The run's profile; NULL = default/unknown, as in the data database. |
 | `state` | `running`, then `complete`, `partial` or `interrupted`. |
 | `stop_reason` | Why the run stopped early, or how a dead run was found. |
 | `started_at`, `finished_at` | UTC. `finished_at` stays NULL for a run whose process ended. |
 | `selection` | JSON: `types`, `max_media_size`, `max_media_total` (bytes or null). |
-| `channels` | JSON array of the channel IDs whose selected media the run recorded. |
+| `channels` | JSON array of the channel IDs whose selected media the run recorded, updated in the transaction that records them. |
 | `app_requests` | File and lookup requests the application sent, retries included (see [Downloads](#downloads)). |
 | `retries`, `flood_waits`, `refreshes` | Requests sent again, flood waits, file reference refreshes. |
 | `bytes_received` | Every byte received, restarts included. |
@@ -403,6 +405,31 @@ timeout, and connecting to another data center.
 Two messages of a run that carry the same media are not downloaded at the same
 time: the second waits for the first, then reuses its file, so the file is requested
 and counted against the per-run limit once.
+
+## Checking a folder
+
+`download-media --check` compares the ledger, the stored files and the saved
+histories (read with `--source`, as the builders read them). It is offline and read
+only: the ledger is opened read only, nothing is recovered, removed or created, and
+no report file is written. Like `collect`, it holds the output folder's lock, and the
+database lease of a `sqlite` or `both` folder, while it reads, so no run changes the
+folder under it; those lock files are removed when it ends. A ledger with an
+unfinished write is refused with a message naming the runs that roll it back
+(`download-media` without `--check`, or `collect --include-media`).
+
+| Check | What it finds |
+|---|---|
+| Identity | The ledger belongs to the folder's dataset (see [Requirements and identity](#requirements-and-identity)); otherwise the check stops with the refusal. |
+| Item → message | Each item's message is in the current history and carries the item's `media_id`. An item whose message is there with other media (an edited post saved again by a later full or window run) is *superseded*; one whose message is not in the current histories (a later run replaced them) is *not in history*. Both are information, not problems: the item and its file stay recorded. |
+| Reference → state | Each downloadable reference of the current histories, counted by type and ledger state. A reference with no row is *selected, no row* when a `collect --include-media` run wrote its message and selected its type (`media_runs.collection_run` names that run; the data database records the run of each message in `messages.run_id`, history files only the run that last replaced or created the whole history, in the provenance record), else *not selected*. In a history file merged by `--update` the two cannot be told apart and count as not selected. |
+| File → hash | Each blob's file is a regular file at its generated path, inside its channel's folder, with the recorded size and SHA-256. Every file is read, so this takes time on large folders. |
+| Orphans | Files under `downloaded-media` that no blob records (a run stopped after publishing one; a later run adopts it when it downloads the same content), blobs that no complete item uses, other entries (links, folders or names that are not generated; never followed), and leftover partial downloads. |
+| Unfinished | Runs recorded as `running` and items still `downloading`: their process ended, and the next run that writes the ledger records them as interrupted. |
+
+Missing, differing or unusable files, orphans, unfinished runs and `selected, no row`
+references are problems; failed, skipped and requested items are not. Exit codes: 0
+when no problem is found, 1 when problems are found (listed on stderr) or the folder
+cannot be checked, 2 for argument errors.
 
 ## Example queries
 
