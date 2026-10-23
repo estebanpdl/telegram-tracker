@@ -3,20 +3,26 @@
 # supported library). Nothing here uses secrets or credentials or
 # contacts Telegram: tests run with synthetic homes and fixtures, under
 # the suite's in-process offline guard and an operating-system block of
-# outbound connections that is checked before the tests run.
+# outbound connections that is checked before the tests run. It runs for
+# pull requests to main, for every push to main, and on demand.
 name: Cross-OS offline tests
 
 on:
   pull_request:
+    branches: [main]
+  push:
     branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# A new commit on a pull request cancels the pull request's older run. Pushes
+# and manual runs get a group of their own, so none of them is cancelled: a
+# shared group keeps only one pending run and would replace it with a newer one.
 concurrency:
-  group: cross-os-${{ github.ref }}
-  cancel-in-progress: true
+  group: cross-os-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   PIP_DISABLE_PIP_VERSION_CHECK: '1'

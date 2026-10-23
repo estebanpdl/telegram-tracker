@@ -495,7 +495,10 @@ and loads no database code.
   installed entry points (`.github/scripts/`). Its tests run under an operating-system
   block of outbound connections (a network namespace on Linux, `sandbox-exec` on
   macOS, a firewall rule for the Python executables on Windows), checked by a probe
-  before the tests and in addition to the in-process guard. No secret is used.
+  before the tests and in addition to the in-process guard. No secret is used. It
+  runs for pull requests to `main`, for every push to `main`, and on demand; a new
+  commit on a pull request cancels that pull request's older run, while push and
+  manual runs are not cancelled by later runs.
 - `tests/fakes.py` supplies synthetic responses, pagination, scripted errors/delays,
   a fake client, and scripted prompts. `tests/fixtures/telegram_world.json` covers
   shared chats, empty/missing/private channels, Unicode, forwards, replies, service
