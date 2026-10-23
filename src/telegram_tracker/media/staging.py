@@ -22,7 +22,7 @@ import stat
 
 # import local submodules
 from telegram_tracker.media.layout import ABSENT, SAME, MediaPathError, PathConflict, check_final, is_link, \
-	lstat_or_none
+	lstat_or_none, sync_folder
 from telegram_tracker.storage.sqlite.connection import link_new
 from telegram_tracker.storage.sqlite.schema import DatabaseRefused
 
@@ -35,20 +35,6 @@ def is_disk_full(exc):
 	return isinstance(exc, OSError) and (
 		exc.errno == errno.ENOSPC or getattr(exc, 'winerror', None) in DISK_FULL_WINERRORS
 	)
-
-
-def sync_folder(path):
-	'''
-	Make a new name in folder `path` durable. POSIX only: Windows cannot
-	open a folder for fsync, and NTFS journals the name itself.
-	'''
-	if os.name == 'nt':
-		return
-	fd = os.open(path, os.O_RDONLY)
-	try:
-		os.fsync(fd)
-	finally:
-		os.close(fd)
 
 
 class PartialFile:

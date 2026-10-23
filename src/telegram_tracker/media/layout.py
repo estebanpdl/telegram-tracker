@@ -138,6 +138,20 @@ def is_link(info):
 	return stat.S_ISLNK(info.st_mode) or bool(getattr(info, 'st_reparse_tag', 0))
 
 
+def sync_folder(path):
+	'''
+	Make a new name in folder `path` durable. POSIX only: Windows cannot
+	open a folder for fsync, and NTFS journals the name itself.
+	'''
+	if os.name == 'nt':
+		return
+	fd = os.open(path, os.O_RDONLY)
+	try:
+		os.fsync(fd)
+	finally:
+		os.close(fd)
+
+
 def lstat_or_none(path):
 	try:
 		return os.lstat(path)
@@ -179,8 +193,9 @@ class MediaLayout:
 	def check_folder(self, path, *, create):
 		'''
 		`path` (under root) as a real directory: missing is created when
-		`create` is set (returns False when it is missing and not created).
-		A link, reparse point or non-directory raises MediaPathError.
+		`create` is set (returns False when it is missing and not created),
+		and its new name is synced in its parent. A link, reparse point or
+		non-directory raises MediaPathError.
 		'''
 		info = lstat_or_none(path)
 		if info is None:
@@ -188,6 +203,8 @@ class MediaLayout:
 				return False
 			try:
 				os.mkdir(path)
+				# the files published in it are synced, but not this new name
+				sync_folder(os.path.dirname(path))
 			except FileExistsError:
 				pass
 			except OSError as exc:
