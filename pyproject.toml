@@ -22,3 +22,4 @@ include = ["telegram_tracker*"]
 
 [tool.setuptools.package-data]
 "telegram_tracker.storage.sqlite" = ["schema-v1.sql"]
+"telegram_tracker.media" = ["ledger-v1.sql"]

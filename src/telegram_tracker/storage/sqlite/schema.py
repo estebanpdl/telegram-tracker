@@ -99,10 +99,11 @@ def _same_file(path, other):
 		return False
 
 
-def classify(path, protected=()):
+def classify(path, protected=(), *, application_id=APPLICATION_ID, schema_version=SCHEMA_VERSION):
 	'''
-	Classify the file at `path` from its header (see Classification).
-	Raises DatabaseRefused for a refused path or an unreadable file.
+	Classify the file at `path` from its header (see Classification),
+	as a file of `application_id` at `schema_version`. Raises
+	DatabaseRefused for a refused path or an unreadable file.
 	'''
 	check_path(path, protected)
 	try:
@@ -118,14 +119,14 @@ def classify(path, protected=()):
 	if len(header) < HEADER_SIZE or not header.startswith(SQLITE_MAGIC):
 		return Classification(CORRUPT, detail='it is not an SQLite database')
 
-	application_id = int.from_bytes(header[APPLICATION_ID_OFFSET:APPLICATION_ID_OFFSET + 4], 'big')
-	if application_id != APPLICATION_ID:
+	found_id = int.from_bytes(header[APPLICATION_ID_OFFSET:APPLICATION_ID_OFFSET + 4], 'big')
+	if found_id != application_id:
 		return Classification(FOREIGN, detail='it is another SQLite database (a Telethon session is one)')
 
 	version = int.from_bytes(header[USER_VERSION_OFFSET:USER_VERSION_OFFSET + 4], 'big', signed=True)
-	if version == SCHEMA_VERSION:
+	if version == schema_version:
 		return Classification(CURRENT, version)
-	return Classification(OLDER if version < SCHEMA_VERSION else NEWER, version)
+	return Classification(OLDER if version < schema_version else NEWER, version)
 
 
 def refusal_message(path, classification):

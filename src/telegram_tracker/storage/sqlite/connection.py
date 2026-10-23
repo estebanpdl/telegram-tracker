@@ -198,12 +198,18 @@ def create_database(path, *, output_binding=None, busy_timeout_ms=BUSY_TIMEOUT_M
 			raise storage_error(exc, f'create {path}') from None
 		finally:
 			con.close()
-		_link_new(tmp, path)
+		link_new(tmp, path)
 	finally:
 		discard(tmp)
 
 
-def _link_new(tmp, path):
+def link_new(tmp, path):
+	'''
+	Publish the finished file `tmp` at `path` without replacing anything
+	there: a hard link, else a rename that refuses an existing file
+	(Windows). Raises DatabaseRefused when `path` exists; `tmp` is left
+	for the caller to remove.
+	'''
 	try:
 		os.link(tmp, path)
 	except FileExistsError:
