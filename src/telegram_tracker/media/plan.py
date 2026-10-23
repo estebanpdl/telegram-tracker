@@ -7,7 +7,11 @@ folder's saved histories, read through the builders' readers
 A ChannelPlan is one saved history: its name and channel, the profile
 recorded for it, the channel's stored access hash, and its references:
 (message_id, MediaRef) for each stored message whose media is of a
-selected type, newest first, as stored.
+selected type, newest first, as stored. With run_sources, it also names
+the collection run that wrote each message, as collect records runs in
+the ledger (media_runs.collection_run): a sqlite folder records it per
+message; files record it per history, and only for a history that its
+last run replaced or created.
 
 The channel ID is the reader's (the database, or the channel snapshot
 <channel>.json of the files), else the stored messages' own. The access
@@ -41,12 +45,15 @@ class ChannelPlan:
 
 	provenance -> its reader.records.HistoryProvenance
 	references -> [(message_id, classify.MediaRef)] of the selected types
+	runs -> {message_id: the collection run that wrote it}, None when not
+	        asked for or when the folder cannot tell
 	'''
 	name: str
 	channel_id: int
 	provenance: object
 	access_hash: int | None
 	references: list = field(default_factory=list)
+	runs: dict | None = None
 
 	def key(self, message_id, ref):
 		return ItemKey(self.channel_id, message_id, ref.media_id)
@@ -103,6 +110,42 @@ def collection_run(output_folder):
 	return (status.get('database') or {}).get('run_uuid') or status.get('started_at')
 
 
+def run_starts(output_folder):
+	'''
+	(run_uuid, started_at) of the collection runs in the folder's
+	database, read only.
+	'''
+	from telegram_tracker.storage.sqlite.connection import open_database
+
+	con = open_database(os.path.join(output_folder, DATABASE_FILE), readonly=True)
+	try:
+		return con.execute('SELECT run_uuid, started_at FROM collection_runs').fetchall()
+	finally:
+		con.close()
+
+
+def run_sources(collection, output_folder):
+	'''
+	A function (history, payload) -> {message_id: the collection run that
+	wrote it}, in the form collect records (collection_run), or None when
+	the reader cannot tell (reader message_runs). The files of a both
+	folder name a run by its started_at, while collect records its
+	database run_uuid, so they are translated; a run the database does
+	not know maps to None.
+	'''
+	aliases = None
+	if collection.source == FILES and collection.storage == BOTH:
+		aliases = {started_at: run_uuid for run_uuid, started_at in run_starts(output_folder)}
+
+	def sources(history, payload):
+		runs = collection.message_runs(history, payload)
+		if runs is None or aliases is None:
+			return runs
+		return {message_id: aliases.get(run) for message_id, run in runs.items()}
+
+	return sources
+
+
 def stored_access_hash(chats, channel_id):
 	'''
 	The access hash of the full Channel `channel_id` among stored chats,
@@ -156,12 +199,12 @@ def media_references(messages, selection=None):
 	return found
 
 
-def read_plans(collection, selection, targets=None):
+def read_plans(collection, selection, targets=None, *, sources=None):
 	'''
 	The Plans of an open collection reader: every saved history, or those
 	saved under the names in `targets` (compared case-insensitively, like
 	Telegram usernames). A second history of the same channel is skipped
-	as a duplicate.
+	as a duplicate. `sources` (run_sources) fills each plan's runs.
 	'''
 	wanted = None if targets is None else {target.casefold() for target in targets}
 	plans, duplicates, seen, found = [], [], {}, set()
@@ -182,7 +225,8 @@ def read_plans(collection, selection, targets=None):
 		if access_hash is None:
 			access_hash = stored_access_hash(collection.channel_chats(history), channel_id)
 		plans.append(ChannelPlan(
-			history.name, channel_id, history.provenance, access_hash, media_references(messages, selection)))
+			history.name, channel_id, history.provenance, access_hash, media_references(messages, selection),
+			None if sources is None else sources(history, payload)))
 	missing = [target for target in targets or () if target.casefold() not in found]
 	return Plans(plans, missing, duplicates)
 

@@ -313,13 +313,18 @@ class Ledger:
 
 	'''
 
-	def request(self, run_uuid, channel_id, refs, *, source_run=None):
+	def request(self, run_uuid, channel_id, refs, *, source_run=None, source_runs=None):
 		'''
 		Record the selected media of one channel as requested, and the
 		channel as covered by the run, in one transaction. `refs` holds
 		(message_id, classify.MediaRef) pairs. New references get a row;
 		requested, skipped and failed rows are requested again; complete
 		rows and rows this run is downloading are left as they are.
+
+		Each item's source_run is the collection run that wrote its
+		message: `source_run` for all of them, or per message from
+		`source_runs` ({message_id: run}) when given. A row requested
+		again keeps its recorded run when this one is not known (None).
 		'''
 		counts = dict.fromkeys(('new', 'again', 'complete', 'downloading'), 0)
 		with self._write('record requested media') as con:
@@ -327,6 +332,7 @@ class Ledger:
 			now = utc_now()
 			for message_id, ref in refs:
 				key = ItemKey(channel_id, message_id, ref.media_id)
+				source = source_run if source_runs is None else source_runs.get(message_id)
 				found = self._one(
 					'SELECT state FROM items WHERE channel_id = ? AND message_id = ? AND media_id = ?', *key)
 				if found is None:
@@ -336,16 +342,16 @@ class Ledger:
 						'last_run_uuid, profile_name, profile_id, updated_at) '
 						"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'requested', ?, ?, ?, ?, ?, ?)",
 						(*key, ref.media_type, ref.media_kind, ref.photo_size, ref.type, ref.subtype,
-							ref.mime_type, ref.ext, ref.expected_bytes, source_run, run_uuid, run_uuid,
+							ref.mime_type, ref.ext, ref.expected_bytes, source, run_uuid, run_uuid,
 							run['profile_name'], run['profile_id'], now)
 					)
 					counts['new'] += 1
 				elif found['state'] in (REQUESTED, SKIPPED, FAILED):
 					con.execute(
-						"UPDATE items SET state = 'requested', reason = NULL, expected_bytes = ?, source_run = ?, "
-						'last_run_uuid = ?, profile_name = ?, profile_id = ?, updated_at = ? '
-						'WHERE channel_id = ? AND message_id = ? AND media_id = ?',
-						(ref.expected_bytes, source_run, run_uuid, run['profile_name'], run['profile_id'], now,
+						"UPDATE items SET state = 'requested', reason = NULL, expected_bytes = ?, "
+						'source_run = coalesce(?, source_run), last_run_uuid = ?, profile_name = ?, profile_id = ?, '
+						'updated_at = ? WHERE channel_id = ? AND message_id = ? AND media_id = ?',
+						(ref.expected_bytes, source, run_uuid, run['profile_name'], run['profile_id'], now,
 							*key)
 					)
 					counts['again'] += 1

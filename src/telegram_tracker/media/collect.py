@@ -193,17 +193,20 @@ class MediaRun:
 		if self.record_requested(result.channel_id, [(job.message_id, job.ref) for job in jobs]):
 			self.jobs.extend(jobs)
 
-	def record_requested(self, channel_id, refs):
+	def record_requested(self, channel_id, refs, source_runs=None):
 		'''
-		Record (message_id, MediaRef) pairs of one channel as requested.
-		Returns False when nothing was recorded: no refs, media stopped,
-		or a ledger that cannot be written, which stops the media
-		downloads only.
+		Record (message_id, MediaRef) pairs of one channel as requested,
+		each with the collection run that wrote its message: this run's
+		collection run, or per message from `source_runs` when given
+		(Ledger.request). Returns False when nothing was recorded: no
+		refs, media stopped, or a ledger that cannot be written, which
+		stops the media downloads only.
 		'''
 		if self.stop_reason is not None or not refs:
 			return False
 		try:
-			self.ledger.request(self.run_uuid, channel_id, refs, source_run=self.source_run)
+			self.ledger.request(
+				self.run_uuid, channel_id, refs, source_run=self.source_run, source_runs=source_runs)
 		except (StorageError, sqlite3.Error) as exc:
 			self.stop(f'media downloads stopped: storage error: {exc}')
 			return False

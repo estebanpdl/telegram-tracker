@@ -55,9 +55,7 @@ from telegram_tracker.media.layout import ABSENT, DIFFERENT, LEDGER_FILE, PARTIA
 	TYPE_FOLDERS, MediaLayout, MediaPathError, inspect_final, is_link, lstat_or_none
 from telegram_tracker.media.ledger import COMPLETE, DOWNLOADING, RUNNING, STATES, ItemKey, open_ledger
 from telegram_tracker.media.partials import clean_partials
-from telegram_tracker.media.plan import history_channel_id, media_references, messages_of, open_folder
-from telegram_tracker.reader.records import FILES
-from telegram_tracker.storage.manifest import BOTH, DATABASE_FILE
+from telegram_tracker.media.plan import history_channel_id, media_references, messages_of, open_folder, run_sources
 from telegram_tracker.storage.writer import OutputLock
 
 
@@ -152,11 +150,8 @@ def _check(report, collection, layout, ledger):
 	for run in runs:
 		if run['command'] == COLLECT and run['collection_run']:
 			selected_by.setdefault(run['collection_run'], set()).update(json.loads(run['selection'])['types'])
-	if collection.source == FILES and collection.storage == BOTH and selected_by:
-		# the files name a run by its started_at; collect recorded its run_uuid
-		for run_uuid, started_at in run_starts(layout.output_folder):
-			if run_uuid in selected_by:
-				selected_by.setdefault(started_at, set()).update(selected_by[run_uuid])
+	# the run that wrote each message, in the form collect records
+	sources = run_sources(collection, layout.output_folder) if selected_by else None
 
 	stored = {}
 	for history in collection.histories():
@@ -166,7 +161,7 @@ def _check(report, collection, layout, ledger):
 		if channel_id is None or channel_id in stored:
 			continue
 		stored[channel_id] = {message.get('id'): media_id_of(message) for message in messages}
-		writers = collection.message_runs(history, payload) or {}
+		writers = (sources(history, payload) if sources is not None else None) or {}
 		for message_id, ref in media_references(messages):
 			item = by_key.get(ItemKey(channel_id, message_id, ref.media_id))
 			if item is not None:
@@ -196,20 +191,6 @@ def _check(report, collection, layout, ledger):
 		partials = clean_partials(layout, ledger, None, remove=False)
 		report.partials = [relative(layout, path) for path in partials.kept + partials.unknown]
 	report.unexpected.extend(_walk(report, layout, {blob['path'] for blob in blobs}))
-
-
-def run_starts(output_folder):
-	'''
-	(run_uuid, started_at) of the collection runs in the folder's
-	database, read only.
-	'''
-	from telegram_tracker.storage.sqlite.connection import open_database
-
-	con = open_database(os.path.join(output_folder, DATABASE_FILE), readonly=True)
-	try:
-		return con.execute('SELECT run_uuid, started_at FROM collection_runs').fetchall()
-	finally:
-		con.close()
 
 
 def media_id_of(message):

@@ -16,7 +16,8 @@ channel:
    and access hashes belong to the collecting account), and so is one
    without a stored access hash;
 2. its selected references without a complete ledger item are recorded
-   as requested;
+   as requested, each with the collection run that wrote its message
+   (media.plan.run_sources) as its source_run;
 3. their messages are fetched again in batches of LOOKUP_BATCH
    (channels.GetMessages, method class media_lookup), and each batch's
    files are downloaded before the next batch is fetched, so file
@@ -45,7 +46,7 @@ from telegram_tracker.media.collect import MediaRun
 from telegram_tracker.media.download import MEDIA_CHANGED, MESSAGE_GONE, REQUEST_FAILED, MediaJob
 from telegram_tracker.media.ledger import COMPLETE
 from telegram_tracker.media.location import location_of, same_media
-from telegram_tracker.media.plan import collection_run, open_folder, read_plans
+from telegram_tracker.media.plan import collection_run, open_folder, read_plans, run_sources
 from telegram_tracker.request_policy import AccountStopped, RequestFailed, RequestPolicy
 from telegram_tracker.storage.provenance import RunProfile, refusal
 from telegram_tracker.storage.records import StorageError
@@ -168,7 +169,7 @@ async def fetch_media(
 
 
 async def _fetch_locked(client, policy, collection, summary, selection, targets, concurrency):
-	found = read_plans(collection, selection, targets)
+	found = read_plans(collection, selection, targets, sources=run_sources(collection, summary.output_folder))
 	summary.channels = len(found.plans)
 	summary.missing, summary.duplicates = found.missing, found.duplicates
 	summary.notes = list(collection.notes)
@@ -216,7 +217,9 @@ async def _fetch_channel(media_run, plan, summary, concurrency):
 			summary.complete_before += 1
 		else:
 			pending.append((message_id, ref))
-	if not media_run.record_requested(plan.channel_id, pending):
+	# each item names the collection run that wrote its message, not the
+	# folder's last run (None when the folder cannot tell)
+	if not media_run.record_requested(plan.channel_id, pending, source_runs=plan.runs or {}):
 		return
 
 	peer = types.InputChannel(channel_id=plan.channel_id, access_hash=plan.access_hash)

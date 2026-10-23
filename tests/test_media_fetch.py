@@ -27,11 +27,14 @@ from telegram_tracker.media.layout import MEDIA_FOLDER, MediaLayout
 from telegram_tracker.media.ledger import open_ledger
 from telegram_tracker.media.selection import MediaSelection
 from telegram_tracker.reader.records import ChannelHistory, HistoryProvenance
+from telegram_tracker.storage import status as status_module
 from telegram_tracker.storage.records import LOCK_FILE
 from telegram_tracker.storage.sqlite.lease import database_lease_path
 
 
 MODES = ('files', 'sqlite', 'both')
+# a started_at after the first collection's
+LATER = '2099-01-01T00:00:00+00:00'
 BATCH = ('alpha_fx', 'beta_fx')
 # the stored channels' access hash (fixture channel defaults)
 ACCESS_HASH = 1000
@@ -306,6 +309,96 @@ class OutcomeTests(FetchCase):
 		runs = {run['run_uuid']: run for run in self.runs()}
 		self.assertEqual(runs[OLD_RUN]['state'], 'interrupted')
 		self.assertStored()
+
+	def test_a_session_rejected_during_a_lookup_stops_the_run(self):
+		client = self.collected()
+		client.files.fault(any_request('GetMessages'), errors.AuthKeyUnregisteredError(request=None))
+		code, _, err = self.download(client=client)
+		self.assertEqual(code, 1)
+		run, = self.runs()
+		self.assertEqual(run['state'], 'interrupted')
+		self.assertTrue(run['stop_reason'].startswith('session rejected: '), run['stop_reason'])
+		self.assertIn('> Stopped: session rejected', err)
+		self.assertIn('log in again', err)
+		# the first channel's items stay requested; the second was not reached
+		self.assertEqual(len(client.lookups), 1)
+		channel = client.lookups[0][0]
+		states = self.states()
+		self.assertEqual({key[0] for key in states}, {channel})
+		self.assertEqual(set(states.values()), {('requested', None)})
+		self.assertEqual(get_files(client), [])
+		self.assertNoLocks()
+
+
+class SourceRunTests(FetchCase):
+	'''
+	Each item names the collection run that wrote its message, in the
+	form collect records it, not the folder's last collection run.
+	'''
+
+	def collection_run(self, out):
+		status = self.status(out)
+		return (status.get('database') or {}).get('run_uuid') or status['started_at']
+
+	def later(self, *extra, out, client, media=False):
+		'''
+		Collect alpha_fx again, with another started_at than the first run
+		(files name runs by their started_at, to the second).
+		'''
+		run = self.media if media else self.collect
+		with mock.patch.object(status_module, 'utc_now', return_value=LATER):
+			code, _, err = run(*extra, targets=('alpha_fx',), out=out, client=client)
+		self.assertEqual(code, 0, err)
+		client.timeline.clear()
+		client.lookups.clear()
+		return self.collection_run(out)
+
+	def sources(self, out):
+		return {(i['channel_id'], i['message_id']): i['source_run'] for i in self.items(out)}
+
+	def test_an_item_names_the_run_that_wrote_its_history_in_each_mode(self):
+		for storage in MODES:
+			with self.subTest(storage=storage):
+				out = os.path.join(self.tmp, storage)
+				client = self.collected(storage=storage, out=out)
+				first = self.collection_run(out)
+				second = self.later('--yes', out=out, client=client)
+				self.assertNotEqual(first, second)
+
+				code, _, err = self.download(out=out, client=client)
+				self.assertEqual(code, 0, err)
+				self.assertStored(out)
+				expected = {key: second if key[0] == ALPHA else first for key in SIZES}
+				self.assertEqual(self.sources(out), expected)
+				# the media run still names the folder's last collection run
+				run, = self.runs(out)
+				self.assertEqual(run['collection_run'], second)
+
+	def test_a_retry_keeps_the_run_collect_recorded(self):
+		# message 1 of alpha fails under collect, then alpha is merged by
+		# --update with a new message 7: files cannot tell which run wrote
+		# a merged history's messages, a database can
+		for storage in MODES:
+			with self.subTest(storage=storage):
+				out = os.path.join(self.tmp, storage)
+				client = standard_world()
+				client.files.fault(
+					lambda r: r.kind == 'GetFile' and r.media_id == 9001, errors.FileIdInvalidError(request=None))
+				code, _, err = self.media(targets=BATCH, out=out, storage=storage, client=client)
+				self.assertEqual(code, 1, err)
+				first = self.collection_run(out)
+				self.assertEqual(self.states(out)[(ALPHA, 1)], ('failed', 'request_failed'))
+				self.assertEqual(self.sources(out)[(ALPHA, 1)], first)
+				client.files.post(7, document(client.files, 7555, 3000, 11), ALPHA)
+				second = self.later('--update', out=out, client=client)
+
+				code, _, err = self.download(out=out, client=client)
+				self.assertEqual(code, 0, err)
+				self.assertEqual(self.states(out)[(ALPHA, 1)], ('complete', None))
+				self.assertEqual(self.states(out)[(ALPHA, 7)], ('complete', None))
+				sources = self.sources(out)
+				self.assertEqual(sources[(ALPHA, 1)], first)
+				self.assertEqual(sources[(ALPHA, 7)], second if storage == 'sqlite' else None)
 
 
 class PreflightTests(FetchCase):

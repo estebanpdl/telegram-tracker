@@ -278,7 +278,7 @@ message's media. Rows are never deleted (trigger `items_kept`). Indexes:
 | `state` | See Item states. |
 | `reason` | Why it was skipped or failed; NULL otherwise. |
 | `attempts` | Download attempts so far, across runs. |
-| `source_run` | The collection run whose history it was selected from. |
+| `source_run` | The collection run whose history it was selected from, in the form of `media_runs.collection_run`: the run that wrote the item's message. `collect` records itself. `download-media` records `messages.run_id` (as its `run_uuid`) in a database read, and in a files read the run of the history's `<channel>_provenance.json` when that run replaced or created the history (its `run_uuid` in `both` folders); NULL when the folder cannot tell, as for a history merged by `--update` and read from its files. A row requested again keeps its value when the new run cannot tell. |
 | `first_run_uuid`, `last_run_uuid` | The run that first requested it and the last run that handled it; for a complete item, the run that completed it. |
 | `profile_name`, `profile_id` | The last run's profile. |
 | `updated_at` | Last change (UTC). |
