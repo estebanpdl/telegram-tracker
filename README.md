@@ -47,7 +47,7 @@ Contents:
 ## Requirements
 
 - [Python 3.14](https://www.python.org/). The project is tested with Python 3.14.7. Pinned library versions and the tested environment are in [docs/compatibility.md](docs/compatibility.md).
-- For `--storage sqlite` or `both` and for builds from a database: an SQLite library of 3.37.2 or newer with JSON1, the one Python's `sqlite3` module loads (`python -c "import sqlite3; print(sqlite3.sqlite_version)"`). Libraries from 3.31 to 3.37.1 are accepted but unsupported and untested; older ones are refused. `--storage files` does not use SQLite.
+- For `--storage sqlite` or `both` and for builds reading a collection database: an SQLite library of 3.37.2 or newer with JSON1, the one Python's `sqlite3` module loads (`python -c "import sqlite3; print(sqlite3.sqlite_version)"`). The collection database's version check accepts 3.31 to 3.37.1, but those versions are unsupported and Python's module may fail to load them; older ones are refused. `--storage files` creates no collection database, but Telethon sessions still use SQLite. `build-urls` writes a separate SQLite database even when reading files.
 - [Telegram API credentials](https://my.telegram.org/auth?to=apps): a Telegram account, plus an app `api_id` and `api_hash`.
 - The libraries in `requirements.txt`: [Telethon](https://docs.telethon.dev/en/stable/) 1.x, [pandas](https://pandas.pydata.org/), [openpyxl](https://openpyxl.readthedocs.io/en/stable/), [tqdm](https://tqdm.github.io/), [NetworkX](https://networkx.org/), [Matplotlib](https://matplotlib.org/), and [python-louvain](https://github.com/taynaud/python-louvain) for community detection.
 

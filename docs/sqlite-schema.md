@@ -39,9 +39,11 @@ phone numbers, access hashes, file references, names, photos and online status. 
   `json_type`). Python's `sqlite3` module reports the library version in
   `sqlite3.sqlite_version`. 3.37.2 is the oldest supported library: the oldest the
   test suite has passed on (see Platform support in `docs/compatibility.md`). The
-  schema itself needs only 3.31, so 3.31 to 3.37.1 are accepted but unsupported and
-  untested; a Python 3.14 build's `sqlite3` module can need a newer library before it
-  loads at all. A library older than 3.31 is refused.
+  schema itself needs only 3.31, so 3.31 to 3.37.1 pass its version check but are
+  unsupported, with no successful test-suite result recorded. A Python 3.14 build's
+  `sqlite3` module can need a newer library before it loads at all; an earlier CI
+  run failed to import it with Ubuntu 20.04's 3.31.1. A library older than 3.31 is
+  refused by the collection database's capability check.
 - Every connection sets `PRAGMA foreign_keys = ON` and `PRAGMA busy_timeout = 5000`.
   The journal mode is SQLite's default rollback journal (`DELETE`).
 - `PRAGMA application_id` is `1413960786` (`0x54475452`, the ASCII bytes `TGTR`).
@@ -481,8 +483,9 @@ the run, its time, its options and its profile.
   never upgrades it. Any other SQLite database, including a Telethon session, is
   refused and left untouched; an empty file is refused, and a file that isn't an
   SQLite database is refused as damaged. An SQLite library older than 3.31 or without
-  JSON1 is refused; 3.31 to 3.37.1 are accepted, but only 3.37.2 and newer are
-  supported (see [Requirements and identity](#requirements-and-identity)).
+  JSON1 is refused; 3.31 to 3.37.1 pass the version check but are unsupported, and
+  Python's module may fail to load them (see
+  [Requirements and identity](#requirements-and-identity)).
 - An upgrade from version N to N+1 runs offline, holding the database lease
   (`telegram-tracker.sqlite3.lock`, as a collection does), and makes a backup first: a consistent
   copy through SQLite's backup API, named `<name>.v<N>-<UTC time>.bak.sqlite3` next
