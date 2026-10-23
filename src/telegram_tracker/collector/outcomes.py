@@ -58,7 +58,8 @@ class CollectionSummary:
 	None) for each succeeded target with messages. `profile` is the
 	run's RunProfile (None when the caller gave none); `takeovers` holds
 	(target, previous profile name or None) for histories this run
-	replaced although they belonged to another profile.
+	replaced although they belonged to another profile. `media` is the
+	sidecar's media block of a run with media downloads, else None.
 	'''
 	requested: list
 	output_folder: str
@@ -76,6 +77,7 @@ class CollectionSummary:
 	peak_queued_results: int = 0
 	profile: object = None
 	takeovers: list = field(default_factory=list)
+	media: dict | None = None
 
 
 def stop_reason_for(exc):

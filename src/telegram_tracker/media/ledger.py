@@ -30,8 +30,8 @@ from collections import namedtuple
 from dataclasses import dataclass
 
 # import local submodules
-from telegram_tracker.media.identity import check_ledger_identity
-from telegram_tracker.media.layout import is_link, lstat_or_none, relative_path
+from telegram_tracker.media.identity import check_ledger_identity, folder_identity
+from telegram_tracker.media.layout import MediaLayout, is_link, lstat_or_none, relative_path
 from telegram_tracker.media.ledger_schema import LedgerRefused, classify_ledger, connect_ledger, \
 	create_ledger
 from telegram_tracker.storage.destination import canonical_folder
@@ -143,6 +143,19 @@ def open_ledger(layout, identity, *, create=False, readonly=False):
 		con.close()
 		raise
 	return Ledger(con, path, meta)
+
+
+def check_ledger(output_folder):
+	'''
+	Read only, before a run that will write the ledger of
+	`output_folder`: the downloaded-media folder, when there is one, has
+	no link, and its ledger, when there is one, belongs to the folder's
+	data (open_ledger's refusals). Nothing is created.
+	'''
+	layout = MediaLayout(output_folder)
+	if layout.ensure(create=False) is None or lstat_or_none(layout.ledger_path) is None:
+		return
+	open_ledger(layout, folder_identity(output_folder), readonly=True).close()
 
 
 def rows(cursor):

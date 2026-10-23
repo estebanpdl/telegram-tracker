@@ -157,6 +157,7 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 			'--max-messages) need message collection; remove '
 			'--limit-download-to-channel-metadata'
 		)
+	include_media = media_options(args, parser, metadata_only)
 
 	targets, given = read_targets(args, parser)
 	output_folder = data_folder_from(args['output'], DEFAULT_OUTPUT)
@@ -178,8 +179,18 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 		from telegram_tracker.storage import OutputLocked, StorageError
 		from telegram_tracker.storage.destination import StorageChoiceRefused, select_destination
 		from telegram_tracker.storage.provenance import RunProfile
+		from telegram_tracker.media.ledger import check_ledger
+		from telegram_tracker.media.limits import MediaLimits
+		from telegram_tracker.media.selection import MediaSelection
 	except ModuleNotFoundError as exc:
 		return missing_dependency(COLLECT, exc)
+
+	media = None
+	if include_media:
+		media = MediaSelection(
+			args.get('media_types') or MediaSelection().types,
+			MediaLimits(args.get('max_media_size'), args.get('max_media_total'))
+		)
 
 	try:
 		destination = select_destination(output_folder, args.get('storage'), legacy=legacy)
@@ -204,6 +215,9 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 			parser.error(f'the --output folder must be outside the application home ({home})')
 		destination.protected = (session.path,)
 		destination.check()
+		if media is not None:
+			# a ledger of other data is refused before credentials; the run checks again
+			check_ledger(output_folder)
 		confirmed = None
 		if bounds and not metadata_only:
 			assume_yes = args.get('yes', False)
@@ -270,6 +284,8 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 		print('Update: new posts are merged into saved histories\n')
 	if destination.uses_database:
 		print(f'Storage: {destination.describe()}\n')
+	if media is not None:
+		print(f'Media: {media.describe()}\n')
 	if batch:
 		duplicates = given - len(targets)
 		print(
@@ -296,6 +312,7 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 					writer_factory=destination.open_writer,
 					preflight=destination.check_unlocked,
 					confirmed=confirmed,
+					media=media,
 					**controls
 				)
 			)
@@ -340,6 +357,7 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 			+ ', '.join(summary.stale_histories) + '\n'
 		)
 	print_messages(summary.saved_messages)
+	media_problems = print_media(summary.media, summary.stop_reason)
 
 	if summary.stop_reason:
 		print(f'> Stopped: {summary.stop_reason}', file=sys.stderr)
@@ -355,10 +373,31 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 			+ ', '.join(target for target, _ in summary.failed),
 			file=sys.stderr
 		)
-	if summary.failed or summary.stop_reason:
+	if summary.failed or summary.stop_reason or media_problems:
 		return 1
 
 	return 0
+
+
+def media_options(args, parser, metadata_only):
+	'''
+	Whether the run downloads media. The media options without
+	--include-media, or media with metadata only, are argument errors.
+	'''
+	include = args.get('include_media', False)
+	given = [
+		option for option, key in (
+			('--media-types', 'media_types'), ('--max-media-size', 'max_media_size'),
+			('--max-media-total', 'max_media_total')
+		) if args.get(key) is not None
+	]
+	if given and not include:
+		parser.error(f'{", ".join(given)} need{"s" if len(given) == 1 else ""} --include-media')
+	if include and metadata_only:
+		parser.error(
+			'--include-media needs message collection; remove --limit-download-to-channel-metadata'
+		)
+	return include
 
 
 def missing_credentials(resolution, profile):
@@ -435,6 +474,40 @@ def print_messages(saved_messages):
 		for target, count, _ in saved_messages:
 			print(f'>   {target}: {count}')
 	print('')
+
+
+def print_media(record, run_stop_reason=None):
+	'''
+	The media downloads of the run (the sidecar's media block): counts on
+	stdout; on stderr, a stop of the downloads alone (a stop of the run is
+	reported with the run) and failed files. Returns True when the
+	downloads stopped on their own or a file failed.
+	'''
+	if record is None:
+		return False
+	stopped = record['stop_reason'] if record['stop_reason'] != run_stop_reason else None
+	items = record['items']
+	if items is not None:
+		print(
+			f'> Media: {items["complete"]} of {items["selected"]} selected file(s) stored '
+			f'({items["downloaded"]} downloaded in this run), {items["skipped"]} skipped by the size '
+			f'limits, {items["failed"]} failed, {items["not_attempted"]} not attempted; '
+			f'{record["bytes_received"]} bytes received. Recorded in {record["ledger"]}.'
+		)
+	if record['requests']:
+		print('> Media requests by method class (sent / retries / flood waits / flood wait seconds):')
+		for name, stats in record['requests'].items():
+			print(
+				f'>   {name:<12} {stats["requests"]} / {stats["retries"]} / '
+				f'{stats["flood_waits"]} / {stats["flood_wait_seconds"]}'
+			)
+	if items is not None or record['requests']:
+		print('')
+	if stopped:
+		print(f'> {stopped[:1].upper()}{stopped[1:]}', file=sys.stderr)
+	if items is not None and items['failed']:
+		print(f'> {items["failed"]} media file(s) failed; their reasons are in {record["ledger"]}.', file=sys.stderr)
+	return bool(stopped or items is None or items['failed'])
 
 
 def asyncio_run(coroutine):

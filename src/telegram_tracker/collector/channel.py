@@ -14,6 +14,7 @@ from telegram_tracker.api import CHANNEL_ACCESS_ERRORS
 from telegram_tracker.collector.history import HistoryWindow, fetch_history
 from telegram_tracker.collector.outcomes import TargetUnavailable
 from telegram_tracker.collector.rpc import CHANNEL
+from telegram_tracker.media.collect import ChannelMedia, covered_messages, input_channel
 from telegram_tracker.storage.histories import FileHistories, ReplaceNotConfirmed
 from telegram_tracker.storage.records import ChannelResult
 from telegram_tracker.utils import JSONEncoder
@@ -50,7 +51,8 @@ async def collect_channel(
 		after_resolve=None,
 		profile=None,
 		histories=None,
-		confirmed=None
+		confirmed=None,
+		media=None
 	):
 	'''
 	Collect one target and return its ChannelResult; nothing is written.
@@ -72,7 +74,10 @@ async def collect_channel(
 	under its ID raises ReplaceNotConfirmed before any history request.
 	`after_resolve(entity)` is awaited
 	right after entity resolution (entity is False when missing) and may
-	raise to stop. Raises TargetUnavailable, PaginationStalled,
+	raise to stop. With `media` (a media.selection.MediaSelection), the
+	location of each selected file is kept while paging, and the result
+	carries the MediaJobs of the messages it covers (see media.collect).
+	Raises TargetUnavailable, PaginationStalled,
 	HistoryUnreadable, HistoryRefused, or RequestFailed for a target that
 	fails on its own.
 	'''
@@ -131,8 +136,13 @@ async def collect_channel(
 	if metadata_only:
 		return result
 
+	captured = ChannelMedia(media) if media is not None else None
+
 	async def get_page(**arguments):
-		return await requests.history(channel_id, **arguments)
+		page = await requests.history(channel_id, **arguments)
+		if captured is not None:
+			captured.capture(page)
+		return page
 
 	async def on_page(chats):
 		await observe('from_messages', chats)
@@ -143,16 +153,18 @@ async def collect_channel(
 
 	if not update:
 		result.history, result.history_mode = data, 'replaced'
+		result.messages = len(data['messages'])
 	elif saved is None:
 		result.history, result.history_mode = data, 'created'
 		result.new_messages = len(data['messages'])
+		result.messages = len(data['messages'])
 	else:
 		result.history, result.history_mode, result.messages = histories.merge(target, saved, data)
 		if result.history_mode == 'merged':
 			result.fetched = data
 		# merging keeps every saved message, so the count only grows
 		result.new_messages = result.messages - saved.messages
-		return result
 
-	result.messages = len(data['messages'])
+	if captured is not None:
+		result.media = captured.jobs(channel_id, input_channel(entity_attrs), covered_messages(result))
 	return result

@@ -91,6 +91,9 @@ class ChannelResult:
 		metadata only
 	new_messages -> for --update, the messages this run added to the
 		history (all of them for 'created'); None otherwise
+	media -> with --include-media, the media.download.MediaJobs of the
+		messages this result covers (recorded once it is committed);
+		None otherwise
 	'''
 	index: int
 	target: str
@@ -103,6 +106,7 @@ class ChannelResult:
 	messages: int | None = None
 	new_messages: int | None = None
 	min_id: int | None = None
+	media: list | None = None
 
 
 @dataclass

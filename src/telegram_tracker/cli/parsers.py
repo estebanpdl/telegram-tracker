@@ -12,7 +12,8 @@ services.
 import argparse
 
 # import local submodules
-from telegram_tracker.cli.argument_types import bounded_float, bounded_int, utc_datetime
+from telegram_tracker.cli.argument_types import bounded_float, bounded_int, media_size, media_types, \
+	utc_datetime
 from telegram_tracker.cli.builder_parsers import AUTO, DEFAULT_OUTPUT, SOURCES, \
 	add_builder_arguments, build_builder_parser
 
@@ -325,10 +326,51 @@ def add_collect_arguments(parser, prog=SCRIPT_PROG):
 			'database; the builders read the files unless given --source sqlite.'
 	)
 
+	media = parser.add_argument_group(
+		'media',
+		'Download the files attached to the collected messages. Off by default: '
+		'without --include-media no file is requested. The other options need '
+		'--include-media, and none is allowed with '
+		'--limit-download-to-channel-metadata.'
+	)
+	media.add_argument(
+		'--include-media',
+		action='store_true',
+		help='Also download the photos, videos, audio and documents attached to '
+			'the collected messages into <output>/downloaded-media/, recorded in its '
+			'media.sqlite3. No size limit unless --max-media-size or '
+			'--max-media-total is given. With --update, only the new messages\' '
+			'files. Downloads start once every channel\'s messages are saved and use '
+			'the request controls below. Files are saved, never opened.'
+	)
+	media.add_argument(
+		'--media-types',
+		type=media_types,
+		metavar='TYPES',
+		help='Only these kinds, separated by commas: image, video, audio, file '
+			'(default: all).'
+	)
+	media.add_argument(
+		'--max-media-size',
+		type=media_size,
+		metavar='SIZE',
+		help='Skip a file larger than SIZE (bytes, or a number with K, M or G for '
+			'KiB, MiB, GiB). A file of unknown size is stopped once it passes SIZE, '
+			'and its partial copy is removed.'
+	)
+	media.add_argument(
+		'--max-media-total',
+		type=media_size,
+		metavar='SIZE',
+		help='Receive at most SIZE in this run, counting every byte received, '
+			'restarts included. Files that do not fit are skipped and recorded.'
+	)
+
 	controls = parser.add_argument_group(
 		'request controls',
 		'Shared by channel collection requests after the account check, '
-		'including metadata lookups. Login and the account check are outside '
+		'including metadata lookups and media downloads (one request per 512 KiB '
+		'of a file). Login and the account check are outside '
 		'these controls; Telethon may retry inside an attempt. These are project '
 		'limits, not a safe rate guaranteed by '
 		f'Telegram. The earlier `{invocation(prog)} --batch-file ...` form uses the '
