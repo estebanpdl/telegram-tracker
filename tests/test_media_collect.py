@@ -26,7 +26,7 @@ from telethon import errors, types
 from fakes import FixtureWorld
 from media_collect_support import ALPHA, BETA, KIB, MediaCase, MediaClient, photo, record_events, \
 	standard_world
-from media_download_support import content
+from media_download_support import any_request, content
 from storage_modes_support import file_contents, kill_inside_a_write
 
 from telegram_tracker import collector
@@ -425,6 +425,27 @@ class StopTests(MediaCase):
 		self.assertIn(f'> Stopped: {status["stop_reason"]}', err)
 		detail = status['stop_reason'].split(': ', 1)[1]
 		self.assertEqual(err.count(detail), 1, err)
+
+	def test_a_session_rejected_while_downloading_ends_the_run_and_keeps_every_history(self):
+		client = standard_world()
+		client.files.fault(any_request(), errors.AuthKeyUnregisteredError(request=None))
+		code, _, err = self.media('--concurrency', '1', targets=BATCH, client=client)
+		self.assertEqual(code, 1)
+		status = self.status()
+		self.assertEqual(status['state'], 'interrupted')
+		self.assertTrue(status['stop_reason'].startswith('session rejected: '), status['stop_reason'])
+		self.assertEqual([t['status'] for t in status['targets']], ['succeeded', 'succeeded'])
+		for target in BATCH:
+			self.assertTrue(os.path.isfile(os.path.join(self.out, target, f'{target}_messages.json')))
+		# one file request on the rejected session, and none after it
+		self.assertEqual(len(get_files(client)), 1)
+		states = self.states()
+		self.assertEqual(sorted(states.values()).count(('failed', 'request_failed')), 1)
+		self.assertEqual(
+			{state for state in states.values() if state != ('failed', 'request_failed')}, {('requested', None)})
+		block = status['media']
+		self.assertEqual((block['state'], block['items']['failed']), ('interrupted', 1))
+		self.assertIn('> Stopped: session rejected', err)
 
 	def test_a_full_disk_stops_media_only(self):
 		client = standard_world()

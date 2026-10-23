@@ -3,9 +3,10 @@
 The download adapter's failure mapping, on the fake file service: flood
 waits within and over the limit, timeouts (the policy's and Telethon's),
 persistent transient errors, other RPC errors and a CDN redirect,
-cancellation, a full disk, an unusable staging folder, and expired file
+cancellation, a full disk, an unusable staging folder, expired file
 references (one refresh per attempt, then the file starts over; a
-second expiry, a deleted message, or changed media fails the item).
+second expiry, a deleted message, or changed media fails the item), and
+a session Telegram rejects (the item fails and the run stops).
 '''
 
 # import modules
@@ -22,6 +23,7 @@ from telethon import errors, types
 
 from media_download_support import CHANNEL, DownloadTestCase, any_request, at_offset, content
 from media_support import RUN_A, make_link, remove_link
+from telegram_tracker.collector.outcomes import SessionRejected
 from telegram_tracker.media import staging
 from telegram_tracker.media.download import CDN_REDIRECT, MediaStopped
 from telegram_tracker.media.ledger import COMPLETE, FAILED, REQUESTED
@@ -325,6 +327,40 @@ class ReferenceTests(FaultTestCase):
 			await self.downloader.download(job)
 		self.assertEqual(caught.exception.method_class, 'media_lookup')
 		self.assertEnded(job, FAILED, 'flood_stop')
+
+	async def test_a_rejected_session_on_the_lookup_stops_the_run(self):
+		job = self.job(81)
+		self.expire_at(PULL_BYTES, 81)
+		self.fake.fault(any_request('GetMessages'), errors.AuthKeyUnregisteredError(request=None))
+		with self.assertRaises(SessionRejected):
+			await self.downloader.download(job)
+		self.assertEnded(job, FAILED, 'request_failed')
+		self.assertEqual(len(self.fake.lookups()), 1)
+
+
+class SessionTests(FaultTestCase):
+
+	async def test_a_rejected_session_fails_the_item_and_stops_the_run(self):
+		cases = {
+			'unregistered': errors.AuthKeyUnregisteredError(request=None),
+			'revoked': errors.SessionRevokedError(request=None),
+			'auth key': errors.AuthKeyError(request=None, message='AUTH_KEY_DUPLICATED', code=406)
+		}
+		for n, (label, error) in enumerate(cases.items(), start=90):
+			with self.subTest(label):
+				self.downloader = self.make_downloader()
+				job, later = self.job(n), self.job(n + 10)
+				self.fake.fault(lambda r, m=n: r.media_id == m and r.offset == PULL_BYTES, error)
+				with self.assertRaises(SessionRejected):
+					await self.downloader.download(job)
+				self.assertEnded(job, FAILED, 'request_failed')
+				# not retried: one request at each offset
+				self.assertEqual([r.offset for r in self.fake.get_files() if r.media_id == n], [0, PULL_BYTES])
+				# a later download raises at once and stays requested
+				with self.assertRaises(SessionRejected):
+					await self.downloader.download(later)
+				self.assertEqual(self.ledger.item(later.key)['state'], REQUESTED)
+				self.assertEqual([r for r in self.fake.get_files() if r.media_id == n + 10], [])
 
 
 if __name__ == '__main__':

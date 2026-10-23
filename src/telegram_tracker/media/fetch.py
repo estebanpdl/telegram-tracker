@@ -41,7 +41,7 @@ from dataclasses import dataclass, field
 from telethon import errors, types
 
 # import local submodules
-from telegram_tracker.collector.outcomes import SESSION_ERRORS, SessionRejected, stop_reason_for
+from telegram_tracker.collector.outcomes import SESSION_ERRORS, SessionRejected, session_rejected, stop_reason_for
 from telegram_tracker.media.collect import MediaRun
 from telegram_tracker.media.download import MEDIA_CHANGED, MESSAGE_GONE, REQUEST_FAILED, MediaJob
 from telegram_tracker.media.ledger import COMPLETE
@@ -230,7 +230,7 @@ async def _fetch_channel(media_run, plan, summary, concurrency):
 		try:
 			messages = await media_run.downloader.lookup(peer, [message_id for message_id, _ in batch])
 		except SESSION_ERRORS as exc:
-			raise SessionRejected(f'Telegram rejected the session ({type(exc).__name__}); log in again') from None
+			raise session_rejected(exc) from None
 		except (RequestFailed, errors.RPCError) as exc:
 			for message_id, ref in batch:
 				if not _fail(media_run, plan.key(message_id, ref), REQUEST_FAILED):

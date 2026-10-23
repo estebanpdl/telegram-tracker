@@ -30,7 +30,8 @@ released (`download-media` uses it the same way, see media.fetch):
 
 MediaStopped (a full disk, an unusable staging folder) and a ledger
 write that fails stop the media downloads only; the collection goes on
-and the block says why. AccountStopped and cancellation stop the run.
+and the block says why. AccountStopped, a rejected session
+(SessionRejected) and cancellation stop the run.
 Completed files and rows are never deleted.
 '''
 

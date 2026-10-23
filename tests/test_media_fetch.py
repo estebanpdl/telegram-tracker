@@ -329,6 +329,24 @@ class OutcomeTests(FetchCase):
 		self.assertEqual(get_files(client), [])
 		self.assertNoLocks()
 
+	def test_a_session_rejected_during_a_download_stops_the_run(self):
+		client = self.collected()
+		client.files.fault(any_request(), errors.AuthKeyUnregisteredError(request=None))
+		code, _, err = self.download(client=client)
+		self.assertEqual(code, 1)
+		run, = self.runs()
+		self.assertEqual(run['state'], 'interrupted')
+		self.assertTrue(run['stop_reason'].startswith('session rejected: '), run['stop_reason'])
+		self.assertIn('> Stopped: session rejected', err)
+		# one file request on the rejected session, and none after it
+		self.assertEqual(len(get_files(client)), 1)
+		states = self.states()
+		self.assertEqual(sorted(states.values()).count(('failed', 'request_failed')), 1)
+		self.assertEqual({key[0] for key in states}, {ALPHA})
+		self.assertEqual(
+			{state for key, state in states.items() if state != ('failed', 'request_failed')}, {('requested', None)})
+		self.assertNoLocks()
+
 
 class SourceRunTests(FetchCase):
 	'''

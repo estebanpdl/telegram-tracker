@@ -25,14 +25,17 @@ requested and ends it complete, skipped or failed:
 Failures map to the ledger's reasons:
 
 	AccountStopped (flood over the limit)  flood_stop, then raised: the run stops
+	a session Telegram rejects             request_failed, then SessionRejected:
+	                                       the run stops
 	RequestFailed, other RPC errors, CDN   request_failed
 	disk full                              disk_full, then MediaStopped
 	staging folder unusable                storage_error, then MediaStopped
 	other local file errors                storage_error
 	cancellation                           interrupted, then raised
 
-The partial file is removed whatever happens. Once the account or media
-has stopped, download() raises at once and leaves the item requested.
+The partial file is removed whatever happens. Once the account, the
+session or media has stopped, download() raises at once and leaves the
+item requested.
 
 Concurrent downloads of the same media in a channel (the same document
 in two messages) are coalesced: the second waits for the first, then
@@ -60,7 +63,8 @@ from telegram_tracker.media.limits import OVER_FILE_LIMIT, OVER_RUN_LIMIT, PULL_
 from telegram_tracker.media.location import MediaLocation, location_of, same_media
 from telegram_tracker.media.staging import PartialFile, is_disk_full, publish
 from telegram_tracker.media.stream import ChunkStream
-from telegram_tracker.request_policy import AccountStopped, RequestFailed, flood_seconds
+from telegram_tracker.request_policy import SESSION_ERRORS, AccountStopped, RequestFailed, flood_seconds, \
+	session_rejected
 from telegram_tracker.storage.records import StorageError
 
 
@@ -207,8 +211,8 @@ class MediaDownloader:
 	async def download(self, job):
 		'''
 		Download one MediaJob; returns its DownloadOutcome. Raises
-		AccountStopped or MediaStopped when downloads cannot go on, and
-		CancelledError when cancelled.
+		AccountStopped, SessionRejected or MediaStopped when downloads
+		cannot go on, and CancelledError when cancelled.
 		'''
 		self._raise_if_stopped()
 		while (running := self._inflight.get(job.media_key)) is not None:
@@ -337,6 +341,12 @@ class MediaDownloader:
 		except AccountStopped:
 			self._record(key, counts, FAILED, FLOOD_STOP)
 			raise
+		except SESSION_ERRORS as exc:
+			# before REQUEST_ERRORS: these are RPC errors too, but every
+			# later request of the account would be refused as well
+			self._record(key, counts, FAILED, REQUEST_FAILED)
+			self.stopped = session_rejected(exc)
+			raise self.stopped from None
 		except asyncio.CancelledError:
 			if counts.n is not None:
 				self._record(key, counts, FAILED, INTERRUPTED)
@@ -419,6 +429,9 @@ class MediaDownloader:
 			channel=job.peer, id=[types.InputMessageID(job.message_id)])
 		try:
 			result = await self._call(counts, MEDIA_LOOKUP, lambda: self.client(request))
+		except SESSION_ERRORS:
+			# the run stops (_download)
+			raise
 		except (RequestFailed, errors.RPCError):
 			raise _Settle(FAILED, REQUEST_FAILED) from None
 		message = next(

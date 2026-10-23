@@ -19,7 +19,7 @@ from telegram_tracker.collector.channel import collect_channel
 from telegram_tracker.collector.history import HistoryWindow
 from telegram_tracker.collector.outcomes import SESSION_ERRORS, CollectionSummary, \
 	DuplicateTarget, PaginationStalled, SessionRejected, TargetUnavailable, \
-	stop_reason_for
+	session_rejected, stop_reason_for
 from telegram_tracker.collector.rpc import MetadataCache, Requests
 from telegram_tracker.media.collect import METHOD_CLASSES as MEDIA_METHOD_CLASSES, MediaRun
 from telegram_tracker.request_policy import AccountStopped, RequestFailed, RequestPolicy
@@ -296,9 +296,7 @@ async def _collect_targets(
 			print(f'> {target}: {exc}; messages not saved.', file=sys.stderr)
 			outcome = ('failed', str(exc))
 		except SESSION_ERRORS as exc:
-			raise SessionRejected(
-				f'Telegram rejected the session ({type(exc).__name__}); log in again'
-			) from None
+			raise session_rejected(exc) from None
 		finally:
 			resolved_events[index].set()
 
