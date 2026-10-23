@@ -39,49 +39,56 @@ Each cell is **supported** (the offline suite or an install check passed there),
 program stops). Every cell uses the versions pinned in `requirements.txt`; other
 dependency versions are unknown.
 
-The runner rows rest on two runs of `.github/workflows/cross-os.yml` on GitHub-hosted
-runners, both on 2026-10-23:
+The runner rows use the saved logs of `.github/workflows/cross-os.yml` on
+2026-10-23, testing PR #20's merge commit `6d66635` (`db78dbe` into `e475609`).
+All four jobs succeeded; their suites ran under an operating-system block of
+outbound connections.
+Each job discovered 859 tests; skipped cases are separate from passes:
 
-- At commit `b1eca57`, all 859 tests passed in every job, under the operating
-  system's block of outbound connections. Skipped: 9 on `ubuntu-24.04`, 18 on
-  `windows-2025`, 7 on `macos-15`, and 9 in the SQLite 3.37.2 job. In the three
-  operating-system jobs, the wheel and sdist were built, and the wheel installed into
-  a fresh environment with `pip check` clean. The entry-point comparison failed in that run on a checker defect (the
-  `python main.py` program name), not on a product difference.
-- At commit `985ea28`, which changed only that checker, all four jobs passed,
-  including the comparison of `tgtracker`, `python -m telegram_tracker` and
-  `python main.py` in 18 cases: help, argument errors, missing credentials, offline
-  `auth` reports and builder refusals.
+| Job | Passed | Skipped | Installed entry-point comparison |
+|---|---|---|---|
+| `ubuntu-24.04` | 850 | 9 | 18 cases, no failures |
+| `windows-2025` | 841 | 18 | 18 cases, no failures |
+| `macos-15` | 852 | 7 | 18 cases, no failures |
+| `ubuntu-24.04`, SQLite 3.37.2 | 850 | 9 | not run in this job |
 
-A hosted runner proves only its own operating system, CPU, file system, and library
-versions. Each job prints them first, but the printed records of these two runs were
-not kept, so the runner rows give the image name and what the skipped and passing
-tests show about its file system. The suite runs from the source tree; the installed
-wheel is checked by the entry-point comparison only.
+In the three operating-system jobs, the wheel and sdist were built, and the wheel
+installed into a fresh environment with `pip check` clean. The comparison covers
+`tgtracker`, `python -m telegram_tracker` and `python main.py` in help, argument
+errors, missing credentials, offline `auth` reports and builder refusals.
+
+A hosted runner proves only its recorded operating system, CPU, file system, and
+library versions. The rows below use the platform records printed in that run,
+including probes in the checkout and temporary folders. The suite runs from the
+source tree; the installed wheel is checked by the entry-point comparison only.
 
 | Platform | Source (`python main.py`) | `python -m telegram_tracker`, installed wheel | `tgtracker`, installed wheel |
 |---|---|---|---|
 | Windows 11, x86-64, local NTFS, Python 3.14.7 (conda-forge), SQLite 3.54.0 | supported | supported by the 2026-10-20 install check (an earlier build) | supported by the 2026-10-20 install check (an earlier build) |
-| GitHub `windows-2025` runner (Windows Server 2025); ignores case, keeps Unicode normalization forms apart | supported | supported (entry-point comparison) | supported (entry-point comparison) |
-| GitHub `ubuntu-24.04` runner (Ubuntu 24.04); case-sensitive, keeps normalization forms apart | supported for a regular user; unknown as root (see Permission errors) | supported (entry-point comparison) | supported (entry-point comparison) |
-| GitHub `macos-15` runner (macOS 15); ignores case and Unicode normalization | supported for a regular user; unknown as root (see Permission errors) | supported (entry-point comparison) | supported (entry-point comparison) |
+| GitHub `windows-2025` runner (Windows Server 2025), x86-64, NTFS; ignores case, keeps Unicode normalization forms apart | supported | supported (entry-point comparison) | supported (entry-point comparison) |
+| GitHub `ubuntu-24.04` runner (Ubuntu 24.04), x86-64, ext4; case-sensitive, keeps normalization forms apart | supported for a regular user; unknown as root (see Permission errors) | supported (entry-point comparison) | supported (entry-point comparison) |
+| GitHub `macos-15` runner (macOS 15.7.9), arm64, APFS; ignores case and Unicode normalization | supported for a regular user; unknown as root (see Permission errors) | supported (entry-point comparison) | supported (entry-point comparison) |
 | Other Linux distributions, Linux on arm64, macOS on x86-64 | unknown | unknown | unknown |
 | WSL with the application home or output on a Windows drive (`/mnt/c`) | unknown | unknown | unknown |
 | Network file systems (SMB, NFS), FAT/exFAT drives | unknown | unknown | unknown |
 
 | Python | Status |
 |---|---|
-| CPython 3.14 | supported: 3.14.7 (conda-forge) on Windows 11, and the CPython 3.14 that `actions/setup-python` installs on the three runners |
+| CPython 3.14 | supported: 3.14.7 (conda-forge) on Windows 11; the saved CI run used 3.14.9 on `windows-2025`, 3.14.8 on `ubuntu-24.04` (both jobs), and 3.14.7 on `macos-15` |
 | CPython 3.14 free-threaded build, 3.15 and later | unknown |
 | 3.13 and earlier | refused by pip (`requires-python = ">=3.14"`); the source form is untested there |
 
 | SQLite library loaded by Python's `sqlite3` | Status |
 |---|---|
 | 3.54.0 | supported |
-| The runners' own libraries | supported (the suite passed with each image's own library). On 2026-10-22, an earlier run of the workflow (commit `1619a9d`) printed 3.45.1 on `ubuntu-24.04` and 3.50.4 on `macos-15` and `windows-2025` |
-| 3.37.2 (Ubuntu 22.04's build, loaded on the `ubuntu-24.04` runner) | supported; the oldest supported library. The job stops unless `sqlite3.sqlite_version` is `3.37.2`, checked before the suite and again inside the network block; the suite then passed (859 tests, 9 skipped, at `b1eca57`), and the job passed again at `985ea28` |
-| 3.31 to 3.37.1 | accepted by the database, but unsupported and untested: Python 3.14's `sqlite3` module may not load with these libraries. The runner's Python 3.14 could not import `sqlite3` with Ubuntu 20.04's 3.31.1 (`undefined symbol: sqlite3_deserialize`) |
-| Older than 3.31, or without JSON1 | refused: `--storage sqlite`/`both` and database reads stop before opening the database; `--storage files` does not use SQLite |
+| The runners' own libraries | supported: the saved CI run loaded 3.45.1 on `ubuntu-24.04` and 3.50.4 on `macos-15` and `windows-2025`, each with JSON1 |
+| 3.37.2 (Ubuntu 22.04's build, loaded on the `ubuntu-24.04` runner) | supported; the oldest supported library. The job stops unless `sqlite3.sqlite_version` is `3.37.2`, checked before the suite and again inside the network block; 850 passed and 9 skipped in the saved run |
+| 3.31 to 3.37.1 | passes the collection database's version check, but unsupported: Python 3.14's `sqlite3` module may not load with these libraries. An earlier CI run could not import `sqlite3` with Ubuntu 20.04's 3.31.1 (`undefined symbol: sqlite3_deserialize`); no successful suite on these versions is recorded |
+| Older than 3.31, or without JSON1 | refused by the collection database's capability check: `--storage sqlite`/`both` and collection database reads stop before opening that database |
+
+`--storage files` creates no collection database and does not apply that capability
+check. Telethon session files still use SQLite, and `build-urls` writes its own
+derived SQLite database even with `--source files`.
 
 Behavior that differs by platform, and its evidence (the runners are those above; a
 skip count matches the platform skips declared in the tests, so it shows which
@@ -510,11 +517,11 @@ and loads no database code.
 
 ## Validation limits
 
-The evidence above is offline and synthetic. Not covered:
+The evidence above is offline and synthetic. Remaining limits:
 
-- Platforms: Windows 11 on local NTFS, and the GitHub-hosted `windows-2025`,
-  `ubuntu-24.04` and `macos-15` runners (see [Platform support](#platform-support)).
-  Other systems, network file systems, and runs as root are not covered.
+- Platforms: systems beyond Windows 11 on local NTFS and the three recorded
+  GitHub-hosted runner configurations, network file systems, and runs as root are
+  not covered (see [Platform support](#platform-support)).
 - Interruption: on Windows, a real SIGINT is raised by the collecting process itself;
   a SIGINT from another process and Ctrl+C typed on a pseudo-terminal are tested on
   the Linux and macOS runners only. Ctrl+C sent to a Windows console is not tested.
