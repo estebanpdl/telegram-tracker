@@ -32,8 +32,9 @@ FORMS = {
 	'module': [PYTHON, '-m', 'telegram_tracker'],
 	'console': [os.path.join(VENV, BIN, 'tgtracker' + EXE)],
 }
-# longest first: 'python -m telegram_tracker' contains no other program name
-PROGRAMS = ('python -m telegram_tracker', 'tgtracker', 'main.py')
+# what each form prints for itself (cli.parsers.invocation runs scripts
+# through python); 'python main.py' before the 'main.py' it contains
+PROGRAMS = ('python -m telegram_tracker', 'python main.py', 'tgtracker', 'main.py')
 TIMES = re.compile(r'(Init|End) program at .*')
 
 CASES = [
@@ -60,10 +61,11 @@ def environment():
 
 
 def normalized(text):
-	text = TIMES.sub('', text)
+	# whitespace before names: help text can wrap 'python -m telegram_tracker'
+	text = ' '.join(TIMES.sub('', text).split())
 	for program in PROGRAMS:
 		text = text.replace(program, 'PROG')
-	return ' '.join(text.split())
+	return text
 
 
 def run(command, argv, env):
