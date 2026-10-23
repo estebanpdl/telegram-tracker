@@ -15,7 +15,9 @@ processes (media_signal_child.py) with the media fakes, for
   covers how those refuse the next run). --check reports what the run
   left without changing it; the next run that writes the ledger records
   the dead run as interrupted, removes its partial file and stores every
-  file.
+  file. After a killed collect, the folder's sidecar still says running:
+  download-media and --check refuse it and name a collection into the
+  folder as the remedy.
 '''
 
 # import modules
@@ -191,6 +193,30 @@ class KilledProcessTests(MediaSignalCase):
 			with self.subTest(storage=storage):
 				run = self.kill(storage, 'collect')
 				code, _, err = self.media('--yes')
+				self.assertEqual(code, 0, err)
+				self.assert_recovered(run, err)
+
+	def test_after_a_killed_collect_download_media_asks_for_a_collection_first(self):
+		# the sidecar still says running: only a collection into the
+		# folder can tell a stopped run from a live one
+		for storage in MODES:
+			with self.subTest(storage=storage):
+				run = self.kill(storage, 'collect')
+				ledger = self.ledger_rows('SELECT * FROM items ORDER BY channel_id, message_id')
+				for extra in (('--check',), ()):
+					code, _, err = self.download(*extra)
+					self.assertEqual(code, 1, err)
+					self.assertIn('says a collection is still running', err)
+					self.assertIn('run the collection into this folder again first', err)
+					self.assertNotIn('fresh --output', err)
+				self.assertEqual(self.ledger_rows('SELECT * FROM items ORDER BY channel_id, message_id'), ledger)
+				self.assertEqual(self.media_run('collect')['state'], 'running')
+
+				# a collection without media leaves the ledger as it is
+				code, _, err = self.collect('--yes')
+				self.assertEqual(code, 0, err)
+				self.assertEqual(self.media_run('collect')['state'], 'running')
+				code, _, err = self.download()
 				self.assertEqual(code, 0, err)
 				self.assert_recovered(run, err)
 

@@ -117,7 +117,8 @@ def collection_status(
 
 	`interrupted_ok`: an interrupted collection passes with a note, for
 	readers of the saved histories alone (each history is saved whole),
-	which do not depend on the aggregate files.
+	which do not depend on the aggregate files. A running one is still
+	refused, and the remedy named is a collection into the same folder.
 	'''
 	try:
 		recorded_storage(data_path)
@@ -140,6 +141,13 @@ def collection_status(
 		'Keep this folder for inspection and rerun collection into a fresh '
 		'--output; completed channel files stay readable.'
 	)
+	if state == RUNNING and interrupted_ok:
+		# a stopped run's saved histories are whole, but only a collection
+		# into this folder can tell a stopped run from one still running
+		raise DataInputError(
+			f'{path} says a collection is still running. Try again after it finishes. If none is '
+			'running, it stopped without finishing: run the collection into this folder again first.'
+		)
 	if state == RUNNING:
 		raise DataInputError(
 			f'{path} says a collection is still running. Build after it '
