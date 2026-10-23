@@ -18,6 +18,7 @@ import source_path  # noqa: F401  (imports telegram_tracker from src)
 import virtual_time
 
 from auth_support import API_HASH, API_ID, PHONE, VALID, CredentialCase, env_values
+from test_platform_paths import ignores_case
 
 from telegram_tracker.cli import collect as cli_collect
 from telegram_tracker.credentials import sources, store
@@ -168,12 +169,27 @@ class CollectCredentialTests(CredentialCase):
 			os.symlink(self.home, alias)
 		try:
 			with Lease(self.home_session, 'The session'):
-				code, _, err = self.collect('--session', os.path.join(alias, 'SESSION_FILE'))
+				code, _, err = self.collect('--session', os.path.join(alias, 'session_file'))
 			self.assertEqual(code, 1)
 			self.assertIn('in use by another process', err)
 			self.assertEqual(self.created, [])
 		finally:
 			os.rmdir(alias) if os.name == 'nt' else os.remove(alias)
+
+	def test_a_case_variant_shares_the_lease_only_where_it_is_the_same_file(self):
+		os.environ.update(env_values(VALID))
+		os.makedirs(self.home)
+		variant = os.path.join(self.home, 'SESSION_FILE')
+		with Lease(self.home_session, 'The session'):
+			code, _, err = self.collect('--session', variant)
+		if ignores_case(self.home):
+			self.assertEqual(code, 1)
+			self.assertIn('in use by another process', err)
+			self.assertEqual(self.created, [])
+		else:
+			# another file on a case-sensitive file system, so another session
+			self.assertEqual(code, 0, err)
+			self.assertEqual([path for path, *_ in self.created], [variant + '.session'])
 
 	def test_held_session_lease_blocks_before_any_client(self):
 		os.environ.update(env_values(VALID))

@@ -32,6 +32,103 @@ filelock 4.2.4, idna 3.20, requests 2.34.2, requests-file 3.0.1, urllib3 2.8.0.
 The tests establish synthetic offline contracts, not live Telegram compatibility
 or an account-specific safe request rate. The README contains option examples.
 
+## Platform support
+
+Each cell is **supported** (the offline suite or an install check passed there),
+**unknown** (not tested; no claim is made), or **refused** (the installer or the
+program stops). Every cell uses the versions pinned in `requirements.txt`; other
+dependency versions are unknown.
+
+The runner rows rest on two runs of `.github/workflows/cross-os.yml` on GitHub-hosted
+runners, both on 2026-10-23:
+
+- At commit `b1eca57`, all 859 tests passed in every job, under the operating
+  system's block of outbound connections. Skipped: 9 on `ubuntu-24.04`, 18 on
+  `windows-2025`, 7 on `macos-15`, and 9 in the SQLite 3.37.2 job. In the three
+  operating-system jobs, the wheel and sdist were built, and the wheel installed into
+  a fresh environment with `pip check` clean. The entry-point comparison failed in that run on a checker defect (the
+  `python main.py` program name), not on a product difference.
+- At commit `985ea28`, which changed only that checker, all four jobs passed,
+  including the comparison of `tgtracker`, `python -m telegram_tracker` and
+  `python main.py` in 18 cases: help, argument errors, missing credentials, offline
+  `auth` reports and builder refusals.
+
+A hosted runner proves only its own operating system, CPU, file system, and library
+versions. Each job prints them first, but the printed records of these two runs were
+not kept, so the runner rows give the image name and what the skipped and passing
+tests show about its file system. The suite runs from the source tree; the installed
+wheel is checked by the entry-point comparison only.
+
+| Platform | Source (`python main.py`) | `python -m telegram_tracker`, installed wheel | `tgtracker`, installed wheel |
+|---|---|---|---|
+| Windows 11, x86-64, local NTFS, Python 3.14.7 (conda-forge), SQLite 3.54.0 | supported | supported by the 2026-10-20 install check (an earlier build) | supported by the 2026-10-20 install check (an earlier build) |
+| GitHub `windows-2025` runner (Windows Server 2025); ignores case, keeps Unicode normalization forms apart | supported | supported (entry-point comparison) | supported (entry-point comparison) |
+| GitHub `ubuntu-24.04` runner (Ubuntu 24.04); case-sensitive, keeps normalization forms apart | supported for a regular user; unknown as root (see Permission errors) | supported (entry-point comparison) | supported (entry-point comparison) |
+| GitHub `macos-15` runner (macOS 15); ignores case and Unicode normalization | supported for a regular user; unknown as root (see Permission errors) | supported (entry-point comparison) | supported (entry-point comparison) |
+| Other Linux distributions, Linux on arm64, macOS on x86-64 | unknown | unknown | unknown |
+| WSL with the application home or output on a Windows drive (`/mnt/c`) | unknown | unknown | unknown |
+| Network file systems (SMB, NFS), FAT/exFAT drives | unknown | unknown | unknown |
+
+| Python | Status |
+|---|---|
+| CPython 3.14 | supported: 3.14.7 (conda-forge) on Windows 11, and the CPython 3.14 that `actions/setup-python` installs on the three runners |
+| CPython 3.14 free-threaded build, 3.15 and later | unknown |
+| 3.13 and earlier | refused by pip (`requires-python = ">=3.14"`); the source form is untested there |
+
+| SQLite library loaded by Python's `sqlite3` | Status |
+|---|---|
+| 3.54.0 | supported |
+| The runners' own libraries | supported (the suite passed with each image's own library). On 2026-10-22, an earlier run of the workflow (commit `1619a9d`) printed 3.45.1 on `ubuntu-24.04` and 3.50.4 on `macos-15` and `windows-2025` |
+| 3.37.2 (Ubuntu 22.04's build, loaded on the `ubuntu-24.04` runner) | supported; the oldest supported library. The job stops unless `sqlite3.sqlite_version` is `3.37.2`, checked before the suite and again inside the network block; the suite then passed (859 tests, 9 skipped, at `b1eca57`), and the job passed again at `985ea28` |
+| 3.31 to 3.37.1 | accepted by the database, but unsupported and untested: Python 3.14's `sqlite3` module may not load with these libraries. The runner's Python 3.14 could not import `sqlite3` with Ubuntu 20.04's 3.31.1 (`undefined symbol: sqlite3_deserialize`) |
+| Older than 3.31, or without JSON1 | refused: `--storage sqlite`/`both` and database reads stop before opening the database; `--storage files` does not use SQLite |
+
+Behavior that differs by platform, and its evidence (the runners are those above; a
+skip count matches the platform skips declared in the tests, so it shows which
+platform-specific tests ran):
+
+- **Owner-only protection.** POSIX: folders 0700 and files 0600 whatever the umask,
+  owned by the current user; a group- or world-accessible `credentials.json` or
+  `profile.json`, or one owned by another user, is refused when read (supported on
+  the `ubuntu-24.04` and `macos-15` runners). Windows: a protected DACL granting only
+  the current user (supported). Extended ACLs (macOS `chmod +a`, Linux `setfacl`) are
+  not inspected. A session file Telethon creates in the application home is protected
+  on POSIX by the 0700 folder; its own mode follows SQLite's default and the umask.
+- **Permission errors** name the path and the system's reason, for an application
+  home, a lease, or an output lock that cannot be created (supported on the Linux and
+  macOS runners, where the tests run as a regular user). As root, file modes do not
+  restrict access, so these tests skip and the behavior under root is unknown.
+- **Locks and leases** are files created with `O_EXCL`. A lock path that is a symlink,
+  even a dangling one, counts as held and is never followed (POSIX; supported on the
+  Linux and macOS runners). A lock left by a killed process refuses the next run,
+  naming its pid, until the file is deleted; nothing is removed automatically
+  (supported on Windows 11 and all three runners). The pid is the interpreter's own,
+  which can differ from the pid of a launcher that started it (a Windows virtual
+  environment's `python.exe`).
+- **Path spellings.** Relative and absolute paths, spaces, and non-ASCII names reach
+  the same output folder (supported on Windows 11 and all three runners). Where the
+  file system ignores case or Unicode normalization but the path text differs (macOS),
+  the session-inside-output and output-inside-home checks and the output-folder
+  binding compare file identity: supported on the `macos-15` runner, where the case
+  and normalization tests ran, and for case on Windows 11 and the `windows-2025`
+  runner, also with text normalization disabled. On the Linux runner a different case or normalization form
+  is a different folder, so those tests skip there.
+- **Database publication.** A new database is built in a temporary file and
+  hard-linked into place, so a file that appears meanwhile is never replaced
+  (supported on Windows 11 and all three runners). Without hard links, Windows falls
+  back to a rename that refuses an existing file; POSIX has no such rename, so
+  database modes refuse an output folder whose file system lacks hard links (tested
+  with a simulated link failure; no file system without hard links was used).
+- **Interruption.** A real SIGINT, raised by the process itself while a request is in
+  flight or while a channel is being written, gives exit 130 and "> Interrupted.",
+  releases every lease and lock, records the run as interrupted (`stop_reason`
+  `cancelled`), and keeps a channel whose write had begun (supported on Windows 11 and
+  all three runners). A SIGINT from another process, during a request and during a
+  write, and Ctrl+C typed on a pseudo-terminal, during a request and at the
+  confirmation prompt, are supported on the Linux and macOS runners. Ctrl+C sent from
+  outside to a Windows console process is unknown: a test cannot send it to one
+  process alone.
+
 ## CLI contract
 
 `python main.py <command>` (the `telegram_tracker.cli` package) is the canonical
@@ -147,10 +244,11 @@ sessions, and Telethon's session-file updates during a check, are unverified.
 - Not implemented: profile rename/delete/copy, session migration, OS keyring,
   coordination across application homes, multi-profile batches.
 
-Platform limits: owner-only protection of the new files was exercised on Windows
-(protected DACL) only; the POSIX 0700/0600 branch is unexercised on this host. The
-two-process account-lease test runs on the local file system; network file systems
-are not covered. Profiles were not tested against live Telegram accounts.
+Platform limits: see [Platform support](#platform-support); the POSIX 0700/0600 branch
+for profile folders and `profile.json` is supported on the Linux and macOS runners,
+for a regular user. The two-process
+account-lease test runs on the local file system; network file systems are not
+covered. Profiles were not tested against live Telegram accounts.
 
 ### History selection and updates
 
@@ -377,10 +475,27 @@ and loads no database code.
   Windows loopback `socketpair()`. Base cases fail recorded violations even if caught.
   It also refuses any file system call on the real `~/.telegram_tracker` tree,
   including relative, case, `..`, 8.3, `file:` URI, and symlink/junction aliases
-  (resolved component by component without entering the tree), including its
-  `profiles/` and `account-leases/` folders, gives every test process a temporary
-  `TELEGRAM_TRACKER_HOME` and `TELEGRAM_TRACKER_SESSION`, and removes
-  `TELEGRAM_TRACKER_PROFILE`.
+  (resolved component by component without entering the tree; on POSIX, case and
+  Unicode normalization are folded too, as macOS file systems ignore both),
+  including its `profiles/` and `account-leases/` folders, gives every test process a
+  temporary `TELEGRAM_TRACKER_HOME` and `TELEGRAM_TRACKER_SESSION`, and removes
+  `TELEGRAM_TRACKER_PROFILE`. It points `tempfile` and child processes (`TMPDIR`) at
+  the canonical temporary folder, so temporary paths match the resolved paths the code
+  reports (macOS `/var` is a link to `/private/var`; a Windows `TEMP` can hold 8.3
+  short names).
+- Platform-specific tests skip with a stated reason where they cannot run:
+  `test_posix_permissions.py` (modes, permission errors, symlinked lock files) and the
+  external-SIGINT and terminal Ctrl+C cases of `test_signals.py` run on Linux and
+  macOS only; Unicode-normalization and case cases of `test_platform_paths.py` run
+  where the temporary folder's file system ignores them. The check that the
+  interpreter is the registered `telegram-tracker` environment runs only in a conda
+  environment.
+- `.github/workflows/cross-os.yml` runs the suite on Windows, Linux and macOS
+  runners and on SQLite 3.37.2, builds and installs the wheel, and compares the
+  installed entry points (`.github/scripts/`). Its tests run under an operating-system
+  block of outbound connections (a network namespace on Linux, `sandbox-exec` on
+  macOS, a firewall rule for the Python executables on Windows), checked by a probe
+  before the tests and in addition to the in-process guard. No secret is used.
 - `tests/fakes.py` supplies synthetic responses, pagination, scripted errors/delays,
   a fake client, and scripted prompts. `tests/fixtures/telegram_world.json` covers
   shared chats, empty/missing/private channels, Unicode, forwards, replies, service
@@ -397,12 +512,12 @@ and loads no database code.
 
 The evidence above is offline and synthetic. Not covered:
 
-- Platforms: Windows on local NTFS only. The POSIX permission branch, `O_EXCL`
-  lock and lease files on Linux/macOS, hard-link database publication outside
-  Windows, and network file systems are unexercised.
-- Interruption: Ctrl+C is tested as `KeyboardInterrupt` raised in the fake client
-  and as task cancellation inside the process, not as a SIGINT delivered to a
-  running process.
+- Platforms: Windows 11 on local NTFS, and the GitHub-hosted `windows-2025`,
+  `ubuntu-24.04` and `macos-15` runners (see [Platform support](#platform-support)).
+  Other systems, network file systems, and runs as root are not covered.
+- Interruption: on Windows, a real SIGINT is raised by the collecting process itself;
+  a SIGINT from another process and Ctrl+C typed on a pseudo-terminal are tested on
+  the Linux and macOS runners only. Ctrl+C sent to a Windows console is not tested.
 - Live Telegram: the tests described here use a fake client for database modes
   (`sqlite`, `both`) and named profiles; they do not qualify live collection.
 - Request rates: concurrency and request-interval defaults are project limits;

@@ -81,7 +81,17 @@ def canonical_folder(path):
 
 
 def same_folder(a, b):
-	return os.path.normcase(canonical_folder(a)) == os.path.normcase(canonical_folder(b))
+	'''
+	True when `a` and `b` are the same folder: equal canonical paths or,
+	where the file system ignores case or Unicode normalization but the
+	text differs (macOS), the same existing directory.
+	'''
+	if os.path.normcase(canonical_folder(a)) == os.path.normcase(canonical_folder(b)):
+		return True
+	try:
+		return os.path.samefile(a, b)
+	except OSError:
+		return False
 
 
 def select_destination(output_folder, requested=None, *, legacy=False):

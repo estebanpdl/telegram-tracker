@@ -48,8 +48,14 @@ def read_pins():
 
 class EnvironmentTests(offline_guard.OfflineTestCase):
 
-	def test_interpreter_is_registered_python_314(self):
+	def test_interpreter_is_python_314_or_newer(self):
 		self.assertGreaterEqual(sys.version_info[:2], (3, 14))
+
+	@unittest.skipUnless(
+		os.path.isdir(os.path.join(sys.prefix, 'conda-meta')),
+		'not a conda environment (CI and installed-wheel checks use a plain Python)'
+	)
+	def test_a_conda_interpreter_is_the_registered_environment(self):
 		self.assertIn('telegram-tracker', sys.prefix.replace('\\', '/'))
 
 	def test_every_requirement_is_pinned_and_installed_at_that_version(self):

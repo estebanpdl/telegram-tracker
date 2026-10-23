@@ -9,6 +9,7 @@ injected adapters.
 '''
 
 # import modules
+import errno
 import json
 import os
 import stat
@@ -153,6 +154,36 @@ class StoreTests(TempHomeCase):
 		open(blocker, 'w').close()
 		with self.assertRaises(store.StoreError):
 			store.save_store(os.path.join(blocker, 'home'), VALID)
+
+	def test_a_home_under_a_file_fails_as_on_posix(self):
+		# POSIX lstat reports a path under a file as ENOTDIR; Windows reports
+		# it as not found, so the POSIX error is substituted here
+		blocker = os.path.join(self.tmp, 'file')
+		open(blocker, 'w').close()
+		real_lstat = os.lstat
+
+		def lstat(path, *args, **kwargs):
+			if os.fspath(path).startswith(blocker + os.sep):
+				raise NotADirectoryError(errno.ENOTDIR, 'Not a directory', path)
+			return real_lstat(path, *args, **kwargs)
+
+		with mock.patch.object(protection.os, 'lstat', lstat):
+			with self.assertRaises(store.StoreError) as ctx:
+				store.save_store(os.path.join(blocker, 'home'), VALID)
+		# the same failure as on Windows: the folder cannot be created
+		self.assertIn('cannot create', str(ctx.exception))
+
+	def test_an_absent_path_passes_and_one_that_cannot_be_inspected_is_refused(self):
+		for absent in (FileNotFoundError(errno.ENOENT, 'No such file or directory', self.home),
+				NotADirectoryError(errno.ENOTDIR, 'Not a directory', self.home)):
+			with self.subTest(absent=type(absent).__name__):
+				with mock.patch.object(protection.os, 'lstat', side_effect=absent):
+					self.assertIsNone(protection.reject_link(self.home))
+		denied = PermissionError(errno.EACCES, 'Permission denied', self.home)
+		with mock.patch.object(protection.os, 'lstat', side_effect=denied):
+			with self.assertRaises(protection.ProtectionError) as ctx:
+				protection.reject_link(self.home)
+		self.assertIn('Permission denied', str(ctx.exception))
 
 	def test_links_are_refused(self):
 		target = os.path.join(self.tmp, 'elsewhere')

@@ -13,6 +13,7 @@ import pathlib
 import socket
 import sqlite3
 import tempfile
+import unicodedata
 import unittest
 
 import offline_guard
@@ -154,7 +155,7 @@ class RealHomeGuardTests(offline_guard.OfflineTestCase):
 		self.assertTrue(caught[0].startswith('home:'), caught)
 
 	def test_real_home_identity_is_captured_from_the_user_profile(self):
-		self.assertIn(os.path.normcase(self.REAL_HOME), offline_guard._home_identities)
+		self.assertIn(offline_guard._fold(self.REAL_HOME), offline_guard._home_identities)
 
 	def test_every_file_system_entry_point_refuses_the_real_home(self):
 		target = os.path.join(self.REAL_HOME, 'credentials.json')
@@ -247,6 +248,17 @@ class RealHomeGuardTests(offline_guard.OfflineTestCase):
 				with self.subTest(alias='sibling outside'):
 					self.assertTrue(os.path.isdir(os.path.join(tmp, 'other')))
 			os.rmdir(link) if os.name == 'nt' else os.remove(link)
+
+	@unittest.skipIf(os.name == 'nt', 'NTFS keeps Unicode normalization forms apart; macOS file systems do not')
+	def test_other_unicode_forms_of_the_home_are_refused(self):
+		name = 'apphomé'
+		with tempfile.TemporaryDirectory() as tmp:
+			stand_in = os.path.join(tmp, unicodedata.normalize('NFC', name))
+			os.mkdir(stand_in)
+			alias = os.path.join(tmp, unicodedata.normalize('NFD', name), 'credentials.json')
+			self.assertNotEqual(alias, os.path.join(stand_in, 'credentials.json'))
+			with offline_guard.pretend_real_home(stand_in):
+				self.assert_refused(os.stat, alias)
 
 
 class ProfileTreeGuardTests(offline_guard.OfflineTestCase):

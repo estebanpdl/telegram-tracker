@@ -127,8 +127,28 @@ def select_session(flag=None, environ=None, cwd=None, isfile=None):
 def is_within(path, folder):
 	'''
 	True when `path` is `folder` or inside it, comparing canonical paths
-	(links resolved; case-insensitive where the file system is).
+	(links resolved; case-insensitive where the file system is). The text
+	cannot tell on macOS, whose file systems usually ignore case and
+	Unicode normalization although normcase changes nothing, so the
+	existing ancestors of `path` are also compared with `folder` by file
+	identity.
 	'''
 	path = os.path.normcase(os.path.realpath(path))
 	folder = os.path.normcase(os.path.realpath(folder))
-	return path == folder or path.startswith(folder.rstrip(os.sep) + os.sep)
+	if path == folder or path.startswith(folder.rstrip(os.sep) + os.sep):
+		return True
+	try:
+		target = os.stat(folder)
+	except OSError:
+		return False
+	current = path
+	while True:
+		try:
+			if os.path.samestat(os.stat(current), target):
+				return True
+		except OSError:
+			pass
+		parent = os.path.dirname(current)
+		if parent == current:
+			return False
+		current = parent

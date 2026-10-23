@@ -35,16 +35,19 @@ from telegram_tracker.storage.sqlite.lease import DatabaseLease, DatabaseLocked,
 
 SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'src')
 
+# Holders report their own pid: the process Popen starts may be a launcher
+# (a Windows virtual environment's python.exe) rather than the interpreter
+# that takes the lease.
 HOLD_LEASE = (
-	'import sys; sys.path.insert(0, sys.argv[1]); '
+	'import os, sys; sys.path.insert(0, sys.argv[1]); '
 	'from telegram_tracker.storage.sqlite.lease import DatabaseLease; '
-	'lease = DatabaseLease(sys.argv[2]); lease.__enter__(); print("held", flush=True); '
+	'lease = DatabaseLease(sys.argv[2]); lease.__enter__(); print("held", os.getpid(), flush=True); '
 	'sys.stdin.readline(); lease.__exit__(None, None, None)'
 )
 
 HOLD_WRITE = (
-	'import sqlite3, sys; con = sqlite3.connect(sys.argv[1], isolation_level=None); '
-	'con.execute("BEGIN IMMEDIATE"); print("held", flush=True); sys.stdin.readline(); '
+	'import os, sqlite3, sys; con = sqlite3.connect(sys.argv[1], isolation_level=None); '
+	'con.execute("BEGIN IMMEDIATE"); print("held", os.getpid(), flush=True); sys.stdin.readline(); '
 	'con.execute("ROLLBACK"); con.close()'
 )
 
@@ -66,14 +69,17 @@ class DestinationCase(storage_modes_support.ModesCase):
 	def holder(self, code, *args):
 		'''
 		A process running `code` until its stdin gets a line; started and
-		holding when this returns.
+		holding when this returns. `owner_pid` is the pid the holding
+		interpreter reported for itself.
 		'''
 		process = subprocess.Popen(
 			[sys.executable, '-I', '-c', code, *args],
 			stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True
 		)
 		self.addCleanup(lambda: process.poll() is not None or process.communicate('\n', timeout=60))
-		self.assertEqual(process.stdout.readline().strip(), 'held')
+		word, pid = process.stdout.readline().split()
+		self.assertEqual(word, 'held')
+		process.owner_pid = int(pid)
 		return process
 
 	def leave_pending(self, out=None, suffix='beta_fx_messages.json'):
@@ -210,7 +216,8 @@ class LeaseTests(DestinationCase):
 		process = self.holder(HOLD_LEASE, SRC, self.db())
 		code, _, err = self.collect()
 		self.assertEqual(code, 1)
-		self.assertIn(f'pid {process.pid}', err)
+		self.assertIn(f'pid {process.owner_pid},', err)
+		self.assertNotEqual(process.owner_pid, os.getpid())
 		self.assertEqual(self.factory_calls, 1)
 		process.communicate('\n', timeout=60)
 		self.assertEqual(self.collect()[0], 0)

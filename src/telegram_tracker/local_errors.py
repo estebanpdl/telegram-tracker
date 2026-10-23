@@ -16,6 +16,7 @@ session or logging in again.
 # import modules
 import configparser
 import errno
+import os
 import sqlite3
 
 
@@ -87,7 +88,8 @@ def session_failure(exc, path):
 			f'The session file {path} cannot be written {detail}. Make the file '
 			'and its folder writable for your account.'
 		)
-	if code == 'SQLITE_CANTOPEN_ISDIR':
+	# the Windows VFS reports a folder as CANTOPEN_ISDIR, the unix VFS as CANTOPEN
+	if code == 'SQLITE_CANTOPEN_ISDIR' or (code == 'SQLITE_CANTOPEN' and os.path.isdir(path)):
 		return f'The session path {path} is a folder, not a session file {detail}.'
 	if code.startswith('SQLITE_CANTOPEN'):
 		return (

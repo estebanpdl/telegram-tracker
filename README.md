@@ -47,6 +47,7 @@ Contents:
 ## Requirements
 
 - [Python 3.14](https://www.python.org/). The project is tested with Python 3.14.7. Pinned library versions and the tested environment are in [docs/compatibility.md](docs/compatibility.md).
+- For `--storage sqlite` or `both` and for builds from a database: an SQLite library of 3.37.2 or newer with JSON1, the one Python's `sqlite3` module loads (`python -c "import sqlite3; print(sqlite3.sqlite_version)"`). Libraries from 3.31 to 3.37.1 are accepted but unsupported and untested; older ones are refused. `--storage files` does not use SQLite.
 - [Telegram API credentials](https://my.telegram.org/auth?to=apps): a Telegram account, plus an app `api_id` and `api_hash`.
 - The libraries in `requirements.txt`: [Telethon](https://docs.telethon.dev/en/stable/) 1.x, [pandas](https://pandas.pydata.org/), [openpyxl](https://openpyxl.readthedocs.io/en/stable/), [tqdm](https://tqdm.github.io/), [NetworkX](https://networkx.org/), [Matplotlib](https://matplotlib.org/), and [python-louvain](https://github.com/taynaud/python-louvain) for community detection.
 
@@ -177,7 +178,7 @@ Nothing is moved or copied automatically. Once a session exists in the applicati
 
 ### How saved credentials are protected
 
-`credentials.json` holds exactly `schema_version`, `api_id`, `api_hash`, and `phone`. It is plain text protected by file permissions, not encryption: the application home and its files are readable only by your account (mode 0700/0600 on Linux and macOS; on Windows an access list that grants only your account, with inheritance from the parent folder disabled). Administrators of the computer can still read them. A session created in the application home gets the same protection. The login code and two-step verification password are never saved. The session's authorization key is stored in the session file, separate from `credentials.json`.
+`credentials.json` holds exactly `schema_version`, `api_id`, `api_hash`, and `phone`. It is plain text protected by file permissions, not encryption: the application home and its files are readable only by your account (mode 0700/0600 on Linux and macOS; on Windows an access list that grants only your account, with inheritance from the parent folder disabled). Administrators of the computer can still read them. A session created in the application home is protected by it too: on Windows it inherits the folder's access list; on Linux and macOS the 0700 folder keeps other accounts out, while the session file's own mode follows SQLite's default and your umask. The login code and two-step verification password are never saved. The session's authorization key is stored in the session file, separate from `credentials.json`.
 
 Saving writes a protected new file next to the old one and replaces it in one step. Failures before replacement leave the earlier file intact; a failed protection check after replacement reports an error with the new file already in place. If the application home cannot be created or protected, `collect` stops with exit 1 before connecting; set `TELEGRAM_TRACKER_HOME` to another absolute folder. `auth login` also stops when it needs to write there. A default-profile login with an external session and `--no-save` can proceed without a profile record. A `credentials.json` that is damaged, of another version, or readable by other accounts stops every command that needs it with exit 2; remove it with `auth clear-credentials` and log in again.
 
@@ -684,8 +685,8 @@ Nothing is fetched: links are not opened, resolved or expanded, and the public s
 
 The behavior in this README is validated by the offline test suite, with synthetic data and a fake Telegram client, plus an install check of the built package. What that validation does not cover:
 
-- **Platforms.** Tested on Windows, on local NTFS drives only. The Linux and macOS permission branch (0700/0600), the lock and lease files on those systems, and network file systems are untested.
-- **Ctrl+C.** Interruption is tested by cancelling the collection inside the process, not by sending a real Ctrl+C (SIGINT) to a running command.
+- **Platforms.** Tested on Windows 11 on local NTFS drives, and on GitHub-hosted Windows Server 2025, Ubuntu 24.04 and macOS 15 runners (permissions, locks, path spellings, interruption, and the installed commands). Other systems, network file systems, and runs as root are untested. [docs/compatibility.md](docs/compatibility.md#platform-support) lists the supported, unknown, and refused combinations of system, Python, installation, and SQLite version, with the evidence for each.
+- **Ctrl+C.** On Windows, interruption is tested with a real SIGINT that the collecting process raises itself; Ctrl+C sent to a Windows console is untested. Ctrl+C typed on a terminal (a pseudo-terminal in the tests) and SIGINT sent by another process are tested on Linux and macOS.
 - **Database modes and profiles against Telegram.** `--storage sqlite` and `both`, and named profiles, are validated offline; this validation includes no collection from Telegram in those modes or profiles.
 - **Request rates.** The concurrency and request-interval defaults are project limits. The rates that Telegram accepts for an account were not measured.
 - **Builders on a database.** Read from the database, a renamed channel's old-name history is not built, and a date nested in an object column of the collected chats reads as stored text (see [Building the dataset and the network](#building-the-dataset-and-the-network)). Rebuilding the collected chats from a database rereads the rows kept so far for each later run, so builds of folders with many runs take longer.
@@ -701,4 +702,4 @@ python -m unittest discover -s tests
 python -m pip check
 ```
 
-The tests import the `telegram_tracker` package from `src/` in this checkout, so the project does not need to be installed to run them, and an installed copy is not used. `python -m pytest` runs the same tests when pytest is installed. [docs/compatibility.md](docs/compatibility.md) describes the tested environment, the CLI contract, and the offline test harness.
+The tests import the `telegram_tracker` package from `src/` in this checkout, so the project does not need to be installed to run them, and an installed copy is not used. Tests that need Linux or macOS (file modes, symlinked lock files, Ctrl+C on a terminal) are reported as skipped on Windows, with the reason. `python -m pytest` runs the same tests when pytest is installed. [docs/compatibility.md](docs/compatibility.md) describes the tested environment, the CLI contract, and the offline test harness.
