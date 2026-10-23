@@ -6,6 +6,7 @@ network, no credentials, synthetic data).
 '''
 
 # import modules
+import errno
 import json
 import os
 import sqlite3
@@ -346,6 +347,66 @@ class OutcomeTests(FetchCase):
 		self.assertEqual(
 			{state for key, state in states.items() if state != ('failed', 'request_failed')}, {('requested', None)})
 		self.assertNoLocks()
+
+	def test_a_full_disk_stops_the_run_in_each_mode(self):
+		for storage in MODES:
+			with self.subTest(storage=storage):
+				out = os.path.join(self.tmp, storage)
+				client = self.collected(storage=storage, out=out)
+				failing = mock.patch(
+					'telegram_tracker.media.staging.PartialFile.write',
+					side_effect=OSError(errno.ENOSPC, 'No space left on device'))
+				with failing:
+					code, _, err = self.download(out=out, client=client)
+				self.assertEqual(code, 1)
+				run, = self.runs(out)
+				self.assertEqual(run['state'], 'interrupted')
+				self.assertIn('the disk is full', run['stop_reason'])
+				self.assertIn('> Media downloads stopped: the disk is full', err)
+				states = self.states(out)
+				self.assertEqual(sorted(states.values()).count(('failed', 'disk_full')), 1)
+				self.assertEqual({key[0] for key in states}, {ALPHA})
+				self.assertEqual(len(get_files(client)), 1)
+				self.assertEqual(self.partial_files(out), [])
+				# the next run stores everything
+				code, _, err = self.download(out=out, client=client)
+				self.assertEqual(code, 0, err)
+				self.assertStored(out)
+
+	def test_an_expired_reference_is_refreshed_through_the_stored_channel(self):
+		client = self.collected()
+		files = client.files
+
+		async def expire(request):
+			files.expire('document', 7002)
+
+		files.fault(lambda r: r.kind == 'GetFile' and r.media_id == 7002, expire)
+		code, _, err = self.download('--telegram-channel', 'alpha_fx', client=client)
+		self.assertEqual(code, 0, err)
+		self.assertStored(keys=[key for key in SIZES if key[0] == ALPHA])
+		# the batch lookup, then the refresh of message 4, both with the stored access hash
+		self.assertEqual(
+			[(channel, access_hash, sorted(ids)) for channel, access_hash, ids in client.lookups],
+			[(ALPHA, ACCESS_HASH, [1, 2, 4, 5, 6]), (ALPHA, ACCESS_HASH, [4])]
+		)
+		attempt, = self.ledger_rows('SELECT refreshed FROM attempts WHERE message_id = 4')
+		self.assertEqual(attempt['refreshed'], 1)
+
+	def test_concurrent_downloads_never_pass_the_run_limit(self):
+		for storage in MODES:
+			with self.subTest(storage=storage):
+				out = os.path.join(self.tmp, storage)
+				client = self.collected(storage=storage, out=out)
+				code, _, err = self.download('--concurrency', '3', '--max-media-total', '1M', out=out, client=client)
+				self.assertEqual(code, 0, err)
+				run, = self.runs(out)
+				self.assertGreater(run['bytes_received'], 0)
+				self.assertLessEqual(run['bytes_received'], 1024 * KIB)
+				attempts = self.ledger_rows('SELECT sum(bytes_received) AS total FROM attempts', out=out)
+				self.assertEqual(attempts[0]['total'], run['bytes_received'])
+				states = self.states(out)
+				self.assertIn(('skipped', 'over_run_limit'), states.values())
+				self.assertIn(('complete', None), states.values())
 
 
 class SourceRunTests(FetchCase):
