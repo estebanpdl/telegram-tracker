@@ -362,7 +362,9 @@ def add_collect_arguments(parser, prog=SCRIPT_PROG):
 		metavar='N',
 		help='Channels collected at once, 1-10; also the most requests in '
 			'flight (default: 3 for --batch-file; --telegram-channel always runs '
-			'at 1). Use 1 to collect one channel at a time.'
+			'at 1). Use 1 to collect one channel at a time. With --include-media, '
+			'the run then downloads as many files at once as it collected '
+			'channels at once, so a single channel downloads one file at a time.'
 	)
 	controls.add_argument(
 		'--request-interval',
