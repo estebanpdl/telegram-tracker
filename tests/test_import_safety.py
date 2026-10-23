@@ -37,10 +37,12 @@ STORAGE_MODULES = qualified(
 )
 MEDIA_MODULES = qualified(
 	'media', 'media.classify', 'media.layout', 'media.ledger_schema', 'media.ledger', 'media.identity',
-	'media.partials', 'media.limits', 'media.staging', 'media.selection'
+	'media.partials', 'media.limits', 'media.staging', 'media.selection', 'media.plan'
 )
 # the download adapter talks to Telegram, so it may load Telethon
-MEDIA_DOWNLOAD_MODULES = qualified('media.location', 'media.stream', 'media.download', 'media.collect')
+MEDIA_DOWNLOAD_MODULES = qualified(
+	'media.location', 'media.stream', 'media.download', 'media.collect', 'media.fetch', 'media.check'
+)
 
 PROBE = '''
 import asyncio, json, sys
@@ -189,7 +191,7 @@ class ImportSafetyTests(offline_guard.OfflineTestCase):
 		code = textwrap.dedent(f'''
 			import sys
 			sys.path[:0] = [{TESTS!r}, {SRC!r}, {ROOT!r}]
-			import {', '.join(qualified('cli', 'cli.builders', 'cli.collect', 'cli.dispatch', 'cli.parsers', 'cli.targets'))}, main
+			import {', '.join(qualified('cli', 'cli.builders', 'cli.collect', 'cli.dispatch', 'cli.media', 'cli.media_parsers', 'cli.parsers', 'cli.run_setup', 'cli.targets'))}, main
 			watched = {['telethon', *qualified('api', 'collector', 'storage', 'request_policy', 'datasets', 'network'), 'pandas']!r}
 			print(sorted(m for m in watched if m in sys.modules))
 		''')

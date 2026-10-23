@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 '''
-`collect --include-media` against fakes, through cli.main on the
-virtual-time loop (storage_modes_support.ModesCase).
+`collect --include-media` and `download-media` against fakes, through
+cli.main on the virtual-time loop (storage_modes_support.ModesCase).
 
 MediaWorld is the fixture world whose channel histories are pages of
 real Telethon messages: the posts of a FakeTelegram file service
@@ -25,6 +25,7 @@ import sqlite3
 from unittest import mock
 
 import source_path  # noqa: F401  (imports telegram_tracker from src)
+import virtual_time
 
 from telethon import types
 from telethon.tl.functions.channels import GetMessagesRequest
@@ -34,6 +35,7 @@ from fakes import FakeTelegramClient, FixtureWorld
 from media_download_support import DATE, FakeTelegram, content
 from storage_modes_support import PAGE_SIZE, ModesCase
 
+from telegram_tracker.cli import media as cli_media
 from telegram_tracker.media.collect import MediaRun
 from telegram_tracker.media.layout import LEDGER_FILE, MEDIA_FOLDER
 from telegram_tracker.media.ledger import Ledger
@@ -85,6 +87,8 @@ class MediaClient(FakeTelegramClient):
 		kwargs.setdefault('page_size', PAGE_SIZE)
 		super().__init__(MediaWorld(self.files), **kwargs)
 		self.timeline = []
+		# (channel_id, access_hash, message ids) of each GetMessages request
+		self.lookups = []
 		answer = self.files._call
 
 		async def recorded(sender, request, ordered=False, flood_sleep_threshold=None):
@@ -92,6 +96,8 @@ class MediaClient(FakeTelegramClient):
 				self.timeline.append(('GetFile', request.location.id, request.offset))
 			elif isinstance(request, GetMessagesRequest):
 				self.timeline.append(('GetMessages', request.channel.channel_id))
+				self.lookups.append(
+					(request.channel.channel_id, request.channel.access_hash, [i.id for i in request.id]))
 			return await answer(sender, request, ordered, flood_sleep_threshold)
 
 		self.files.client._call = recorded
@@ -218,11 +224,23 @@ class MediaCase(ModesCase):
 	readers for the folder's ledger.
 	'''
 
+	def setUp(self):
+		super().setUp()
+		virtual = mock.patch.object(cli_media, 'asyncio_run', virtual_time.run)
+		virtual.start()
+		self.addCleanup(virtual.stop)
+
 	def make_client(self, raw=None):
 		return standard_world()
 
 	def media(self, *extra, **kwargs):
 		return self.collect('--include-media', *extra, **kwargs)
+
+	def download(self, *extra, out=None, **kwargs):
+		'''
+		`download-media -o OUT EXTRA...` through cli.main.
+		'''
+		return self.run_cli(['download-media', '-o', out or self.out, *extra], **kwargs)
 
 	def ledger_path(self, out=None):
 		return os.path.join(out or self.out, MEDIA_FOLDER, LEDGER_FILE)
