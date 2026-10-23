@@ -422,5 +422,60 @@ class StaleRunTests(DestinationCase):
 		self.assertEqual(self.rows('SELECT state FROM collection_runs'), [('complete',), ('complete',)])
 
 
+class InterruptedWriteTests(DestinationCase):
+	'''
+	A database left with a hot journal by a killed writer: the checks
+	before credentials cannot read it read only, so they leave it to the
+	check under the lease, which rolls it back.
+	'''
+
+	def test_the_next_collect_recovers_a_database_left_by_a_killed_writer(self):
+		for storage in ('sqlite', 'both'):
+			with self.subTest(storage=storage):
+				out = os.path.join(self.tmp, storage)
+				self.assertEqual(self.collect(out=out, storage=storage)[0], 0)
+				journal = storage_modes_support.kill_inside_a_write(self.db(out))
+				with self.assertRaises(connection.InterruptedWrite) as refused:
+					open_database(self.db(out), readonly=True)
+				self.assertIn('the next collect run into this folder', str(refused.exception))
+
+				code, _, err = self.collect(out=out)
+				self.assertEqual(code, 0, err)
+				self.assertIn('has an unfinished write', err)
+				self.assertFalse(os.path.exists(journal))
+				self.assertEqual(self.rows("SELECT count(*) FROM sqlite_master WHERE name = 'junk'", out=out), [(0,)])
+				self.assertEqual(
+					self.rows('SELECT state FROM collection_runs ORDER BY run_id', out=out), [('complete',), ('complete',)])
+				self.assertEqual(read_json(os.path.join(out, STATUS_FILE))['state'], 'complete')
+
+	def test_a_blocked_database_with_an_unfinished_write_is_refused_under_the_lease(self):
+		self.leave_pending()
+		# read before the kill: a writable connection would roll the journal back
+		runs = self.rows('SELECT count(*) FROM collection_runs')
+		journal = storage_modes_support.kill_inside_a_write(self.db())
+		code, _, err = self.collect(targets=BATCH)
+		self.assertEqual(code, 1)
+		self.assertIn('has an unfinished write', err)
+		self.assertIn('is blocked: an earlier run stopped after writing the database', err)
+		self.assertEqual(self.channel_requests(), [])
+		# rolled back by the check under the lease, which then refused
+		self.assertFalse(os.path.exists(journal))
+		self.assertEqual(self.rows('SELECT count(*) FROM collection_runs'), runs)
+		self.assertNoLocks()
+
+	def test_a_window_run_without_yes_does_not_replace_a_history_it_could_not_list(self):
+		self.assertEqual(self.collect(storage='sqlite')[0], 0)
+		before = self.rows('SELECT channel_id, message_id FROM messages ORDER BY 1, 2')
+		storage_modes_support.kill_inside_a_write(self.db())
+		code, _, err = self.collect('--max-messages', '1')
+		self.assertEqual(code, 1)
+		self.assertIn('cannot be listed before connecting', err)
+		target, = read_json(os.path.join(self.out, STATUS_FILE))['targets']
+		self.assertEqual(target['status'], 'failed')
+		self.assertIn('so it was not replaced', target['reason'])
+		self.assertEqual(self.rows('SELECT channel_id, message_id FROM messages ORDER BY 1, 2'), before)
+		self.assertGreater(len(before), 1)
+
+
 if __name__ == '__main__':
 	unittest.main()

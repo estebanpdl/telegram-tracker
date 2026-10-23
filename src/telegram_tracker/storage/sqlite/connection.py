@@ -199,6 +199,8 @@ def open_database(
 		create_database(path, output_binding=output_binding, busy_timeout_ms=busy_timeout_ms)
 	elif found.kind != CURRENT:
 		raise DatabaseRefused(refusal_message(path, found))
+	if readonly:
+		refuse_interrupted_write(path)
 
 	con = connect(path, busy_timeout_ms, readonly=readonly)
 	try:
