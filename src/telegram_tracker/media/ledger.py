@@ -36,7 +36,7 @@ from telegram_tracker.media.ledger_schema import LedgerRefused, classify_ledger,
 	create_ledger
 from telegram_tracker.storage.destination import canonical_folder
 from telegram_tracker.storage.records import StorageError
-from telegram_tracker.storage.sqlite.connection import app_version, transaction
+from telegram_tracker.storage.sqlite.connection import app_version, interrupted_write, transaction
 from telegram_tracker.storage.sqlite.schema import MISSING
 from telegram_tracker.storage.status import utc_now
 
@@ -150,12 +150,21 @@ def check_ledger(output_folder):
 	Read only, before a run that will write the ledger of
 	`output_folder`: the downloaded-media folder, when there is one, has
 	no link, and its ledger, when there is one, belongs to the folder's
-	data (open_ledger's refusals). Nothing is created.
+	data (open_ledger's refusals). Nothing is created. Returns None, or a
+	note when the ledger has an unfinished write: a read-only connection
+	cannot roll it back, so the check is left to the run's own open,
+	which rolls it back once the output folder is locked.
 	'''
 	layout = MediaLayout(output_folder)
 	if layout.ensure(create=False) is None or lstat_or_none(layout.ledger_path) is None:
-		return
+		return None
+	if interrupted_write(layout.ledger_path) is not None:
+		return (
+			f'{layout.ledger_path} has an unfinished write (a run stopped while writing it); it is '
+			'checked and recovered once the output folder is locked.'
+		)
 	open_ledger(layout, folder_identity(output_folder), readonly=True).close()
+	return None
 
 
 def rows(cursor):

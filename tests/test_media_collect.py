@@ -27,7 +27,7 @@ from fakes import FixtureWorld
 from media_collect_support import ALPHA, BETA, KIB, MediaCase, MediaClient, photo, record_events, \
 	standard_world
 from media_download_support import content
-from storage_modes_support import file_contents
+from storage_modes_support import file_contents, kill_inside_a_write
 
 from telegram_tracker import collector
 from telegram_tracker.media import layout as media_layout
@@ -37,6 +37,7 @@ from telegram_tracker.media.layout import MEDIA_FOLDER, MediaLayout
 from telegram_tracker.media.ledger import open_ledger
 from telegram_tracker.media.selection import MediaSelection
 from telegram_tracker.storage.records import LOCK_FILE, StorageError
+from telegram_tracker.storage.sqlite.connection import DatabaseBusy, InterruptedWrite
 
 
 MODES = ('files', 'sqlite', 'both')
@@ -611,6 +612,66 @@ class LedgerGuardTests(MediaCase):
 		self.assertEqual([(a['run_uuid'], a['outcome'], a['reason']) for a in attempts][0],
 			(OLD_RUN, 'failed', 'interrupted'))
 		self.assertEqual(len(attempts), 2)
+
+
+class InterruptedLedgerWriteTests(MediaCase):
+	'''
+	A ledger left with a hot journal by a killed writer: the read-only
+	check before credentials cannot read it, so the run's own open under
+	the lock rolls it back and checks it.
+	'''
+
+	def test_the_next_media_run_recovers_a_ledger_left_by_a_killed_writer(self):
+		client = standard_world()
+		self.assertEqual(self.media(client=client)[0], 0)
+		layout = MediaLayout(self.out)
+		with open_ledger(layout, folder_identity(self.out)) as ledger:
+			ledger.start_run(OLD_RUN, 'collect', selection=MediaSelection().record())
+		journal = kill_inside_a_write(self.ledger_path())
+		# what the check before credentials meets: no read-only connection works
+		with self.assertRaises(InterruptedWrite) as refused:
+			open_ledger(layout, folder_identity(self.out), readonly=True)
+		self.assertNotIn('JSON1', str(refused.exception))
+		calls = self.factory_calls
+
+		code, _, err = self.media(client=client)
+		self.assertEqual(code, 0, err)
+		self.assertEqual(self.factory_calls, calls + 1)
+		self.assertIn('has an unfinished write', err)
+		self.assertIn('1 earlier media run(s) never finished', err)
+		self.assertFalse(os.path.exists(journal))
+		runs = {r['run_uuid']: r for r in self.runs()}
+		self.assertEqual(runs[OLD_RUN]['state'], 'interrupted')
+		self.assertEqual(self.ledger_rows("SELECT count(*) AS n FROM sqlite_master WHERE name = 'junk'"), [{'n': 0}])
+		self.assertEqual(self.status()['media']['state'], 'complete')
+
+	def test_a_busy_ledger_is_reported_as_busy_not_as_a_missing_json1(self):
+		self.assertEqual(self.media()[0], 0)
+		holder = sqlite3.connect(self.ledger_path(), isolation_level=None)
+		try:
+			holder.execute('BEGIN EXCLUSIVE')
+			with self.assertRaises(DatabaseBusy) as refused:
+				open_ledger(MediaLayout(self.out), folder_identity(self.out), readonly=True)
+		finally:
+			holder.execute('ROLLBACK')
+			holder.close()
+		self.assertIn('in use by another process', str(refused.exception))
+		self.assertNotIn('JSON1', str(refused.exception))
+
+	def test_a_ledger_of_other_data_with_an_unfinished_write_is_refused_under_the_lock(self):
+		source, target = os.path.join(self.tmp, 'source'), os.path.join(self.tmp, 'target')
+		self.assertEqual(self.media(out=source)[0], 0)
+		self.assertEqual(self.collect(out=target)[0], 0)
+		shutil.copytree(os.path.join(source, MEDIA_FOLDER), os.path.join(target, MEDIA_FOLDER))
+		kill_inside_a_write(self.ledger_path(target))
+		client = standard_world()
+		code, _, err = self.media(out=target, client=client)
+		self.assertEqual(code, 1)
+		self.assertIn('has an unfinished write', err)
+		self.assertIn(IDENTITY_FILE, err)
+		self.assertNotIn('get_entity', client.call_names())
+		self.assertEqual(client.kinds('GetHistoryRequest', 'GetFile'), [])
+		self.assertEqual(self.status(target)['state'], 'interrupted')
 
 
 class ArgumentTests(MediaCase):

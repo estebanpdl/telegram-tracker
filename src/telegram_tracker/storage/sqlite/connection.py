@@ -44,6 +44,43 @@ class DatabaseBusy(StorageError):
 	'''
 
 
+class InterruptedWrite(StorageError):
+	'''
+	A read-only connection was refused: the file has an unfinished write
+	(see interrupted_write), which only a writer can roll back.
+	'''
+
+
+def interrupted_write(path):
+	'''
+	The rollback journal beside the SQLite file `path` when it is not
+	empty, else None. A process killed inside a write transaction leaves
+	one (a hot journal), and so does a write still in progress. A
+	read-only connection cannot roll it back and fails to read the file,
+	so checks that only read leave such a file to the next writer, which
+	rolls it back once it holds the folder.
+	'''
+	journal = f'{path}-journal'
+	try:
+		return journal if os.lstat(journal).st_size > 0 else None
+	except OSError:
+		return None
+
+
+def refuse_interrupted_write(path):
+	'''
+	Raise InterruptedWrite when `path` has an unfinished write; called
+	before a read-only connection.
+	'''
+	journal = interrupted_write(path)
+	if journal is not None:
+		raise InterruptedWrite(
+			f'{path} has an unfinished write ({os.path.basename(journal)}): a run stopped while '
+			'writing it, or one is writing it now. Reading it needs that write rolled back, which '
+			'the next collect run into this folder does. It was left untouched.'
+		)
+
+
 def package_version(name):
 	try:
 		return metadata.version(name)

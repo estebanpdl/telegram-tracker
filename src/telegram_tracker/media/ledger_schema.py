@@ -23,8 +23,8 @@ from importlib import resources
 
 # import local submodules
 from telegram_tracker.storage.records import StorageError
-from telegram_tracker.storage.sqlite.connection import app_version, check_library, connect, \
-	link_new, storage_error, transaction
+from telegram_tracker.storage.sqlite.connection import app_version, check_library, connect, link_new, \
+	refuse_interrupted_write, storage_error, transaction
 from telegram_tracker.storage.sqlite.schema import CURRENT, MISSING, NEWER, OLDER, DatabaseRefused, \
 	classify, schema_objects
 from telegram_tracker.utils import discard
@@ -128,7 +128,8 @@ def verify(con, path):
 	Check an open ledger: identity pragmas, every object exactly as the
 	DDL creates it, and one ledger_meta row. Returns the LedgerMeta.
 	'''
-	check_library(con)
+	# probed in memory: a busy or unreadable file is not a missing JSON1
+	check_library()
 	try:
 		identity = (
 			con.execute('PRAGMA application_id').fetchone()[0],
@@ -191,6 +192,8 @@ def connect_ledger(path, *, readonly=False):
 		raise LedgerRefused(f'{path} does not exist')
 	if found.kind != CURRENT:
 		raise LedgerRefused(refusal(path, found))
+	if readonly:
+		refuse_interrupted_write(path)
 	con = ledger_connection(path, readonly=readonly)
 	try:
 		return con, verify(con, path)

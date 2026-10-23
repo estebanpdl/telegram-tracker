@@ -12,6 +12,8 @@ import io
 import json
 import os
 import sqlite3
+import subprocess
+import sys
 import tempfile
 
 from unittest import mock
@@ -39,6 +41,31 @@ TIMED = (STATUS_FILE, MANIFEST_FILE)
 def read_json(path):
 	with open(path, encoding='utf-8') as fh:
 		return json.load(fh)
+
+
+# A process killed inside a write transaction whose pages spilled into the
+# file: it leaves a hot rollback journal, which only a writer rolls back.
+KILLED_WRITER = (
+	'import os, sqlite3, sys\n'
+	'con = sqlite3.connect(sys.argv[1], isolation_level=None)\n'
+	'con.execute("PRAGMA cache_size = 2")\n'
+	'con.execute("BEGIN IMMEDIATE")\n'
+	'con.execute("CREATE TABLE junk (x BLOB)")\n'
+	'for _ in range(300): con.execute("INSERT INTO junk VALUES (randomblob(4000))")\n'
+	'os._exit(0)\n'
+)
+
+
+def kill_inside_a_write(path):
+	'''
+	Leave the SQLite file `path` with a hot journal; returns the
+	journal's path.
+	'''
+	subprocess.run([sys.executable, '-I', '-c', KILLED_WRITER, path], check=True, timeout=120)
+	journal = f'{path}-journal'
+	if not os.path.isfile(journal) or os.path.getsize(journal) == 0:
+		raise AssertionError(f'no hot journal beside {path}')
+	return journal
 
 
 def listing(folder):

@@ -217,7 +217,9 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 		destination.check()
 		if media is not None:
 			# a ledger of other data is refused before credentials; the run checks again
-			check_ledger(output_folder)
+			note = check_ledger(output_folder)
+			if note is not None:
+				print(f'> Note: {note}', file=sys.stderr)
 		confirmed = None
 		if bounds and not metadata_only:
 			assume_yes = args.get('yes', False)
