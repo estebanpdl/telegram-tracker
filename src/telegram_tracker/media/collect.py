@@ -13,14 +13,15 @@ MediaJobs:
 
 MediaRun is the run's media side, opened once the output folder is
 locked and the run's store is open, and closed before the lock is
-released:
+released (`download-media` uses it the same way, see media.fetch):
 
 1. open: a files folder gets its collection-identity.json, then the
    ledger is opened (created when missing) and checked against the
    folder's data; the run is recorded (runs that died are recorded as
    interrupted) and their partial files are removed.
 2. request(result), the writer's duty right after a channel's history
-   is committed: the channel's selected media are recorded as requested.
+   is committed: the channel's selected media are recorded as requested
+   (record_requested).
 3. download(concurrency), after the run's last history commit, so a
    media flood or a slow file never delays a channel's history: one
    MediaDownloader for the run, `concurrency` downloads at a time.
@@ -46,7 +47,7 @@ from telegram_tracker.media.classify import classify
 from telegram_tracker.media.download import MEDIA, MEDIA_LOOKUP, MediaDownloader, MediaJob, MediaStopped
 from telegram_tracker.media.identity import ensure_identity
 from telegram_tracker.media.layout import LEDGER_FILE, MEDIA_FOLDER, MediaLayout, MediaPathError
-from telegram_tracker.media.ledger import COMPLETE, FAILED, REQUESTED, SKIPPED, STATES, open_ledger
+from telegram_tracker.media.ledger import COMPLETE, FAILED, REQUESTED, SKIPPED, STATES, ItemKey, open_ledger
 from telegram_tracker.media.location import location_of, same_media
 from telegram_tracker.media.partials import clean_partials
 from telegram_tracker.storage.records import StorageError
@@ -129,6 +130,8 @@ class MediaRun:
 		self.source_run = source_run
 		self.run_uuid = downloader.run_uuid
 		self.jobs = []
+		# ItemKeys of every item the run recorded as requested
+		self.selected = []
 		self.channels = set()
 		self.downloaded = 0
 		self.state = RUNNING
@@ -139,12 +142,14 @@ class MediaRun:
 		self.items = None
 
 	@classmethod
-	def open(cls, output_folder, selection, *, client, policy, profile=None, collection_run=None):
+	def open(cls, output_folder, selection, *, client, policy, profile=None, collection_run=None, command=COMMAND):
 		'''
 		Open the ledger of `output_folder` and start the run (see the
 		module docstring). `collection_run` is the collection's run UUID
-		in a database folder, its started_at in a files folder. Raises
-		StorageError when the ledger cannot be used.
+		in a database folder, its started_at in a files folder: for
+		collect the run itself, for download-media the collection whose
+		histories it reads. Raises StorageError when the ledger cannot be
+		used.
 		'''
 		try:
 			identity = ensure_identity(output_folder)
@@ -155,7 +160,7 @@ class MediaRun:
 		try:
 			run_uuid = str(uuid.uuid4())
 			started = ledger.start_run(
-				run_uuid, COMMAND, selection=selection.record(),
+				run_uuid, command, selection=selection.record(),
 				profile_name=profile.name if profile else None, profile_id=profile.id if profile else None,
 				collection_run=collection_run
 			)
@@ -185,26 +190,36 @@ class MediaRun:
 		cannot be written stops the media downloads only.
 		'''
 		jobs = result.media or []
-		if self.stop_reason is not None or not jobs:
-			return
+		if self.record_requested(result.channel_id, [(job.message_id, job.ref) for job in jobs]):
+			self.jobs.extend(jobs)
+
+	def record_requested(self, channel_id, refs):
+		'''
+		Record (message_id, MediaRef) pairs of one channel as requested.
+		Returns False when nothing was recorded: no refs, media stopped,
+		or a ledger that cannot be written, which stops the media
+		downloads only.
+		'''
+		if self.stop_reason is not None or not refs:
+			return False
 		try:
-			self.ledger.request(
-				self.run_uuid, result.channel_id, [(job.message_id, job.ref) for job in jobs],
-				source_run=self.source_run
-			)
+			self.ledger.request(self.run_uuid, channel_id, refs, source_run=self.source_run)
 		except (StorageError, sqlite3.Error) as exc:
 			self.stop(f'media downloads stopped: storage error: {exc}')
-			return
-		self.channels.add(result.channel_id)
-		self.jobs.extend(jobs)
+			return False
+		self.channels.add(channel_id)
+		self.selected.extend(ItemKey(channel_id, message_id, ref.media_id) for message_id, ref in refs)
+		return True
 
-	async def download(self, concurrency):
+	async def download(self, concurrency, jobs=None):
 		'''
-		Download the queued jobs, `concurrency` at a time. Media stops end
-		the downloads only. AccountStopped and other errors are raised
-		once every download in flight has ended; cancelling cancels them.
+		Download `jobs` (default: the queued jobs), `concurrency` at a
+		time. Media stops end the downloads only. AccountStopped and other
+		errors are raised once every download in flight has ended;
+		cancelling cancels them.
 		'''
-		pending = iter(self.jobs)
+		jobs = self.jobs if jobs is None else jobs
+		pending = iter(jobs)
 
 		async def worker():
 			for job in pending:
@@ -221,9 +236,9 @@ class MediaRun:
 				if outcome.state == COMPLETE and outcome.downloaded:
 					self.downloaded += 1
 
-		if self.stop_reason is not None or not self.jobs:
+		if self.stop_reason is not None or not jobs:
 			return
-		workers = [asyncio.create_task(worker()) for _ in range(max(1, min(concurrency, len(self.jobs))))]
+		workers = [asyncio.create_task(worker()) for _ in range(max(1, min(concurrency, len(jobs))))]
 		# a failing download does not cancel the others: an account stop
 		# reaches each of them at its next request, which records it
 		results = await asyncio.gather(*workers, return_exceptions=True)
@@ -261,8 +276,8 @@ class MediaRun:
 		This run's selected items by their state in the ledger now.
 		'''
 		counts = dict.fromkeys(STATES, 0)
-		for job in self.jobs:
-			item = self.ledger.item(job.key)
+		for key in self.selected:
+			item = self.ledger.item(key)
 			if item is not None:
 				counts[item['state']] += 1
 		return counts
@@ -287,7 +302,7 @@ class MediaRun:
 		}
 		if self.items is not None:
 			record['items'] = {
-				'selected': len(self.jobs),
+				'selected': len(self.selected),
 				'complete': self.items[COMPLETE],
 				'downloaded': self.downloaded,
 				'skipped': self.items[SKIPPED],

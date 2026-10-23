@@ -67,17 +67,18 @@ def interrupted_write(path):
 		return None
 
 
-def refuse_interrupted_write(path):
+def refuse_interrupted_write(path, recovered_by='the next collect run into this folder'):
 	'''
 	Raise InterruptedWrite when `path` has an unfinished write; called
-	before a read-only connection.
+	before a read-only connection. `recovered_by` names the runs that roll
+	such a write back.
 	'''
 	journal = interrupted_write(path)
 	if journal is not None:
 		raise InterruptedWrite(
 			f'{path} has an unfinished write ({os.path.basename(journal)}): a run stopped while '
 			'writing it, or one is writing it now. Reading it needs that write rolled back, which '
-			'the next collect run into this folder does. It was left untouched.'
+			f'{recovered_by} does. It was left untouched.'
 		)
 
 

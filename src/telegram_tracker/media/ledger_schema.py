@@ -33,6 +33,9 @@ from telegram_tracker.utils import discard
 LEDGER_APPLICATION_ID = 1413960781  # 0x5447544D, 'TGTM'
 LEDGER_VERSION = 1
 
+# the runs that open the ledger for writing, with the output folder locked
+LEDGER_RECOVERY = 'the next `download-media` (without --check) or `collect --include-media` run into this folder'
+
 
 class LedgerRefused(StorageError):
 	'''
@@ -193,7 +196,7 @@ def connect_ledger(path, *, readonly=False):
 	if found.kind != CURRENT:
 		raise LedgerRefused(refusal(path, found))
 	if readonly:
-		refuse_interrupted_write(path)
+		refuse_interrupted_write(path, LEDGER_RECOVERY)
 	con = ledger_connection(path, readonly=readonly)
 	try:
 		return con, verify(con, path)

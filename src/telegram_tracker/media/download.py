@@ -223,6 +223,29 @@ class MediaDownloader:
 			del self._inflight[job.media_key]
 			done.set_result(None)
 
+	async def lookup(self, peer, message_ids):
+		'''
+		The messages `message_ids` of channel `peer` fetched again in one
+		request (method class `media_lookup`): {message_id: types.Message,
+		or None for one that is gone or is not a message}. The request and
+		its retries and flood waits are added to the run's counters.
+		Raises AccountStopped, RequestFailed or an RPC error.
+		'''
+		self._raise_if_stopped()
+		counts = _Counts()
+		request = functions.channels.GetMessagesRequest(
+			channel=peer, id=[types.InputMessageID(message_id) for message_id in message_ids])
+		try:
+			result = await self._call(counts, MEDIA_LOOKUP, lambda: self.client(request))
+		finally:
+			self.ledger.add_counters(
+				self.run_uuid, app_requests=counts.requests, retries=counts.retries, flood_waits=counts.flood_waits)
+		found = {
+			message.id: message for message in getattr(result, 'messages', None) or ()
+			if isinstance(message, types.Message)
+		}
+		return {message_id: found.get(message_id) for message_id in message_ids}
+
 	def finish(self):
 		'''
 		Remove this run's empty staging folder, if any.

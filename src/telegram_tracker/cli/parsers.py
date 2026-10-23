@@ -12,10 +12,11 @@ services.
 import argparse
 
 # import local submodules
-from telegram_tracker.cli.argument_types import bounded_float, bounded_int, media_size, media_types, \
-	utc_datetime
+from telegram_tracker.cli.argument_types import bounded_float, bounded_int, utc_datetime
 from telegram_tracker.cli.builder_parsers import AUTO, DEFAULT_OUTPUT, SOURCES, \
 	add_builder_arguments, build_builder_parser
+from telegram_tracker.cli.media_parsers import DOWNLOAD_MEDIA, DOWNLOAD_MEDIA_DESCRIPTION, \
+	DOWNLOAD_MEDIA_EPILOG, DOWNLOAD_MEDIA_HELP, add_download_media_arguments, add_media_selection_arguments
 
 
 # --storage values (storage.manifest); importing that module would load
@@ -343,28 +344,7 @@ def add_collect_arguments(parser, prog=SCRIPT_PROG):
 			'files. Downloads start once every channel\'s messages are saved and use '
 			'the request controls below. Files are saved, never opened.'
 	)
-	media.add_argument(
-		'--media-types',
-		type=media_types,
-		metavar='TYPES',
-		help='Only these kinds, separated by commas: image, video, audio, file '
-			'(default: all).'
-	)
-	media.add_argument(
-		'--max-media-size',
-		type=media_size,
-		metavar='SIZE',
-		help='Skip a file larger than SIZE (bytes, or a number with K, M or G for '
-			'KiB, MiB, GiB). A file of unknown size is stopped once it passes SIZE, '
-			'and its partial copy is removed.'
-	)
-	media.add_argument(
-		'--max-media-total',
-		type=media_size,
-		metavar='SIZE',
-		help='Receive at most SIZE in this run, counting every byte received, '
-			'restarts included. Files that do not fit are skipped and recorded.'
-	)
+	add_media_selection_arguments(media)
 
 	controls = parser.add_argument_group(
 		'request controls',
@@ -431,7 +411,8 @@ def build_parsers(prog=SCRIPT_PROG):
 	parser = argparse.ArgumentParser(
 		prog=prog,
 		description='Collect Telegram channel data, then build a messages '
-			'dataset and a channel network from it.',
+			'dataset and a channel network from it, or download the media of the '
+			'collected messages.',
 		epilog=legacy_forms(prog),
 		formatter_class=argparse.RawDescriptionHelpFormatter
 	)
@@ -471,10 +452,23 @@ def build_parsers(prog=SCRIPT_PROG):
 			+ BUILDER_STORAGE_NOTE
 	)
 
+	subparsers[DOWNLOAD_MEDIA] = commands.add_parser(
+		DOWNLOAD_MEDIA,
+		help=DOWNLOAD_MEDIA_HELP,
+		description=DOWNLOAD_MEDIA_DESCRIPTION,
+		epilog=DOWNLOAD_MEDIA_EPILOG
+	)
+
 	subparsers[AUTH], actions = add_auth_parsers(commands)
 	subparsers.update({f'{AUTH} {name}': action for name, action in actions.items()})
 
 	add_collect_arguments(subparsers[COLLECT], prog)
+	add_download_media_arguments(subparsers[DOWNLOAD_MEDIA])
+	add_session_arguments(subparsers[DOWNLOAD_MEDIA].add_argument_group(
+		'session and credentials',
+		f'Which Telegram session and app credentials to use; `{invocation(prog)} auth status` '
+		'shows the current choice.'
+	))
 	add_builder_arguments(subparsers[BUILD_DATASET])
 	add_builder_arguments(subparsers[BUILD_NETWORK])
 	add_builder_arguments(subparsers[BUILD_URLS])

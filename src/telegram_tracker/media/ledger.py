@@ -503,6 +503,9 @@ class Ledger:
 	def blob(self, channel_id, sha256):
 		return self._one('SELECT * FROM blobs WHERE channel_id = ? AND sha256 = ?', channel_id, sha256)
 
+	def blobs(self):
+		return rows(self.con.execute('SELECT * FROM blobs ORDER BY channel_id, path'))
+
 	def blob_hint(self, channel_id, media_kind, media_id):
 		'''
 		The blob of a complete item with the same media in the channel, or

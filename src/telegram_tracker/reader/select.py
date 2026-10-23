@@ -24,7 +24,7 @@ from telegram_tracker.utils import DataInputError
 
 
 @contextlib.contextmanager
-def open_collection(data_path, source=AUTO, *, messages=True):
+def open_collection(data_path, source=AUTO, *, messages=True, interrupted_ok=False):
 	'''
 	The collection in `data_path` as a reader of the chosen `source`
 	(see the module docstring): reader.files.FilesCollection or
@@ -32,6 +32,8 @@ def open_collection(data_path, source=AUTO, *, messages=True):
 	user) and `storage` (the folder's recorded mode). Raises
 	DataInputError before anything is read when the folder cannot be
 	built from. `messages`: the builder reads message histories.
+	`interrupted_ok`: an interrupted last collection is read, with a note
+	(storage.status.collection_status).
 
 	The database is read under its lease; leave the block before
 	writing outputs.
@@ -46,7 +48,7 @@ def open_collection(data_path, source=AUTO, *, messages=True):
 	if selected == FILES:
 		from telegram_tracker.reader.files import FilesCollection
 
-		status, notes = collection_status(data_path, messages=messages)
+		status, notes = collection_status(data_path, messages=messages, interrupted_ok=interrupted_ok)
 		collection = FilesCollection(data_path, status)
 		collection.notes = notes
 		collection.storage = storage
@@ -55,7 +57,7 @@ def open_collection(data_path, source=AUTO, *, messages=True):
 
 	from telegram_tracker.reader.database import DatabaseCollection
 
-	with DatabaseCollection(data_path, messages=messages) as collection:
+	with DatabaseCollection(data_path, messages=messages, interrupted_ok=interrupted_ok) as collection:
 		yield collection
 
 

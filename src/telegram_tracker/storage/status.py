@@ -102,7 +102,8 @@ def check_collection_status(data_path, *, messages=True):
 	return collection_status(data_path, messages=messages)[1]
 
 
-def collection_status(data_path, *, messages=True, required=False, histories='message files'):
+def collection_status(
+		data_path, *, messages=True, required=False, histories='message files', interrupted_ok=False):
 	'''
 	Builder gate. Raises DataInputError when the folder's storage
 	manifest cannot be used, or the last collection into `data_path` is
@@ -113,6 +114,10 @@ def collection_status(data_path, *, messages=True, required=False, histories='me
 	Folders without a sidecar (earlier versions) pass with no notes,
 	unless `required`: a reader of the database never infers a finished
 	collection from a missing sidecar.
+
+	`interrupted_ok`: an interrupted collection passes with a note, for
+	readers of the saved histories alone (each history is saved whole),
+	which do not depend on the aggregate files.
 	'''
 	try:
 		recorded_storage(data_path)
@@ -140,14 +145,17 @@ def collection_status(data_path, *, messages=True, required=False, histories='me
 			f'{path} says a collection is still running. Build after it '
 			f'finishes. If none is running, it stopped without finishing. {recovery}'
 		)
+	notes = []
 	if state == INTERRUPTED:
 		reason = status.get('stop_reason') or 'unknown reason'
-		raise DataInputError(
-			f'{path}: the last collection was interrupted ({reason}), so its '
-			f'aggregate files may be incomplete. {recovery}'
+		if not interrupted_ok:
+			raise DataInputError(
+				f'{path}: the last collection was interrupted ({reason}), so its '
+				f'aggregate files may be incomplete. {recovery}'
+			)
+		notes.append(
+			f'the last collection was interrupted ({reason}); the {histories} it saved are read as they are'
 		)
-
-	notes = []
 	failed = [
 		t['input'] for t in status.get('targets', [])
 		if t.get('status') not in ('succeeded', 'duplicate')
