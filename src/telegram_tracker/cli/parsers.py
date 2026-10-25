@@ -15,6 +15,8 @@ import argparse
 from telegram_tracker.cli.argument_types import bounded_float, bounded_int, utc_datetime
 from telegram_tracker.cli.builder_parsers import AUTO, DEFAULT_OUTPUT, SOURCES, \
 	add_builder_arguments, build_builder_parser
+from telegram_tracker.cli.media_parsers import DOWNLOAD_MEDIA, DOWNLOAD_MEDIA_DESCRIPTION, \
+	DOWNLOAD_MEDIA_EPILOG, DOWNLOAD_MEDIA_HELP, add_download_media_arguments, add_media_selection_arguments
 
 
 # --storage values (storage.manifest); importing that module would load
@@ -325,10 +327,30 @@ def add_collect_arguments(parser, prog=SCRIPT_PROG):
 			'database; the builders read the files unless given --source sqlite.'
 	)
 
+	media = parser.add_argument_group(
+		'media',
+		'Download the files attached to the collected messages. Off by default: '
+		'without --include-media no file is requested. The other options need '
+		'--include-media, and none is allowed with '
+		'--limit-download-to-channel-metadata.'
+	)
+	media.add_argument(
+		'--include-media',
+		action='store_true',
+		help='Also download the photos, videos, audio and documents attached to '
+			'the collected messages into <output>/downloaded-media/, recorded in its '
+			'media.sqlite3. No size limit unless --max-media-size or '
+			'--max-media-total is given. With --update, only the new messages\' '
+			'files. Downloads start once every channel\'s messages are saved and use '
+			'the request controls below. Files are saved, never opened.'
+	)
+	add_media_selection_arguments(media)
+
 	controls = parser.add_argument_group(
 		'request controls',
 		'Shared by channel collection requests after the account check, '
-		'including metadata lookups. Login and the account check are outside '
+		'including metadata lookups and media downloads (one request per 512 KiB '
+		'of a file). Login and the account check are outside '
 		'these controls; Telethon may retry inside an attempt. These are project '
 		'limits, not a safe rate guaranteed by '
 		f'Telegram. The earlier `{invocation(prog)} --batch-file ...` form uses the '
@@ -340,7 +362,9 @@ def add_collect_arguments(parser, prog=SCRIPT_PROG):
 		metavar='N',
 		help='Channels collected at once, 1-10; also the most requests in '
 			'flight (default: 3 for --batch-file; --telegram-channel always runs '
-			'at 1). Use 1 to collect one channel at a time.'
+			'at 1). Use 1 to collect one channel at a time. With --include-media, '
+			'the run then downloads as many files at once as it collected '
+			'channels at once, so a single channel downloads one file at a time.'
 	)
 	controls.add_argument(
 		'--request-interval',
@@ -389,7 +413,8 @@ def build_parsers(prog=SCRIPT_PROG):
 	parser = argparse.ArgumentParser(
 		prog=prog,
 		description='Collect Telegram channel data, then build a messages '
-			'dataset and a channel network from it.',
+			'dataset and a channel network from it, or download the media of the '
+			'collected messages.',
 		epilog=legacy_forms(prog),
 		formatter_class=argparse.RawDescriptionHelpFormatter
 	)
@@ -429,10 +454,23 @@ def build_parsers(prog=SCRIPT_PROG):
 			+ BUILDER_STORAGE_NOTE
 	)
 
+	subparsers[DOWNLOAD_MEDIA] = commands.add_parser(
+		DOWNLOAD_MEDIA,
+		help=DOWNLOAD_MEDIA_HELP,
+		description=DOWNLOAD_MEDIA_DESCRIPTION,
+		epilog=DOWNLOAD_MEDIA_EPILOG
+	)
+
 	subparsers[AUTH], actions = add_auth_parsers(commands)
 	subparsers.update({f'{AUTH} {name}': action for name, action in actions.items()})
 
 	add_collect_arguments(subparsers[COLLECT], prog)
+	add_download_media_arguments(subparsers[DOWNLOAD_MEDIA])
+	add_session_arguments(subparsers[DOWNLOAD_MEDIA].add_argument_group(
+		'session and credentials',
+		f'Which Telegram session and app credentials to use; `{invocation(prog)} auth status` '
+		'shows the current choice.'
+	))
 	add_builder_arguments(subparsers[BUILD_DATASET])
 	add_builder_arguments(subparsers[BUILD_NETWORK])
 	add_builder_arguments(subparsers[BUILD_URLS])

@@ -10,9 +10,10 @@ import asyncio
 from dataclasses import dataclass, field
 
 # import local submodules
-from telethon import errors
-
-from telegram_tracker.request_policy import AccountStopped
+# the run-ending session outcome lives with the request policy, which the
+# media downloads use too; it is part of this module's interface
+from telegram_tracker.request_policy import SESSION_ERRORS, AccountStopped, SessionRejected, \
+	session_rejected  # noqa: F401
 from telegram_tracker.storage.records import StorageError
 
 
@@ -37,15 +38,6 @@ class DuplicateTarget(Exception):
 		self.alias_of = alias_of
 
 
-class SessionRejected(Exception):
-	'''
-	Telegram refused the session's authorization during collection.
-	Ends the run.
-	'''
-
-
-# authorization/session errors that end the run
-SESSION_ERRORS = (errors.UnauthorizedError, errors.AuthKeyError)
 
 
 @dataclass
@@ -58,7 +50,8 @@ class CollectionSummary:
 	None) for each succeeded target with messages. `profile` is the
 	run's RunProfile (None when the caller gave none); `takeovers` holds
 	(target, previous profile name or None) for histories this run
-	replaced although they belonged to another profile.
+	replaced although they belonged to another profile. `media` is the
+	sidecar's media block of a run with media downloads, else None.
 	'''
 	requested: list
 	output_folder: str
@@ -76,6 +69,7 @@ class CollectionSummary:
 	peak_queued_results: int = 0
 	profile: object = None
 	takeovers: list = field(default_factory=list)
+	media: dict | None = None
 
 
 def stop_reason_for(exc):

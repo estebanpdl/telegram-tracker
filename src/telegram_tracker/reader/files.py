@@ -116,6 +116,39 @@ class FilesCollection:
 				load=lambda path=path: read_messages_file(path)
 			)
 
+	@staticmethod
+	def channel_chats(history):
+		'''
+		The chats of the channel snapshot beside a ChannelHistory's
+		messages file (<channel>.json); empty when it cannot be read.
+		'''
+		try:
+			with open(history.label[:-len('_messages.json')] + '.json', encoding='utf-8') as reader:
+				chats = json.load(reader)['chats']
+		except (OSError, ValueError, KeyError, TypeError):
+			return []
+		return [chat for chat in chats if isinstance(chat, dict)] if isinstance(chats, list) else []
+
+	@staticmethod
+	def message_runs(history, payload):
+		'''
+		{message_id: started_at of the collection run that wrote it} for a
+		history that its last run replaced or created, from the provenance
+		record; None when that cannot be told (merged by --update, or no
+		readable record): files do not record which run wrote each
+		message.
+		'''
+		try:
+			record = read_provenance(history.label[:-len('_messages.json')] + '_provenance.json')
+		except HistoryUnreadable:
+			record = None
+		if record is None or record.get('history') not in ('replaced', 'created'):
+			return None
+		return {
+			message.get('id'): record.get('run_started_at')
+			for message in payload.get('messages') or () if isinstance(message, dict)
+		}
+
 	def collected_chats(self):
 		path = f'{self.data_path}/{COLLECTED_CHATS}'
 		if not os.path.isfile(path):

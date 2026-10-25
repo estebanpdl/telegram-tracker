@@ -1,0 +1,526 @@
+# Media ledger
+
+Downloaded photos, videos, audio and documents are stored as plain files under
+`<output>/downloaded-media/`, and recorded in a separate SQLite file, the media
+ledger: `<output>/downloaded-media/media.sqlite3`. This page is the contract for
+that folder and that file. The DDL is [media-ledger.sql](media-ledger.sql).
+
+The ledger is the same in every storage mode (`files`, `sqlite`, `both`). The
+collected data is never changed by it: the data database stays schema version 1
+(see [sqlite-schema.md](sqlite-schema.md)) and the history files stay as they are.
+No file bytes are stored in SQLite, in any mode.
+
+## Folder layout
+
+```
+<output>/downloaded-media/
+  media.sqlite3                                   the ledger
+  <channel_id>/images/<message_id>-<hash>.<ext>   one file per stored content
+  <channel_id>/videos/...
+  <channel_id>/audios/...
+  <channel_id>/files/...
+  .partial/<run_uuid>/<channel_id>-<message_id>-<media_id>.part
+```
+
+- `<channel_id>` is the numeric channel ID, stable across renames. `<hash>` is the
+  first 16 hex digits of the file's SHA-256. `<ext>` comes from the classification
+  below.
+- Names are generated from those integers, hex digits and an allowed extension only.
+  The file name sent with a document is never used for a path; it stays in the
+  message's raw metadata.
+- The folder is not `<output>/media/`: `media` is a valid channel name, and files
+  mode writes each channel's history to `<output>/<channel>/`. No channel name can be
+  `downloaded-media`.
+- No generated name can match `*_messages.json`, the pattern of history files.
+- `.partial/<run_uuid>/` holds a run's downloads in progress. A file there is never
+  complete.
+
+**Links and confinement.** Every folder from `downloaded-media` down
+(`downloaded-media`, the channel and type folders, `.partial` and each
+`.partial/<run_uuid>`) is checked with `lstat` before use. A symlink, a junction or
+another reparse point, or anything that is not a folder, is refused, and the folder
+must resolve inside `downloaded-media`. The output folder itself may be reached
+through a link. A final file name is inspected with `lstat` as well: a link or a
+non-regular file there is a conflict (`path_conflict`), never followed or adopted. A
+regular file there with the same size and SHA-256 is adopted (a leftover of a run
+that stopped before recording it); with other content it is a conflict and is never
+overwritten.
+
+**One file per content.** A file is stored once per channel and content, identified
+by (`channel_id`, `sha256`). Another message with the same content gets its own
+`items` row pointing at the same blob. No hard links or symlinks are made. The
+media ID only hints that a file may already be stored: reuse needs the stored file's
+size and SHA-256 to match.
+
+## Classification
+
+Only a message's own photo (`MessageMediaPhoto`) or document
+(`MessageMediaDocument`) is downloaded. Web page previews, games, invoices, paid
+media, stories, thumbnails, other video qualities and cached or stripped thumbnails
+are not; contacts, locations, polls and dice have no file. All of them stay in the
+raw metadata.
+
+The first matching rule wins:
+
+| Media | Detected by | `type` | `subtype` |
+|---|---|---|---|
+| Photo | `MessageMediaPhoto` with a `Photo` | `image` | `photo` |
+| Sticker | `DocumentAttributeSticker` | by MIME | `sticker` |
+| Voice note | `DocumentAttributeAudio` with `voice` | `audio` | `voice_note` |
+| Video note | `DocumentAttributeVideo` with `round_message` | `video` | `video_note` |
+| GIF | `DocumentAttributeAnimated` | by MIME | `gif` |
+| Video | `DocumentAttributeVideo` | `video` | `video` |
+| Audio | `DocumentAttributeAudio` | `audio` | `audio` |
+| Other document | none of the above | by MIME | `document` |
+
+"By MIME" means `image`, `video` or `audio` for those MIME prefixes, else `file`. The
+`type` names the folder: `images`, `videos`, `audios` or `files`.
+
+A photo is stored at its largest downloadable size (`PhotoSize`, or the largest step
+of a `PhotoSizeProgressive`), as `jpg`; `photo_size` records that size's type. A
+document's extension comes from its MIME type through this table. Any other MIME
+type, or none, gets `bin`. Formats whose usual viewer runs embedded code
+(executables, scripts, HTML, SVG, macro-capable Office formats) are left out on
+purpose. Files are saved, never opened.
+
+| MIME type | Extension |
+|---|---|
+| `image/jpeg` | `jpg` |
+| `image/png` | `png` |
+| `image/gif` | `gif` |
+| `image/webp` | `webp` |
+| `image/heic` | `heic` |
+| `image/heif` | `heif` |
+| `image/avif` | `avif` |
+| `image/bmp` | `bmp` |
+| `image/tiff` | `tif` |
+| `video/mp4` | `mp4` |
+| `video/webm` | `webm` |
+| `video/quicktime` | `mov` |
+| `video/x-matroska` | `mkv` |
+| `video/mpeg` | `mpg` |
+| `video/3gpp` | `3gp` |
+| `video/x-msvideo` | `avi` |
+| `audio/ogg` | `ogg` |
+| `audio/opus` | `opus` |
+| `audio/mpeg` | `mp3` |
+| `audio/mp4` | `m4a` |
+| `audio/x-m4a` | `m4a` |
+| `audio/aac` | `aac` |
+| `audio/flac` | `flac` |
+| `audio/x-flac` | `flac` |
+| `audio/wav` | `wav` |
+| `audio/x-wav` | `wav` |
+| `audio/webm` | `weba` |
+| `application/x-tgsticker` | `tgs` |
+| `application/pdf` | `pdf` |
+| `application/epub+zip` | `epub` |
+| `application/zip` | `zip` |
+| `application/x-7z-compressed` | `7z` |
+| `application/vnd.rar` | `rar` |
+| `application/x-rar-compressed` | `rar` |
+| `application/gzip` | `gz` |
+| `application/vnd.openxmlformats-officedocument.wordprocessingml.document` | `docx` |
+| `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` | `xlsx` |
+| `application/vnd.openxmlformats-officedocument.presentationml.presentation` | `pptx` |
+| `application/vnd.oasis.opendocument.text` | `odt` |
+| `text/plain` | `txt` |
+| `application/json` | `json` |
+
+MIME types are compared in lower case, without parameters (`; charset=...`).
+
+## Requirements and identity
+
+- SQLite 3.31 or newer with the JSON functions, as for the data database. Each
+  connection, the creating one included, turns on `PRAGMA foreign_keys`,
+  `PRAGMA recursive_triggers` and a busy timeout. Recursive triggers make `REPLACE`
+  conflict resolution fire the never-delete triggers, so `INSERT OR REPLACE` cannot
+  rewrite a blob or a complete item.
+- `PRAGMA application_id` is `1413960781` (`0x5447544D`, 'TGTM'). A file is
+  classified from its header before any connection, so a file that is not a ledger
+  (a data database, a Telethon session, anything else) is never opened.
+- `PRAGMA user_version` holds the ledger version, `1`. A newer or older version is
+  refused and left untouched.
+- Every connection is checked against the DDL, object by object, and must hold
+  exactly one `ledger_meta` row.
+- A new ledger is built in a sibling temporary file, checked, and then published
+  without replacing anything at the path. A file that appeared meanwhile is kept and
+  the creation is refused.
+- Ledger rows change only through single short transactions on one connection per
+  run; no transaction stays open while a download waits for the network.
+
+## Link to the collected data
+
+**Dataset identity.** `ledger_meta.dataset_uuid` binds the ledger to the collected
+data of its folder:
+
+- `sqlite` and `both` folders: the `dataset_uuid` of `collection-storage.json`,
+  which is the data database's `schema_meta.dataset_uuid`.
+- `files` folders have no storage manifest, so they get
+  `<output>/collection-identity.json`:
+
+  ```
+  {"format": 1, "dataset_uuid": "<uuid4>", "created_at": "<UTC ISO 8601>"}
+  ```
+
+  It is written once, before the folder's ledger is created, and never changed. It
+  is not a storage manifest: the folder stays a `files` folder. It is read only in
+  folders without `collection-storage.json`. A `files` folder that has a ledger but
+  has lost its record gets no new one: a new UUID would never match the ledger, and
+  since the record is never replaced, the original could no longer be restored.
+
+The ledger is refused, and left untouched, when its `dataset_uuid` differs from the
+folder's, when its `storage` differs from the folder's mode, or when a `files`
+folder has a ledger but no `collection-identity.json`. Copying or moving the whole
+output folder keeps the two together; a `downloaded-media` folder copied into
+another output meets a missing or different identity.
+
+**Join keys.** Each `items` row carries the message's `channel_id` and `message_id`,
+the `media_id` (photo or document ID) and the raw `media_type`, which are the values
+of `messages.channel_id`, `messages.message_id`, `messages.media_id` and
+`messages.media_type` in the data database. `last_run_uuid` names the ledger run that
+last handled the item, and `profile_name`/`profile_id` its profile; `source_run`
+names the collection run whose history the item was selected from.
+
+- **Data database:** `items (channel_id, message_id, media_id)` =
+  `messages (channel_id, message_id, media_id)`. The view `message_media_references`
+  has the same key and adds the profile of the run that collected the reference.
+- **Files:** `<channel>/<channel>_messages.json` → `messages[].id` and
+  `messages[].media.photo.id` or `messages[].media.document.id`. The channel ID is
+  `channel_id` in `<channel>/<channel>_provenance.json`, else `full_chat.id` in
+  `<channel>/<channel>.json`.
+
+**What the ledger cannot guarantee.** A history write and the ledger rows for its
+media are never one transaction: they live in different files. Ledger rows are
+written only after the history they refer to is saved, so a row never names a
+message that was not saved. A stop between the two leaves media references with no
+ledger row. `media_runs.channels` cannot show them, because it is written in the same
+transaction as the rows; `download-media --check` tells them apart from references
+that nothing selected through the run that wrote each message (see
+[Checking a folder](#checking-a-folder)), and `download-media` requests them.
+
+## Tables
+
+### ledger_meta
+
+One row, written when the ledger is created and never changed (trigger
+`ledger_meta_final`; no row is ever deleted, trigger `ledger_meta_kept`).
+
+| Column | Meaning |
+|---|---|
+| `singleton` | Always 1. |
+| `ledger_version` | 1. |
+| `ledger_uuid` | This ledger's UUID. |
+| `dataset_uuid` | The folder's dataset (see Link to the collected data). |
+| `storage` | The folder's storage mode: `files`, `sqlite` or `both`. |
+| `output_binding` | The canonical output folder when the ledger was created. Information only: a moved folder is not refused for it. |
+| `created_at` | When the ledger was created (UTC). |
+| `app_version` | The Telegram Tracker version that created it. |
+
+### media_runs
+
+One row per run that wrote to the ledger. Rows are never deleted (trigger
+`media_runs_kept`). Index `media_runs_by_state` finds running runs.
+
+| Column | Meaning |
+|---|---|
+| `run_uuid` | The run's UUID. |
+| `command` | `collect` (collection with media) or `download-media`. |
+| `collection_run` | The collection run, by its `run_uuid` in `sqlite`/`both` folders or its `started_at` in `files` folders: for `collect`, the run itself; for `download-media`, the folder's last collection run when it started. |
+| `profile_name`, `profile_id` | The run's profile; NULL = default/unknown, as in the data database. |
+| `state` | `running`, then `complete`, `partial` or `interrupted`. |
+| `stop_reason` | Why the run stopped early, or how a dead run was found. |
+| `started_at`, `finished_at` | UTC. `finished_at` stays NULL for a run whose process ended. |
+| `selection` | JSON: `types`, `max_media_size`, `max_media_total` (bytes or null). |
+| `channels` | JSON array of the channel IDs whose selected media the run recorded, updated in the transaction that records them. |
+| `app_requests` | File and lookup requests the application sent, retries included (see [Downloads](#downloads)). |
+| `retries`, `flood_waits`, `refreshes` | Requests sent again, flood waits, file reference refreshes. |
+| `bytes_received` | Every byte received, restarts included. |
+| `app_version` | The Telegram Tracker version of the run. |
+
+### blobs
+
+One row per stored file. A blob never changes and is never deleted (triggers
+`blobs_final`, `blobs_kept`); the path is unique.
+
+| Column | Meaning |
+|---|---|
+| `channel_id` | The channel the file belongs to. |
+| `sha256` | SHA-256 of the file, lower-case hex. |
+| `bytes` | File size. |
+| `type` | `image`, `video`, `audio` or `file` (the folder). |
+| `mime_type` | MIME type of the item that first stored it. |
+| `ext` | Extension, without the dot. |
+| `path` | Path relative to `downloaded-media`, with `/` separators. |
+| `first_run_uuid` | The run that stored it. |
+| `created_at` | When it was recorded (UTC). |
+
+### items
+
+One row per selected media reference of a collected message, keyed like the
+message's media. Rows are never deleted (trigger `items_kept`). Indexes:
+`items_by_state`, `items_by_media` (the reuse hint by media ID) and `items_by_blob`
+(the messages that share a file).
+
+| Column | Meaning |
+|---|---|
+| `channel_id`, `message_id` | The message. |
+| `media_id` | The photo or document ID. |
+| `media_type` | Raw media constructor, as `messages.media_type`. |
+| `media_kind` | `photo` or `document`. |
+| `photo_size` | For a photo, the type of the size stored; NULL for documents. |
+| `type`, `subtype` | Classification (see Classification). |
+| `mime_type` | Normalized MIME type; `image/jpeg` for photos. |
+| `ext` | Extension the file gets. |
+| `expected_bytes` | Size the API reported; NULL = unknown. |
+| `actual_bytes` | Size of the stored file; set when complete. |
+| `sha256` | The blob, set when complete. |
+| `state` | See Item states. |
+| `reason` | Why it was skipped or failed; NULL otherwise. |
+| `attempts` | Download attempts so far, across runs. |
+| `source_run` | The collection run whose history it was selected from, in the form of `media_runs.collection_run`: the run that wrote the item's message. `collect` records itself. `download-media` records `messages.run_id` (as its `run_uuid`) in a database read, and in a files read the run of the history's `<channel>_provenance.json` when that run replaced or created the history (its `run_uuid` in `both` folders); NULL when the folder cannot tell, as for a history merged by `--update` and read from its files. A row requested again keeps its value when the new run cannot tell. |
+| `first_run_uuid`, `last_run_uuid` | The run that first requested it and the last run that handled it; for a complete item, the run that completed it. |
+| `profile_name`, `profile_id` | The last run's profile. |
+| `updated_at` | Last change (UTC). |
+
+### attempts
+
+One row per download attempt. `n` numbers an item's attempts across runs. An attempt
+is written when its download starts and ended once (trigger `attempts_ended_final`);
+rows are never deleted (trigger `attempts_kept`). Index `attempts_by_run` finds a
+run's attempts.
+
+| Column | Meaning |
+|---|---|
+| `channel_id`, `message_id`, `media_id` | The item. |
+| `n` | Attempt number. |
+| `run_uuid` | The run that made it. |
+| `started_at`, `ended_at` | UTC; `ended_at` is NULL while it runs. |
+| `outcome` | `complete`, `skipped` or `failed`. |
+| `reason` | The item's reason for `skipped` and `failed`. |
+| `bytes_received` | Bytes received in this attempt. |
+| `app_requests` | Requests the application made for it. |
+| `refreshed` | 1 when its file reference was refreshed. |
+
+## Item states
+
+An item starts as `requested` (trigger `items_insert_requested`) and moves only
+along these transitions (trigger `items_state_transition`). `complete` is final: a
+complete item never changes again (trigger `items_complete_final`).
+
+| From | To |
+|---|---|
+| `requested` | `requested`, `downloading`, `complete`, `skipped`, `failed` |
+| `downloading` | `complete`, `skipped`, `failed` |
+| `skipped` | `requested` |
+| `failed` | `requested` |
+| `complete` | none |
+
+- `requested` → `complete` reuses a stored blob without downloading.
+- `requested` → `requested`, `skipped` → `requested` and `failed` → `requested` are a
+  later run selecting the item again.
+
+| State | Reasons |
+|---|---|
+| `skipped` | `over_file_limit`, `over_run_limit` |
+| `failed` | `reference_expired`, `message_gone`, `media_changed`, `flood_stop`, `request_failed`, `disk_full`, `storage_error`, `size_mismatch`, `path_conflict`, `stored_file_differs`, `interrupted` |
+
+## Runs and recovery
+
+A run writes to the ledger only while it holds the output folder's lock
+(`.collection.lock`), so at most one writes at a time. When a run starts, any run still recorded as running
+belongs to a process that ended. In the same transaction that records the new run,
+such runs become `interrupted` (with a `stop_reason`), their `downloading` items
+become `failed` with `interrupted`, and their open attempts are ended. Items they
+had only requested stay `requested`. When a run finishes, its own items still
+downloading are recorded the same way.
+
+**Partial files.** Each run downloads into `.partial/<run_uuid>/`, and a file there
+is never complete. With the folder locked, the `.partial/<run_uuid>/` folders
+of other runs the ledger knows are leftovers: their generated `.part` files are
+removed, then each folder once empty. Anything else there (another name, a folder, a
+link) is kept and reported; links are never followed. Folders of runs the ledger
+does not know are reported, never removed. Complete files are outside `.partial` and
+are never removed.
+
+## Byte limits
+
+There is no limit by default. A user can set a per-file and a per-run limit, as a
+number of bytes or with K, M or G (KiB, MiB, GiB).
+
+- **Per file.** A file whose known size is above it is skipped with no request
+  (`over_file_limit`). A file of unknown size is stopped once more than the limit
+  has arrived, and is skipped with the same reason.
+- **Per run.** Every byte received counts, restarts included. Downloads reserve
+  before they request: a known size reserves its size rounded up to whole 512 KiB
+  pulls (at least one) before the first request, and a file that does not fit is
+  skipped (`over_run_limit`); an unknown size reserves 512 KiB before each pull and
+  gives back what the pull did not use. A download never receives more than it
+  reserved, so the bytes received never exceed the limit. Up to one pull's worth of
+  the limit can stay unused, and with several downloads at once which files fit can
+  differ from run to run; each skip is recorded.
+
+## Downloads
+
+A run downloads only items it has recorded as `requested`, one attempt at a time:
+
+1. A complete item of the same media in the channel is reused with no request, once
+   its stored file is verified (size and SHA-256, once per run per file). If that
+   file has changed, the item fails with `stored_file_differs` and the file is kept.
+2. The per-file and per-run limits are applied (see [Byte limits](#byte-limits)).
+3. The item becomes `downloading` and an attempt starts. The file is requested in
+   512 KiB pulls into `.partial/<run_uuid>/`, hashed as it arrives, and synced to
+   disk. Each pull is one application request, paced like every other request of
+   the account. A pull that fails is sent again from the same offset, with the
+   same file reference.
+4. An expired file reference is refreshed once per attempt by fetching the message
+   again; the file then starts over from zero, and a known size reserves again. A
+   second expiry fails the item (`reference_expired`); a message that is gone, or
+   whose media is no longer the same, fails it with `message_gone` or
+   `media_changed`.
+5. A known size must match exactly (`size_mismatch` otherwise), and no pull starts
+   at or after it. So a file longer than its reported size is noticed only when the
+   extra bytes arrive in its last pull; when the reported size is a whole number of
+   pulls, they are never requested.
+6. Content already stored in the channel is reused (its file verified); otherwise
+   the file is published at its generated name without replacing anything (see
+   [Folder layout](#folder-layout)). The blob, the item, the attempt and the run's
+   counters are written in one transaction. The partial file is removed whatever
+   the outcome.
+
+Requests made inside the network library are not counted in `app_requests`: the
+request repeated after a `FILE_MIGRATE` answer, the library's own retry of a
+timeout, and connecting to another data center.
+
+| Event | Item | The run |
+|---|---|---|
+| Flood wait within `--max-flood-wait` | waits, then the pull is sent again | all requests wait |
+| Flood wait over it, or retries used up by flood waits | `failed`, `flood_stop` | stops; items not yet attempted stay `requested` |
+| Errors that persist after the retries, other request errors | `failed`, `request_failed` | goes on |
+| Disk full | `failed`, `disk_full` | media stops; items not yet attempted stay `requested` |
+| `.partial` cannot be used (a link, not a folder) | `failed`, `storage_error` | media stops, as for a full disk |
+| Another local file error | `failed`, `storage_error` | goes on |
+| Cancelled (Ctrl+C) | `failed`, `interrupted` | stops |
+
+Two messages of a run that carry the same media are not downloaded at the same
+time: the second waits for the first, then reuses its file, so the file is requested
+and counted against the per-run limit once.
+
+## Checking a folder
+
+`download-media --check` compares the ledger, the stored files and the saved
+histories (read with `--source`, as the builders read them). It is offline and read
+only: the ledger is opened read only, nothing is recovered, removed or created, and
+no report file is written. Like `collect`, it holds the output folder's lock, and the
+database lease of a `sqlite` or `both` folder, while it reads, so no run changes the
+folder under it; those lock files are removed when it ends. A ledger with an
+unfinished write is refused with a message naming the runs that roll it back
+(`download-media` without `--check`, or `collect --include-media`).
+
+| Check | What it finds |
+|---|---|
+| Identity | The ledger belongs to the folder's dataset (see [Requirements and identity](#requirements-and-identity)); otherwise the check stops with the refusal. |
+| Item → message | Each item's message is in the current history and carries the item's `media_id`. An item whose message is there with other media (an edited post saved again by a later full or window run) is *superseded*; one whose message is not in the current histories (a later run replaced them) is *not in history*. Both are information, not problems: the item and its file stay recorded. |
+| Reference → state | Each downloadable reference of the current histories, counted by type and ledger state. A reference with no row is *selected, no row* when a `collect --include-media` run wrote its message and selected its type (`media_runs.collection_run` names that run; the data database records the run of each message in `messages.run_id`, history files only the run that last replaced or created the whole history, in the provenance record), else *not selected*. In a history file merged by `--update` the two cannot be told apart and count as not selected. |
+| File → hash | Each blob's file is a regular file at its generated path, inside its channel's folder, with the recorded size and SHA-256. Every file is read, so this takes time on large folders. |
+| Orphans | Files under `downloaded-media` that no blob records (a run stopped after publishing one; a later run adopts it when it downloads the same content), blobs that no complete item uses, other entries (links, folders or names that are not generated; never followed), and leftover partial downloads. |
+| Unfinished | Runs recorded as `running` and items still `downloading`: their process ended, and the next run that writes the ledger records them as interrupted. |
+
+Missing, differing or unusable files, orphans, unfinished runs and `selected, no row`
+references are problems; failed, skipped and requested items are not. Exit codes: 0
+when no problem is found, 1 when problems are found (listed on stderr) or the folder
+cannot be checked, 2 for argument errors.
+
+## Example queries
+
+Each message's media with its ledger state, from the data database. Run it on a
+read-only connection opened with `uri=True`. A relative path in `ATTACH` resolves
+against the working directory, so run it from the output folder or give an absolute
+path.
+
+```sql
+ATTACH 'file:downloaded-media/media.sqlite3?mode=ro' AS media;
+SELECT m.channel_id, m.message_id, m.media_type, m.media_id,
+       coalesce(i.state, 'not selected') AS state, i.reason,
+       b.path, b.bytes, i.sha256, i.last_run_uuid, i.profile_name
+FROM messages m
+LEFT JOIN media.items i ON i.channel_id = m.channel_id AND i.message_id = m.message_id
+                       AND i.media_id = m.media_id
+LEFT JOIN media.blobs b ON b.channel_id = i.channel_id AND b.sha256 = i.sha256
+WHERE m.media_id IS NOT NULL
+ORDER BY m.channel_id, m.message_id;
+```
+
+The same for a `files` folder, in Python:
+
+```python
+import json
+import os
+import pathlib
+import sqlite3
+
+
+def read_json(path):
+    with open(path, encoding='utf-8') as reader:
+        return json.load(reader)
+
+
+def channel_id_of(output, channel):
+    provenance = os.path.join(output, channel, f'{channel}_provenance.json')
+    if os.path.exists(provenance):
+        return read_json(provenance)['channel_id']
+    return read_json(os.path.join(output, channel, f'{channel}.json'))['full_chat']['id']
+
+
+def media_of(output, channel):
+    '''(message_id, media_id, state, path) for each photo or document in the history.'''
+    ledger = pathlib.Path(output, 'downloaded-media', 'media.sqlite3').resolve()
+    con = sqlite3.connect(ledger.as_uri() + '?mode=ro', uri=True)
+    try:
+        rows = {
+            (message_id, media_id): (state, path)
+            for message_id, media_id, state, path in con.execute(
+                'SELECT i.message_id, i.media_id, i.state, b.path FROM items i '
+                'LEFT JOIN blobs b ON b.channel_id = i.channel_id AND b.sha256 = i.sha256 '
+                'WHERE i.channel_id = ?', (channel_id_of(output, channel),))
+        }
+    finally:
+        con.close()
+    history = read_json(os.path.join(output, channel, f'{channel}_messages.json'))
+    for message in history['messages']:
+        media = message.get('media') or {}
+        file = media.get('photo') or media.get('document')
+        if isinstance(file, dict) and 'id' in file:
+            state, path = rows.get((message['id'], file['id']), ('not selected', None))
+            yield message['id'], file['id'], state, path
+```
+
+Files of one channel stored more than once (one blob, several messages):
+
+```sql
+SELECT b.path, b.bytes, count(*) AS messages
+FROM blobs b JOIN items i ON i.channel_id = b.channel_id AND i.sha256 = b.sha256
+GROUP BY b.channel_id, b.sha256
+HAVING count(*) > 1
+ORDER BY messages DESC;
+```
+
+Items by state and reason, per run that last handled them:
+
+```sql
+SELECT last_run_uuid, state, reason, count(*) AS items
+FROM items
+GROUP BY last_run_uuid, state, reason
+ORDER BY last_run_uuid, state, reason;
+```
+
+Runs that ended without finishing, and what they left:
+
+```sql
+SELECT r.run_uuid, r.started_at, r.stop_reason, count(a.n) AS interrupted_attempts
+FROM media_runs r
+LEFT JOIN attempts a ON a.run_uuid = r.run_uuid AND a.reason = 'interrupted'
+WHERE r.state = 'interrupted'
+GROUP BY r.run_uuid
+ORDER BY r.started_at;
+```

@@ -5,6 +5,10 @@ import argparse
 import math
 from datetime import datetime, timezone
 
+# standard library only
+from telegram_tracker.media.classify import TYPES as MEDIA_TYPES
+from telegram_tracker.media.limits import parse_size
+
 
 def bounded_int(low, high=None):
 	'''
@@ -58,3 +62,29 @@ def utc_datetime(text):
 	if value.tzinfo is None:
 		return value.replace(tzinfo=timezone.utc)
 	return value.astimezone(timezone.utc)
+
+
+def media_types(text):
+	'''
+	argparse type: comma-separated media types (image, video, audio,
+	file), as a tuple.
+	'''
+	names = tuple(name.strip().lower() for name in text.split(','))
+	unknown = [name for name in names if name not in MEDIA_TYPES]
+	if unknown:
+		raise argparse.ArgumentTypeError(
+			f'unknown media type(s) {", ".join(repr(n) for n in unknown)}: use '
+			f'{", ".join(MEDIA_TYPES)}, separated by commas'
+		)
+	return names
+
+
+def media_size(text):
+	'''
+	argparse type: a byte count, optionally with K, M or G (KiB, MiB,
+	GiB), larger than zero.
+	'''
+	try:
+		return parse_size(text)
+	except ValueError as exc:
+		raise argparse.ArgumentTypeError(str(exc)) from None

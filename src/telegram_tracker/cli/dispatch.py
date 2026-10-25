@@ -12,8 +12,9 @@ import sys
 from telegram_tracker.cli.auth import run_auth
 from telegram_tracker.cli.builders import run_builder
 from telegram_tracker.cli.collect import run_collect
-from telegram_tracker.cli.parsers import AUTH, COLLECT, COMMAND_PROG, SCRIPT_PROG, build_legacy_parser, \
-	build_parser, build_parsers, is_legacy_collection
+from telegram_tracker.cli.media import run_download_media
+from telegram_tracker.cli.parsers import AUTH, COLLECT, COMMAND_PROG, DOWNLOAD_MEDIA, SCRIPT_PROG, \
+	build_legacy_parser, build_parser, build_parsers, is_legacy_collection
 
 
 def main(argv=None, *, prog=SCRIPT_PROG, client_factory=None, authorize=None):
@@ -24,7 +25,7 @@ def main(argv=None, *, prog=SCRIPT_PROG, client_factory=None, authorize=None):
 
 	prog -> program name shown in help and errors
 	client_factory / authorize replace the Telethon client and the login
-	step for `collect` and `auth` (tests use fakes). By default the
+	step for `collect`, `download-media` and `auth` (tests use fakes). By default the
 	session and app credentials are resolved as described in
 	telegram_tracker.credentials.
 	'''
@@ -52,6 +53,9 @@ def main(argv=None, *, prog=SCRIPT_PROG, client_factory=None, authorize=None):
 		)
 	if command == AUTH:
 		return run_auth(args, client_factory=client_factory, authorize=authorize)
+	if command == DOWNLOAD_MEDIA:
+		return run_download_media(
+			args, subparsers[DOWNLOAD_MEDIA], client_factory=client_factory, authorize=authorize)
 	return run_builder(command, args)
 
 

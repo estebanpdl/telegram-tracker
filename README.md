@@ -20,6 +20,7 @@ Telegram Tracker collects public Telegram channels through Telegram's API and tu
 - `collect` saves each channel's profile metadata and posts as JSON, plus aggregate files about the chats found in that data (e.g., forward sources). You can collect one channel or a list of channels from a text file. The same data can also go to an SQLite database, instead of the files or beside them (see [Storage modes](#storage-modes---storage)).
 - `build-dataset` reads the collected data (the files, or the database) and writes `msgs_dataset.csv` and `collected_chats.xlsx`.
 - `build-network` reads the collected chats and writes a directed graph, `Graph.gexf`, and a preview image, `network.png`.
+- `collect --include-media` and `download-media` save the photos, videos, audio and documents attached to the collected messages. This is off by default (see [Downloading media](#downloading-media)).
 
 The two builders run offline: they read local data only and never connect to Telegram.
 
@@ -41,6 +42,7 @@ Contents:
 - [Database backups and schema versions](#database-backups-and-schema-versions)
 - [Collection status, locking, and recovery](#collection-status-locking-and-recovery)
 - [Building the dataset and the network](#building-the-dataset-and-the-network)
+- [Downloading media](#downloading-media)
 - [Known limits](#known-limits)
 - [Running the tests](#running-the-tests)
 
@@ -239,6 +241,7 @@ python main.py collect --batch-file FILE [options]
 python main.py build-dataset [--data-path DIR] [--source auto|files|sqlite]
 python main.py build-network [--data-path DIR] [--source auto|files|sqlite]
 python main.py build-urls [--data-path DIR] [--source auto|files|sqlite]
+python main.py download-media [--output DIR] [--dry-run | --check] [options]
 python main.py auth login | status | logout | clear-credentials | profiles
 ```
 
@@ -273,7 +276,7 @@ The same for every form:
 | Code | Meaning |
 |---|---|
 | `0` | Every requested target was collected, the build succeeded, or the `auth` action completed (including "nothing to do"). Empty channels and empty inputs count as success. |
-| `1` | A target failed, the login failed, the run stopped early (flood wait or rejected session), the output folder, its database, the session, or the Telegram account is in use, the session file or another local file cannot be used, Telegram cannot be reached, a `sqlite` or `both` folder is blocked or its database cannot be used, the session belongs to another account than the profile or the phone number, writing an output or the credentials failed, the application home cannot be created, an `auth` confirmation or the replacement of saved histories by a filtered run was declined, `auth status --check` found the session logged out, the input data of a build is missing or malformed, or a library is missing. |
+| `1` | A target failed, a media file failed or the media downloads stopped, the login failed, the run stopped early (flood wait or rejected session), the output folder, its database, the session, or the Telegram account is in use, the session file or another local file cannot be used, Telegram cannot be reached, a `sqlite` or `both` folder is blocked or its database cannot be used, the session belongs to another account than the profile or the phone number, writing an output or the credentials failed, the application home cannot be created, an `auth` confirmation or the replacement of saved histories by a filtered run was declined, `auth status --check` found the session logged out, the input data of a build is missing or malformed, or a library is missing. |
 | `2` | Invalid arguments, including an unreadable batch file or an unsupported line in it, a `--storage` mode the folder cannot take (or the earlier collection form on a `sqlite` or `both` folder), an invalid or unknown profile, `--session` or `TELEGRAM_TRACKER_SESSION` with a named profile, a filtered `collect` run that would replace saved histories without a terminal to confirm it and without `--yes`, and missing or invalid app credentials (before any connection). |
 | `130` | Interrupted with Ctrl+C. |
 
@@ -400,7 +403,7 @@ A batch file holds one target per line, in any of the forms above. Blank lines a
 
 | Control | Default | Range | Effect |
 |---|---|---|---|
-| `--concurrency N` | 3 for `--batch-file` | 1–10 | Channels collected at once; also the most requests in flight |
+| `--concurrency N` | 3 for `--batch-file` | 1–10 | Channels collected at once (with `--include-media`, also files downloaded at once); also the most requests in flight |
 | `--request-interval SECONDS` | 0.25 | 0.1–60 | Minimum gap between request attempts admitted by the shared policy |
 | `--max-flood-wait SECONDS` | 60 | 0–3600 | Longest Telegram flood wait to sit out |
 | `--max-retries N` | 3 | 0–10 | Additional attempts per request after a flood wait or a transient error |
@@ -409,6 +412,7 @@ A batch file holds one target per line, in any of the forms above. Blank lines a
 - **Transient errors.** Server errors, timeouts (60 seconds per attempt), and dropped connections are retried after 1, 2, 4 ... seconds (at most 30) within `--max-retries`. If they keep failing, only that channel fails.
 - **Access errors.** A missing or private channel fails only that channel. A session that Telegram rejects stops the run; log in again.
 - **Serial fallback.** `--concurrency 1` collects one channel at a time with the same policy. Use it if you prefer the earlier one-by-one behavior, or when an account hits flood waits often.
+- **Media downloads.** With `--include-media`, files are downloaded after every channel's messages are saved, through the same policy, one request per 512 KiB. The run downloads as many files at once as it collects channels at once (`--concurrency`, capped at the number of channels), so a single `--telegram-channel` downloads one file at a time; `download-media --concurrency N` downloads N at once (see [docs/media.md](docs/media.md#concurrency-and-speed)).
 
 **Concurrency is not a Telegram quota.** More workers do not raise Telegram's limits for an account: the request gap is shared across all channels, and a flood wait pauses new policy attempts for all of them. The defaults are project limits, not a rate that Telegram guarantees to be safe. On simulated 1-second requests, 3 workers took about 40% of the serial time, and 10 workers were limited by the 0.25-second gap (see [docs/compatibility.md](docs/compatibility.md)). Real timings depend on Telegram.
 
@@ -442,6 +446,8 @@ output/data/                          (or the folder given with --output)
 ├── collection-status.json            state and per-target outcome of the last collection
 ├── collection-storage.json           storage mode, for sqlite and both folders only
 ├── telegram-tracker.sqlite3          the database (--storage sqlite or both)
+├── downloaded-media/                 media files and their ledger (--include-media, download-media)
+├── collection-identity.json          files folders with downloaded media: ties the media ledger to this data
 ├── _exceptions-channels-not-found.txt   requested targets that were missing or inaccessible (when any)
 ├── _exceptions-users-not-found.txt      discovered chats whose metadata could not be retrieved (when any)
 ├── msgs_dataset.csv                  written by build-dataset
@@ -681,6 +687,30 @@ It writes three files to the folder and replaces them on every build:
 
 Nothing is fetched: links are not opened, resolved or expanded, and the public suffix list is the copy bundled with `tldextract`. Two `build-urls` runs on one folder refuse each other (`urls.sqlite3.lock`). [docs/urls-dataset.md](docs/urls-dataset.md) gives the evidence and counting rules, every column, and example queries.
 
+## Downloading media
+
+Media downloads are off by default: without `--include-media` or `download-media`, no file is requested.
+
+```
+# download the files of the collected messages after collecting them
+python main.py collect --batch-file ./channels.txt --include-media
+
+# download the files of an existing folder; first see what a run would request
+python main.py download-media --output ./output/data --dry-run
+python main.py download-media --output ./output/data --media-types image,video --max-media-total 5G
+
+# check the stored files against the ledger and the saved messages
+python main.py download-media --output ./output/data --check
+```
+
+- **Where.** Files go to `<output>/downloaded-media/<channel_id>/{images,videos,audios,files}/`, under generated names, one copy per channel and content, recorded in `downloaded-media/media.sqlite3`. The collected data is not changed. Files are saved, never opened.
+- **Which.** `collect --include-media` downloads the files of the messages the run covered (with `--update`, the new messages). `download-media` downloads every file of the selected kinds in the folder's saved histories that is not stored yet, including files that failed or were skipped before, fetching the messages again for fresh file references. It needs the profile that collected each channel.
+- **Limits.** `--media-types image,video,audio,file` selects kinds; `--max-media-size SIZE` skips larger files; `--max-media-total SIZE` caps the bytes received in the run. There is no size limit by default.
+- **Interruptions.** Completed files are never deleted. Ctrl+C and failures remove the file in progress; a killed run's partial file is removed by the next run that writes the ledger. Failed and skipped files are recorded with a reason, and `download-media` tries them again.
+- **Sharing.** Copying or sharing the output folder shares the downloaded files.
+
+[docs/media.md](docs/media.md) describes the options, the folder layout, speed and concurrency, `--dry-run` and `--check`, exit codes, and failure handling; [docs/media-ledger.md](docs/media-ledger.md) is the ledger's contract.
+
 ## Known limits
 
 The behavior in this README is validated by the offline test suite, with synthetic data and a fake Telegram client, plus an install check of the built package. What that validation does not cover:
@@ -692,6 +722,7 @@ The behavior in this README is validated by the offline test suite, with synthet
 - **Builders on a database.** Read from the database, a renamed channel's old-name history is not built, and a date nested in an object column of the collected chats reads as stored text (see [Building the dataset and the network](#building-the-dataset-and-the-network)). Rebuilding the collected chats from a database rereads the rows kept so far for each later run, so builds of folders with many runs take longer.
 - **Dataset appends.** `build-dataset` appends to `msgs_dataset.csv`, so building twice, or again after `--update`, duplicates rows (see [Building the dataset and the network](#building-the-dataset-and-the-network)).
 - **URLs.** `build-urls` finds only URLs that are in the collected messages; it does not read URL buttons, and it checks no link against the web. Its public suffix list is as current as the pinned `tldextract` release.
+- **Media against Telegram.** Media downloads are validated offline, with a fake client serving real Telethon objects; no file was downloaded from Telegram by the tests. Download rates are capped by the request pacing (about 2 MiB/s per account at the defaults), not measured (see [docs/media.md](docs/media.md#known-limits)).
 
 ## Running the tests
 

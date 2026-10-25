@@ -32,7 +32,7 @@ import os
 from telegram_tracker.reader.records import SQLITE, ChannelHistory, ChatsInput, HistoryProvenance
 from telegram_tracker.storage.destination import same_folder
 from telegram_tracker.storage.manifest import DATABASE_FILE, MANIFEST_FILE, ManifestError, read_manifest
-from telegram_tracker.storage.records import COMPLETE, PARTIAL, STATUS_FILE, StorageError
+from telegram_tracker.storage.records import COMPLETE, INTERRUPTED, PARTIAL, STATUS_FILE, StorageError
 from telegram_tracker.storage.status import collection_status
 from telegram_tracker.utils import DataInputError
 
@@ -67,9 +67,10 @@ class DatabaseCollection:
 	'''
 	source = SQLITE
 
-	def __init__(self, data_path, *, messages=True):
+	def __init__(self, data_path, *, messages=True, interrupted_ok=False):
 		self.data_path = data_path
 		self.messages = messages
+		self.interrupted_ok = interrupted_ok
 		self.manifest = None
 		self.status = None
 		self.storage = None
@@ -121,7 +122,8 @@ class DatabaseCollection:
 			)
 		self.storage = self.manifest['storage']
 		self.status, self.notes = collection_status(
-			self.data_path, messages=self.messages, required=True, histories='stored histories'
+			self.data_path, messages=self.messages, required=True, histories='stored histories',
+			interrupted_ok=self.interrupted_ok
 		)
 
 	def _open(self):
@@ -170,7 +172,7 @@ class DatabaseCollection:
 				f'{self.data_path}/{STATUS_FILE} and {self.path} describe different runs, so '
 				'the folder may have changed after collection. Keep it for inspection.'
 			)
-		if state not in (COMPLETE, PARTIAL):
+		if state not in (COMPLETE, PARTIAL) and not (self.interrupted_ok and state == INTERRUPTED):
 			raise DataInputError(
 				f'{self.path} says its last run is {state}, not finished. Build after a '
 				'collection into this folder finishes, or keep the folder for inspection.'
@@ -267,6 +269,23 @@ class DatabaseCollection:
 		for list_name in ('chats', 'users'):
 			payload[list_name] = [json.loads(raw) for name, raw in entities if name == list_name]
 		return payload
+
+	def channel_chats(self, history):
+		'''
+		The channel of a ChannelHistory as stored (its latest copy), in a
+		list; empty when it was not stored.
+		'''
+		return [json.loads(raw) for raw, in self._rows(
+			"SELECT raw FROM peers WHERE peer_kind = 'channel' AND peer_id = ?", history.channel_id)]
+
+	def message_runs(self, history, payload):
+		'''
+		{message_id: run_uuid of the collection run that wrote it} for the
+		stored messages of a ChannelHistory.
+		'''
+		return dict(self._rows(
+			'SELECT m.message_id, r.run_uuid FROM messages m JOIN collection_runs r ON r.run_id = m.run_id '
+			'WHERE m.channel_id = ?', history.channel_id))
 
 	'''
 

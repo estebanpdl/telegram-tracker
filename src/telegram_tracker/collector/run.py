@@ -19,8 +19,9 @@ from telegram_tracker.collector.channel import collect_channel
 from telegram_tracker.collector.history import HistoryWindow
 from telegram_tracker.collector.outcomes import SESSION_ERRORS, CollectionSummary, \
 	DuplicateTarget, PaginationStalled, SessionRejected, TargetUnavailable, \
-	stop_reason_for
+	session_rejected, stop_reason_for
 from telegram_tracker.collector.rpc import MetadataCache, Requests
+from telegram_tracker.media.collect import METHOD_CLASSES as MEDIA_METHOD_CLASSES, MediaRun
 from telegram_tracker.request_policy import AccountStopped, RequestFailed, RequestPolicy
 from telegram_tracker.storage.histories import ReplaceNotConfirmed
 from telegram_tracker.storage.provenance import HistoryRefused
@@ -78,7 +79,8 @@ async def run_collection(
 		identify=None,
 		writer_factory=None,
 		preflight=None,
-		confirmed=None
+		confirmed=None,
+		media=None
 	):
 	'''
 	Collect `targets` (normalized, without duplicates) with one client.
@@ -115,6 +117,16 @@ async def run_collection(
 		targets whose replacement was confirmed. Any other target whose
 		resolved channel has a history stored under its ID fails, keeping
 		that ID in its outcome (see collector.channel). None checks nothing.
+	media -> a media.selection.MediaSelection: also download the selected
+		media of the messages each channel covers into
+		<output>/downloaded-media/ (see media.collect). The ledger is
+		opened once the store is open, before any channel request, and
+		a channel's media are recorded right after its history is
+		committed; downloads start after the last history commit, under
+		the same policy, before the aggregates are finalized. A media
+		stop (full disk, ledger failure) ends the downloads only; an
+		account stop during them ends the run. None (the default)
+		downloads nothing.
 
 	Missing/inaccessible targets, stalled pagination, unreadable saved
 	histories (--update), --update into another profile's history, and
@@ -127,6 +139,8 @@ async def run_collection(
 	after every worker has finished.
 	'''
 	window = window or HistoryWindow(min_id=min_id)
+	if media is not None and metadata_only:
+		raise ValueError('media downloads need message collection, not metadata only')
 	summary = CollectionSummary(requested=list(targets), output_folder=output_folder)
 	summary.concurrency = max(1, min(concurrency, len(summary.requested)))
 
@@ -175,7 +189,8 @@ async def run_collection(
 					update=update,
 					account_checks=0 if identify is None else 1,
 					writer_factory=writer_factory or open_file_writer,
-					confirmed=confirmed
+					confirmed=confirmed,
+					media=media
 				)
 	finally:
 		await client.disconnect()
@@ -185,7 +200,7 @@ async def run_collection(
 
 async def _collect_locked(
 		client, summary, policy, parameters, *, metadata_only, window, update, account_checks,
-		writer_factory, confirmed):
+		writer_factory, confirmed, media):
 	status = StatusFile(
 		summary.output_folder, summary.requested, parameters, summary.profile, account_checks
 	)
@@ -201,18 +216,39 @@ async def _collect_locked(
 		status.write()
 		await _collect_targets(
 			client, summary, policy, status, writer,
-			metadata_only=metadata_only, window=window, update=update, confirmed=confirmed
+			metadata_only=metadata_only, window=window, update=update, confirmed=confirmed, media=media
 		)
 	finally:
 		writer.close()
 
 
-async def _collect_targets(client, summary, policy, status, writer, *, metadata_only, window, update, confirmed):
+def _open_media(client, summary, policy, status, writer, media):
+	'''
+	The run's MediaRun (see media.collect), recorded in the sidecar.
+	'''
+	database = _status_fields(writer).get('database') or {}
+	media_run = MediaRun.open(
+		summary.output_folder, media, client=client, policy=policy, profile=summary.profile,
+		collection_run=database.get('run_uuid') or status.data['started_at']
+	)
+	status.data['media'] = media_run.record()
+	try:
+		status.write()
+	except BaseException as exc:
+		media_run.finish(stop_reason_for(exc))
+		media_run.close()
+		raise
+	return media_run
+
+
+async def _collect_targets(
+		client, summary, policy, status, writer, *, metadata_only, window, update, confirmed, media):
 	targets = summary.requested
 	cache = MetadataCache(Requests(client, policy))
 	queue = asyncio.Queue(maxsize=summary.concurrency)
 	resolved = {}
 	resolved_events = [asyncio.Event() for _ in targets]
+	media_run = None
 
 	async def after_resolve(index, entity):
 		'''
@@ -245,7 +281,8 @@ async def _collect_targets(client, summary, policy, status, writer, *, metadata_
 				after_resolve=functools.partial(after_resolve, index),
 				profile=summary.profile,
 				histories=writer.histories,
-				confirmed=confirmed
+				confirmed=confirmed,
+				media=media
 			)
 			outcome = ('result', result)
 		except TargetUnavailable:
@@ -259,9 +296,7 @@ async def _collect_targets(client, summary, policy, status, writer, *, metadata_
 			print(f'> {target}: {exc}; messages not saved.', file=sys.stderr)
 			outcome = ('failed', str(exc))
 		except SESSION_ERRORS as exc:
-			raise SessionRejected(
-				f'Telegram rejected the session ({type(exc).__name__}); log in again'
-			) from None
+			raise session_rejected(exc) from None
 		finally:
 			resolved_events[index].set()
 
@@ -298,6 +333,9 @@ async def _collect_targets(client, summary, policy, status, writer, *, metadata_
 			if payload.history_mode == 'not_collected' and writer.has_history(
 					target, payload.channel_id):
 				entry['stale_history'] = True
+			if media_run is not None:
+				# only now that the history is committed
+				media_run.request(payload)
 		elif kind == 'duplicate':
 			entry.update(status='duplicate', alias_of=payload)
 		else:
@@ -320,25 +358,36 @@ async def _collect_targets(client, summary, policy, status, writer, *, metadata_
 		for index in order:
 			await process(index)
 
-	workers = [asyncio.create_task(worker()) for _ in range(summary.concurrency if targets else 0)]
-	writer_task = asyncio.create_task(write_results())
+	tasks = []
 	try:
+		if media is not None:
+			# before any channel request: a ledger that cannot be used stops the run
+			media_run = _open_media(client, summary, policy, status, writer, media)
+		workers = [asyncio.create_task(worker()) for _ in range(summary.concurrency if targets else 0)]
+		writer_task = asyncio.create_task(write_results())
+		tasks = workers + [writer_task]
 		await _supervise(workers, writer_task, queue)
+		if media_run is not None:
+			# every history is committed: media cannot delay or cost any of them
+			await media_run.download(summary.concurrency)
 	except BaseException as exc:
 		summary.stop_reason = stop_reason_for(exc)
-		await _cancel_all(workers + [writer_task])
+		await _cancel_all(tasks)
 		await _close_quietly(cache)
 		if not isinstance(exc, StorageError):
 			# results already collected and waiting for the writer
 			_drain(queue, record)
-		_finish(writer, cache, status, summary, policy, failing=True)
+		_finish(writer, cache, status, summary, policy, media_run, failing=True)
 		if isinstance(exc, (AccountStopped, SessionRejected)):
 			# a planned stop: the summary carries stop_reason
 			return
 		raise
-
-	await cache.close()
-	_finish(writer, cache, status, summary, policy, failing=False)
+	else:
+		await cache.close()
+		_finish(writer, cache, status, summary, policy, media_run, failing=False)
+	finally:
+		if media_run is not None:
+			media_run.close()
 
 
 async def _supervise(workers, writer_task, queue):
@@ -392,12 +441,12 @@ def _status_fields(writer):
 	return fields() if fields is not None else {}
 
 
-def _finish(writer, cache, status, summary, policy, *, failing):
+def _finish(writer, cache, status, summary, policy, media_run=None, *, failing):
 	'''
-	Finalize aggregates from the committed channels, fill the summary from
-	the target statuses (input order), and close the sidecar. A storage
-	error while finishing is raised unless the run is already failing with
-	another error.
+	End the media run (its downloads are over), finalize aggregates from
+	the committed channels, fill the summary from the target statuses
+	(input order), and close the sidecar. A storage error while finishing
+	is raised unless the run is already failing with another error.
 	'''
 	for index, entry in enumerate(status.data['targets']):
 		target = summary.requested[index]
@@ -419,6 +468,13 @@ def _finish(writer, cache, status, summary, policy, *, failing):
 
 	summary.requests = policy.stats_record()
 	summary.peak_in_flight = policy.peak_active
+	if media_run is not None:
+		summary.media = status.data['media'] = media_run.finish(summary.stop_reason)
+		# media requests are counted in the media block: the collection's
+		# statistics (sidecar, database) keep their own method classes
+		summary.requests = {
+			name: stats for name, stats in summary.requests.items() if name not in MEDIA_METHOD_CLASSES
+		}
 
 	error = None
 	try:

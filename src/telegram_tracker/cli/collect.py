@@ -27,12 +27,12 @@ from telegram_tracker.cli.auth import confirm
 from telegram_tracker.cli.builders import missing_dependency
 from telegram_tracker.cli.profile_checks import account_check
 from telegram_tracker.cli.parsers import COLLECT, DEFAULT_OUTPUT, invocation
+from telegram_tracker.cli.run_setup import app_client, prepare_session, select_run_session
 from telegram_tracker.cli.targets import read_targets
-from telegram_tracker.credentials import accounts, profiles
+from telegram_tracker.credentials import accounts
 from telegram_tracker.credentials import home as homes
 from telegram_tracker.credentials import sources
 from telegram_tracker.credentials.lease import Lease, LeaseError
-from telegram_tracker.credentials.protection import ProtectionError
 from telegram_tracker.local_errors import client_failure
 from telegram_tracker.utils import data_folder_from
 
@@ -157,6 +157,7 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 			'--max-messages) need message collection; remove '
 			'--limit-download-to-channel-metadata'
 		)
+	include_media = media_options(args, parser, metadata_only)
 
 	targets, given = read_targets(args, parser)
 	output_folder = data_folder_from(args['output'], DEFAULT_OUTPUT)
@@ -178,8 +179,18 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 		from telegram_tracker.storage import OutputLocked, StorageError
 		from telegram_tracker.storage.destination import StorageChoiceRefused, select_destination
 		from telegram_tracker.storage.provenance import RunProfile
+		from telegram_tracker.media.ledger import check_ledger
+		from telegram_tracker.media.limits import MediaLimits
+		from telegram_tracker.media.selection import MediaSelection
 	except ModuleNotFoundError as exc:
 		return missing_dependency(COLLECT, exc)
+
+	media = None
+	if include_media:
+		media = MediaSelection(
+			args.get('media_types') or MediaSelection().types,
+			MediaLimits(args.get('max_media_size'), args.get('max_media_total'))
+		)
 
 	try:
 		destination = select_destination(output_folder, args.get('storage'), legacy=legacy)
@@ -194,16 +205,14 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 	window = HistoryWindow(**bounds)
 
 	try:
-		home, _ = homes.app_home()
-		profile = profiles.select_profile(args.get('profile'), home=home)
-		profiles.require(profile)
-		session = profiles.select_session(profile, args.get('session'))
-		if homes.is_within(session.path, output_folder):
-			parser.error('the session file must not be inside the --output folder')
-		if homes.is_within(output_folder, home) or homes.is_within(home, output_folder):
-			parser.error(f'the --output folder must be outside the application home ({home})')
+		home, profile, session = select_run_session(args, parser, output_folder)
 		destination.protected = (session.path,)
 		destination.check()
+		if media is not None:
+			# a ledger of other data is refused before credentials; the run checks again
+			note = check_ledger(output_folder)
+			if note is not None:
+				print(f'> Note: {note}', file=sys.stderr)
 		confirmed = None
 		if bounds and not metadata_only:
 			assume_yes = args.get('yes', False)
@@ -216,22 +225,9 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 				confirmed = frozenset(existing)
 		phone = None
 		if client_factory is None:
-			from telegram_tracker.api import create_client
-
-			resolution = sources.resolve(
-				config=args.get('config'),
-				home=profile.root,
-				discover_legacy=profile.is_default
-			)
-			if resolution.missing:
-				return missing_credentials(resolution, profile)
-			phone = resolution.values['phone']
-			client_factory = functools.partial(
-				create_client,
-				session.path,
-				resolution.values['api_id'],
-				resolution.values['api_hash']
-			)
+			client_factory, phone = app_client(args, profile, session)
+			if client_factory is None:
+				return 2
 	except (homes.HomeError, sources.CredentialError) as exc:
 		print(f'> {exc}', file=sys.stderr)
 		return 2
@@ -242,23 +238,9 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 		print('\n> Interrupted.', file=sys.stderr)
 		return 130
 
-	if session.notice:
-		print(session.notice, file=sys.stderr)
-	if session.in_home and not os.path.isfile(session.path):
-		try:
-			profiles.prepare_root(profile)
-		except ProtectionError as exc:
-			print(
-				f'> Cannot create the session in {profile.root}: {exc}. Set '
-				'TELEGRAM_TRACKER_HOME' + (' or pass --session.' if profile.is_default else '.'),
-				file=sys.stderr
-			)
-			return 1
-	try:
-		accounts.prepare(home)
-	except accounts.AccountError as exc:
-		print(f'> {exc}', file=sys.stderr)
-		return 1
+	stop = prepare_session(session, profile, home)
+	if stop is not None:
+		return stop
 
 	if authorize is None:
 		authorize = functools.partial(ensure_authorized, phone=phone)
@@ -270,6 +252,8 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 		print('Update: new posts are merged into saved histories\n')
 	if destination.uses_database:
 		print(f'Storage: {destination.describe()}\n')
+	if media is not None:
+		print(f'Media: {media.describe()}\n')
 	if batch:
 		duplicates = given - len(targets)
 		print(
@@ -296,6 +280,7 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 					writer_factory=destination.open_writer,
 					preflight=destination.check_unlocked,
 					confirmed=confirmed,
+					media=media,
 					**controls
 				)
 			)
@@ -340,6 +325,7 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 			+ ', '.join(summary.stale_histories) + '\n'
 		)
 	print_messages(summary.saved_messages)
+	media_problems = print_media(summary.media, summary.stop_reason)
 
 	if summary.stop_reason:
 		print(f'> Stopped: {summary.stop_reason}', file=sys.stderr)
@@ -355,30 +341,31 @@ def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
 			+ ', '.join(target for target, _ in summary.failed),
 			file=sys.stderr
 		)
-	if summary.failed or summary.stop_reason:
+	if summary.failed or summary.stop_reason or media_problems:
 		return 1
 
 	return 0
 
 
-def missing_credentials(resolution, profile):
+def media_options(args, parser, metadata_only):
 	'''
-	Explain which app credentials are missing and how to provide them
-	(stderr, exit 2). Names sources only, never values.
+	Whether the run downloads media. The media options without
+	--include-media, or media with metadata only, are argument errors.
 	'''
-	found = [label for label in resolution.labels() if not label.endswith(': missing')]
-	login = 'auth login' + ('' if profile.is_default else f' --profile {profile.name}')
-	print(
-		f'> Missing app credentials: {", ".join(resolution.missing)}'
-		+ (f' (found {"; ".join(found)})' if found else '')
-		+ f'. Run `{login}` to enter and save them, set '
-		+ ', '.join(sources.ENV_VARS.values())
-		+ (', or fill in config/config.ini.' if profile.is_default else ', or pass --config.'),
-		file=sys.stderr
-	)
-	for note in resolution.notes:
-		print(f'> Note: {note}', file=sys.stderr)
-	return 2
+	include = args.get('include_media', False)
+	given = [
+		option for option, key in (
+			('--media-types', 'media_types'), ('--max-media-size', 'max_media_size'),
+			('--max-media-total', 'max_media_total')
+		) if args.get(key) is not None
+	]
+	if given and not include:
+		parser.error(f'{", ".join(given)} need{"s" if len(given) == 1 else ""} --include-media')
+	if include and metadata_only:
+		parser.error(
+			'--include-media needs message collection; remove --limit-download-to-channel-metadata'
+		)
+	return include
 
 
 def list_names(names):
@@ -435,6 +422,40 @@ def print_messages(saved_messages):
 		for target, count, _ in saved_messages:
 			print(f'>   {target}: {count}')
 	print('')
+
+
+def print_media(record, run_stop_reason=None):
+	'''
+	The media downloads of the run (the sidecar's media block): counts on
+	stdout; on stderr, a stop of the downloads alone (a stop of the run is
+	reported with the run) and failed files. Returns True when the
+	downloads stopped on their own or a file failed.
+	'''
+	if record is None:
+		return False
+	stopped = record['stop_reason'] if record['stop_reason'] != run_stop_reason else None
+	items = record['items']
+	if items is not None:
+		print(
+			f'> Media: {items["complete"]} of {items["selected"]} selected file(s) stored '
+			f'({items["downloaded"]} downloaded in this run), {items["skipped"]} skipped by the size '
+			f'limits, {items["failed"]} failed, {items["not_attempted"]} not attempted; '
+			f'{record["bytes_received"]} bytes received. Recorded in {record["ledger"]}.'
+		)
+	if record['requests']:
+		print('> Media requests by method class (sent / retries / flood waits / flood wait seconds):')
+		for name, stats in record['requests'].items():
+			print(
+				f'>   {name:<12} {stats["requests"]} / {stats["retries"]} / '
+				f'{stats["flood_waits"]} / {stats["flood_wait_seconds"]}'
+			)
+	if items is not None or record['requests']:
+		print('')
+	if stopped:
+		print(f'> {stopped[:1].upper()}{stopped[1:]}', file=sys.stderr)
+	if items is not None and items['failed']:
+		print(f'> {items["failed"]} media file(s) failed; their reasons are in {record["ledger"]}.', file=sys.stderr)
+	return bool(stopped or items is None or items['failed'])
 
 
 def asyncio_run(coroutine):

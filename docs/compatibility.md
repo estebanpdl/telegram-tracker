@@ -427,6 +427,34 @@ never CLI arguments or written to output. Prompts need an interactive terminal;
 run inside an activated environment. `conda run` does not attach terminal input
 by default.
 
+### Media downloads
+
+`collect --include-media` and `download-media` (canonical form only) download the
+files attached to collected messages; the user guide is [media.md](media.md) and the
+ledger contract [media-ledger.md](media-ledger.md).
+
+- Opt-in: without those, no `GetFile` or message lookup is made and nothing of
+  media is written (tested in every storage mode). With `--include-media`, the
+  collected files and the stored messages are identical to a run without it (tested
+  in files and sqlite folders).
+- Files go to `<output>/downloaded-media/`; the ledger `media.sqlite3`
+  (`application_id` 'TGTM', `user_version` 1) is the same in every storage mode and
+  the data database stays schema version 1. A files folder gets
+  `collection-identity.json`, its dataset UUID, the first time.
+- Requests: Telethon `iter_download`, one 512 KiB `GetFile` per policy attempt
+  (method class `media`); message lookups are `channels.GetMessages` batches of 100
+  (`media_lookup`). Both share the run's `RequestPolicy`; their statistics go to the
+  sidecar's `media` block and the ledger, so `run_requests` keeps its four classes.
+- Order and concurrency: `collect` downloads after its last history commit, as many
+  files at once as its effective `--concurrency` (capped at the number of targets);
+  `download-media` downloads `--concurrency` files at once (default 1).
+- Leases: `download-media` takes collect's, in collect's order; `--check` holds the
+  output lock and the database lease while it reads and writes nothing else.
+  Neither reads a folder whose sidecar says `running`.
+- Publication: a file is staged in `.partial/<run_uuid>/`, hashed, synced, and linked
+  to its generated name without replacing anything; then one ledger transaction
+  records it. Completed files are never deleted.
+
 ## Offline builders
 
 `datasets.build_dataset` and `network.build_network` read a collection through
@@ -515,6 +543,13 @@ and loads no database code.
   implies live collection.
 - `tests/builder_data.py` prepares fake collection output and runs wrappers in guarded
   interpreters. `tests/virtual_time.py` jumps to timers, avoiding real pacing waits.
+- Media: `tests/media_download_support.py` answers Telethon's own `iter_download` and
+  `GetMessages` requests (data centers, `FILE_MIGRATE`, file references and their
+  expiry, `GetFile` offset rules) on a client made without connecting;
+  `tests/media_collect_support.py` serves histories as real Telethon messages.
+  `tests/test_media_signals.py` raises a real SIGINT in, and kills, a child process
+  (`media_signal_child.py`) while a file downloads, for both commands in every storage
+  mode, on every platform.
 - `tests/test_environment.py` checks pinned interfaces and prevents reintroduction
   of removed pandas and matplotlib calls.
 
@@ -532,6 +567,11 @@ The evidence above is offline and synthetic. Remaining limits:
   (`sqlite`, `both`) and named profiles; they do not qualify live collection.
 - Request rates: concurrency and request-interval defaults are project limits;
   Telegram's per-account limits were not measured.
+- Media: no file was downloaded from Telegram. The `GetMessages` batch size of 100,
+  the access hash stored in a real channel's data, and refreshing an expired file
+  reference after a message lookup are unconfirmed against the service. Download rates
+  were not measured; requests Telethon makes on its own (data-center connections, the
+  repeat after `FILE_MIGRATE`) are neither paced nor counted.
 - Readers: SQLite runs in rollback-journal mode. An open read transaction on the
   database delays a collection's writes; after the 5 s busy timeout the run stops
   with exit 1.

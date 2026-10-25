@@ -198,12 +198,23 @@ class Destination:
 		return [t for t in targets if t in found]
 
 	def _database_histories(self, targets):
-		from telegram_tracker.storage.sqlite.connection import open_database
+		from telegram_tracker.storage.sqlite.connection import interrupted_write, open_database
 		from telegram_tracker.storage.sqlite.schema import DatabaseRefused
 
 		if not targets:
 			return set()
 		path = self.database_path
+		if interrupted_write(path) is not None:
+			# A run that was not confirmed still refuses, after resolution, to
+			# replace a history stored under the channel's ID (collector.channel).
+			print(
+				f'> Note: {path} has an unfinished write, so the channels whose saved history this '
+				'filtered run would replace cannot be listed before connecting. Without --yes, '
+				'`collect` does not replace a history it finds there after connecting: that channel '
+				'fails instead (the legacy form replaces it, as after its warning).',
+				file=sys.stderr
+			)
+			return set()
 		try:
 			con = open_database(path, protected=self.protected, readonly=True)
 		except DatabaseRefused as exc:
@@ -225,12 +236,16 @@ class Destination:
 
 			check_free(self.database_path)
 
-	def _check_database(self):
+	def _check_database(self, *, leased=False):
 		'''
 		The recorded database: present and current, created for this
 		folder with the manifest's dataset UUID, and no 'pending' marker.
+		Before the database lease the connection is read only, which cannot
+		roll back an unfinished write (interrupted_write): such a database
+		is left, with a note, to the check under the lease, whose
+		connection may write and so rolls it back.
 		'''
-		from telegram_tracker.storage.sqlite.connection import open_database
+		from telegram_tracker.storage.sqlite.connection import interrupted_write, open_database
 		from telegram_tracker.storage.sqlite.schema import DatabaseRefused
 
 		path = self.database_path
@@ -239,8 +254,15 @@ class Destination:
 				f'{self.output_folder} was collected with --storage {self.storage}, but {path} '
 				'is missing. Keep the folder for inspection and collect into a fresh --output.'
 			)
+		if not leased and interrupted_write(path) is not None:
+			print(
+				f'> Note: {path} has an unfinished write (a run stopped while writing it); it is '
+				'checked and recovered once the database lease is held.',
+				file=sys.stderr
+			)
+			return
 		try:
-			con = open_database(path, protected=self.protected, readonly=True)
+			con = open_database(path, protected=self.protected, readonly=not leased)
 		except DatabaseRefused as exc:
 			raise DestinationError(str(exc)) from None
 		try:
@@ -346,7 +368,7 @@ class Destination:
 					'run meanwhile; nothing was written.'
 				)
 			self.manifest = manifest
-			self._check_database()
+			self._check_database(leased=True)
 
 		database = writer_class.open(
 			self.database_path,

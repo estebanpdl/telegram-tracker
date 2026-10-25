@@ -44,6 +44,44 @@ class DatabaseBusy(StorageError):
 	'''
 
 
+class InterruptedWrite(StorageError):
+	'''
+	A read-only connection was refused: the file has an unfinished write
+	(see interrupted_write), which only a writer can roll back.
+	'''
+
+
+def interrupted_write(path):
+	'''
+	The rollback journal beside the SQLite file `path` when it is not
+	empty, else None. A process killed inside a write transaction leaves
+	one (a hot journal), and so does a write still in progress. A
+	read-only connection cannot roll it back and fails to read the file,
+	so checks that only read leave such a file to the next writer, which
+	rolls it back once it holds the folder.
+	'''
+	journal = f'{path}-journal'
+	try:
+		return journal if os.lstat(journal).st_size > 0 else None
+	except OSError:
+		return None
+
+
+def refuse_interrupted_write(path, recovered_by='the next collect run into this folder'):
+	'''
+	Raise InterruptedWrite when `path` has an unfinished write; called
+	before a read-only connection. `recovered_by` names the runs that roll
+	such a write back.
+	'''
+	journal = interrupted_write(path)
+	if journal is not None:
+		raise InterruptedWrite(
+			f'{path} has an unfinished write ({os.path.basename(journal)}): a run stopped while '
+			'writing it, or one is writing it now. Reading it needs that write rolled back, which '
+			f'{recovered_by} does. It was left untouched.'
+		)
+
+
 def package_version(name):
 	try:
 		return metadata.version(name)
@@ -162,6 +200,8 @@ def open_database(
 		create_database(path, output_binding=output_binding, busy_timeout_ms=busy_timeout_ms)
 	elif found.kind != CURRENT:
 		raise DatabaseRefused(refusal_message(path, found))
+	if readonly:
+		refuse_interrupted_write(path)
 
 	con = connect(path, busy_timeout_ms, readonly=readonly)
 	try:
@@ -198,12 +238,18 @@ def create_database(path, *, output_binding=None, busy_timeout_ms=BUSY_TIMEOUT_M
 			raise storage_error(exc, f'create {path}') from None
 		finally:
 			con.close()
-		_link_new(tmp, path)
+		link_new(tmp, path)
 	finally:
 		discard(tmp)
 
 
-def _link_new(tmp, path):
+def link_new(tmp, path):
+	'''
+	Publish the finished file `tmp` at `path` without replacing anything
+	there: a hard link, else a rename that refuses an existing file
+	(Windows). Raises DatabaseRefused when `path` exists; `tmp` is left
+	for the caller to remove.
+	'''
 	try:
 		os.link(tmp, path)
 	except FileExistsError:

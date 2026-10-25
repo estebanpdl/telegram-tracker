@@ -68,6 +68,24 @@ class RequestFailed(Exception):
 	'''
 
 
+class SessionRejected(Exception):
+	'''
+	Telegram refused the session's authorization (one of SESSION_ERRORS,
+	which the policy raises at once). Ends the run.
+	'''
+
+
+# authorization/session errors that end the run
+SESSION_ERRORS = (errors.UnauthorizedError, errors.AuthKeyError)
+
+
+def session_rejected(exc):
+	'''
+	The SessionRejected that ends the run for one of SESSION_ERRORS.
+	'''
+	return SessionRejected(f'Telegram rejected the session ({type(exc).__name__}); log in again')
+
+
 def flood_seconds(exc):
 	'''
 	The server's requested wait for a flood error, else None.
