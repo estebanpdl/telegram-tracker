@@ -9,10 +9,10 @@ When on, `install()` (called by the offline guard) replaces:
 	- `os.fsync` with a version that checks the descriptor and returns
 	  without flushing.
 
-Data still reaches the operating system, so everything a test process can
-observe is unchanged: rollback journals are still written, and a killed
-process leaves the same files behind. Only power-loss durability is lost,
-which no test can observe.
+Data still reaches the operating system, and rollback journals are still
+written. SQLite documents `synchronous = OFF` as safe when the application
+crashes or is killed; only an operating-system crash or a power loss can
+lose data, and no test produces either.
 
 The pragma reads the database header, so on a damaged, foreign, or locked
 file it fails. It runs with the busy timeout at zero and its errors are
