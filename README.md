@@ -734,3 +734,23 @@ python -m pip check
 ```
 
 The tests import the `telegram_tracker` package from `src/` in this checkout, so the project does not need to be installed to run them, and an installed copy is not used. Tests that need Linux or macOS (file modes, symlinked lock files, Ctrl+C on a terminal) are reported as skipped on Windows, with the reason. `python -m pytest` runs the same tests when pytest is installed. [docs/compatibility.md](docs/compatibility.md) describes the tested environment, the CLI contract, and the offline test harness.
+
+### Faster local runs
+
+Two options shorten a local run. Neither changes what the command above checks, and CI runs only that command.
+
+**Parallel workers.** With pytest and pytest-xdist installed in the environment (neither is in `requirements.txt`):
+
+```
+python -m pytest tests -p no:cacheprovider -n 4 --dist=loadfile
+```
+
+`--dist=loadfile` keeps each test module on one worker, and every worker process gets its own temporary application home from the offline guard. Serial and parallel runs give the same result for every test ([docs/compatibility.md](docs/compatibility.md#parallel-and-local-test-runs)). On a hard disk the workers queue for the same disk, so a parallel run can be slower than a serial one unless disk syncs are also skipped.
+
+**Skipping disk syncs (local runs only).** On a slow disk, most of the suite's time goes into waiting for SQLite commits and `fsync` to reach the disk. With `TGTRACKER_TEST_NO_SYNC=1`, each test process opens SQLite connections with `PRAGMA synchronous = OFF`, and `os.fsync` checks its descriptor without flushing:
+
+```
+TGTRACKER_TEST_NO_SYNC=1 python -m pytest tests -p no:cacheprovider -n 4 --dist=loadfile
+```
+
+In PowerShell, set `$env:TGTRACKER_TEST_NO_SYNC = '1'` first. Written data still reaches the operating system, and SQLite documents this setting as safe when a process crashes or is killed, so only durability across an operating-system crash or a power loss goes untested. Tests that patch `fsync` or `sqlite3.connect` themselves still get their own patches, and the processes that tests start keep real syncs. The default command and CI never set the variable. Any value other than `1`, `0`, or empty is refused: the offline guard fails to load, so every test module errors.
