@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 '''
-How targets and runs end: the per-target and run-ending errors, the run's
+Run records: collection parameters, per-target and run-ending errors,
 CollectionSummary, and the stop reason recorded for a run that ends early.
 '''
 
@@ -15,6 +15,37 @@ from dataclasses import dataclass, field
 from telegram_tracker.request_policy import SESSION_ERRORS, AccountStopped, SessionRejected, \
 	session_rejected  # noqa: F401
 from telegram_tracker.storage.records import StorageError
+
+
+def _status_fields(writer):
+	'''
+	The writer's sidecar keys; none for a writer without status_fields.
+	'''
+	fields = getattr(writer, 'status_fields', None)
+	return fields() if fields is not None else {}
+
+
+def run_parameters(metadata_only, window, update, controls=None):
+	'''
+	The run's collection parameters for the sidecar (no credentials).
+	'''
+	if metadata_only:
+		mode = 'metadata_only'
+	elif update:
+		mode = 'update'
+	elif window.is_filtered:
+		mode = 'window'
+	else:
+		mode = 'full'
+
+	parameters = {
+		'mode': mode,
+		'metadata_only': metadata_only,
+		'window': window.as_record() if mode == 'window' else None,
+		'window_description': window.describe() if mode == 'window' else None
+	}
+	parameters.update(controls or {})
+	return parameters
 
 
 class PaginationStalled(Exception):

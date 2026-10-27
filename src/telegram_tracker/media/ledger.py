@@ -26,92 +26,19 @@ import contextlib
 import json
 import stat
 
-from collections import namedtuple
-from dataclasses import dataclass
-
 # import local submodules
 from telegram_tracker.media.identity import check_ledger_identity, folder_identity
 from telegram_tracker.media.layout import MediaLayout, is_link, lstat_or_none, relative_path
 from telegram_tracker.media.ledger_schema import LedgerRefused, classify_ledger, connect_ledger, \
 	create_ledger
+from telegram_tracker.media.ledger_records import COMMANDS, COMPLETE, COUNTERS, DOWNLOADING, FAILED, \
+	FAIL_REASONS, INTERRUPTED_REASON, REQUESTED, RUNNING, RUN_END_STATES, SKIPPED, SKIP_REASONS, STATES, \
+	TRANSITIONS, AttemptStats, InvalidTransition, ItemKey, LedgerError, RequestCounts, StartedRun
 from telegram_tracker.storage.destination import canonical_folder
 from telegram_tracker.storage.records import StorageError
 from telegram_tracker.storage.sqlite.connection import app_version, interrupted_write, transaction
 from telegram_tracker.storage.sqlite.schema import MISSING
 from telegram_tracker.storage.status import utc_now
-
-
-REQUESTED = 'requested'
-DOWNLOADING = 'downloading'
-COMPLETE = 'complete'
-SKIPPED = 'skipped'
-FAILED = 'failed'
-STATES = (REQUESTED, DOWNLOADING, COMPLETE, SKIPPED, FAILED)
-
-TRANSITIONS = {
-	REQUESTED: frozenset({REQUESTED, DOWNLOADING, COMPLETE, SKIPPED, FAILED}),
-	DOWNLOADING: frozenset({COMPLETE, SKIPPED, FAILED}),
-	SKIPPED: frozenset({REQUESTED}),
-	FAILED: frozenset({REQUESTED}),
-	COMPLETE: frozenset()
-}
-
-SKIP_REASONS = ('over_file_limit', 'over_run_limit')
-FAIL_REASONS = (
-	'reference_expired', 'message_gone', 'media_changed', 'flood_stop', 'request_failed', 'disk_full',
-	'storage_error', 'size_mismatch', 'path_conflict', 'stored_file_differs', 'interrupted'
-)
-INTERRUPTED_REASON = 'interrupted'
-
-COMMANDS = ('collect', 'download-media')
-RUNNING = 'running'
-RUN_END_STATES = ('complete', 'partial', 'interrupted')
-COUNTERS = ('app_requests', 'retries', 'flood_waits', 'refreshes', 'bytes_received')
-
-ItemKey = namedtuple('ItemKey', 'channel_id message_id media_id')
-
-
-class LedgerError(StorageError):
-	'''
-	A ledger write that the ledger's rules do not allow; nothing was
-	changed.
-	'''
-
-
-class InvalidTransition(LedgerError):
-	'''
-	An item state change outside TRANSITIONS.
-	'''
-
-
-@dataclass(frozen=True)
-class StartedRun:
-	'''
-	stale_runs -> run UUIDs found running and recorded as interrupted
-	interrupted_items -> items found downloading and recorded as failed
-	'''
-	stale_runs: tuple
-	interrupted_items: int
-
-
-@dataclass(frozen=True)
-class RequestCounts:
-	'''
-	How request() found each reference: new rows, rows requested again
-	(requested, skipped or failed before), already complete, and rows
-	this run is downloading.
-	'''
-	new: int = 0
-	again: int = 0
-	complete: int = 0
-	downloading: int = 0
-
-
-@dataclass(frozen=True)
-class AttemptStats:
-	bytes_received: int = 0
-	app_requests: int = 0
-	refreshed: bool = False
 
 
 def open_ledger(layout, identity, *, create=False, readonly=False):

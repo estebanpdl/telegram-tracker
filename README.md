@@ -722,7 +722,7 @@ The behavior in this README is validated by the offline test suite, with synthet
 - **Builders on a database.** Read from the database, a renamed channel's old-name history is not built, and a date nested in an object column of the collected chats reads as stored text (see [Building the dataset and the network](#building-the-dataset-and-the-network)). Rebuilding the collected chats from a database rereads the rows kept so far for each later run, so builds of folders with many runs take longer.
 - **Dataset appends.** `build-dataset` appends to `msgs_dataset.csv`, so building twice, or again after `--update`, duplicates rows (see [Building the dataset and the network](#building-the-dataset-and-the-network)).
 - **URLs.** `build-urls` finds only URLs that are in the collected messages; it does not read URL buttons, and it checks no link against the web. Its public suffix list is as current as the pinned `tldextract` release.
-- **Media against Telegram.** Media downloads are validated offline, with a fake client serving real Telethon objects; no file was downloaded from Telegram by the tests. Download rates are capped by the request pacing (about 2 MiB/s per account at the defaults), not measured (see [docs/media.md](docs/media.md#known-limits)).
+- **Media against Telegram.** Media downloads are validated offline, with a fake client serving real Telethon objects; no file was downloaded from Telegram by the tests. Default application request pacing corresponds to about 2 MiB/s of requested file chunks within a run; this is not a network bandwidth cap, and real download rates were not measured (see [docs/media.md](docs/media.md#known-limits)).
 
 ## Running the tests
 
