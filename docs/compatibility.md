@@ -435,6 +435,10 @@ by default.
 files attached to collected messages; the user guide is [media.md](media.md) and the
 ledger contract [media-ledger.md](media-ledger.md).
 
+The media qualification recorded here is Windows 11 with Python 3.14.7.
+The platform matrix above records a pre-media CI run; qualification of media on
+Linux or macOS requires results that include the media tests.
+
 - Opt-in: without those, no `GetFile` or message lookup is made and nothing of
   media is written (tested in every storage mode). With `--include-media`, the
   collected files and the stored messages are identical to a run without it (tested
@@ -561,7 +565,8 @@ and loads no database code.
   `tests/media_collect_support.py` serves histories as real Telethon messages.
   `tests/test_media_signals.py` raises a real SIGINT in, and kills, a child process
   (`media_signal_child.py`) while a file downloads, for both commands in every storage
-  mode, on every platform.
+  mode. These cases are enabled on every platform; the media results recorded here
+  are from Windows.
 - `tests/test_environment.py` checks pinned interfaces and prevents reintroduction
   of removed pandas and matplotlib calls.
 

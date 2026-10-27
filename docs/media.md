@@ -152,16 +152,19 @@ same request policy as the collection: the request interval, the flood-wait limi
 the retries apply to every one of them.
 
 - **`collect --include-media`** starts downloading only after every channel's messages
-  are saved, so downloads never delay the collection. It downloads as many files at
+  are saved. Run completion, aggregate finalization and lock release wait for the
+  downloads to finish. It downloads as many files at
   once as it collected channels at once: `--concurrency`, capped at the number of
   channels in the run. A single `--telegram-channel` therefore downloads one file at a
   time, whatever `--concurrency` says.
 - **`download-media`** downloads `--concurrency` files at once (1-10, default 1),
   whatever the number of channels.
-- **Speed ceiling.** With one request per 512 KiB and at least `--request-interval`
-  between requests, the defaults allow at most about 2 MiB/s per account (0.25 s), and
-  about 5 MiB/s at the smallest interval (0.1 s). This is a ceiling set by the pacing,
-  not a measured Telegram rate.
+- **Request pacing.** Each application-level file request covers up to 512 KiB.
+  At the default interval (0.25 s), admitting only file requests corresponds to
+  about 2 MiB/s of requested chunks within this run, or 5 MiB/s at the smallest
+  interval (0.1 s). This is not a network bandwidth cap or a measured Telegram rate:
+  other application requests share the policy, and Telethon's internal requests
+  are outside it (see [Known limits](#known-limits)).
 
 ## Profiles
 
@@ -236,12 +239,16 @@ The media features are validated offline, with a fake Telegram client that serve
 Telethon message and file objects (see [compatibility.md](compatibility.md)). What that
 does not cover:
 
+- **Other platforms.** The recorded media tests ran on Windows 11 with Python 3.14.7.
+  The earlier cross-OS support matrix predates media delivery; Linux/macOS media
+  behavior needs its own recorded CI or operator result.
 - **Live Telegram.** No file has been downloaded from Telegram by these tests. The
   number of messages that one `GetMessages` request may fetch again (100 here), the
   access hash stored in a real channel's data, and the refresh of an expired file
   reference after fetching a message again are confirmed only by a live check.
-- **Throughput.** The 2 MiB/s ceiling is the pacing's; real download rates and the
-  per-account limits Telegram applies to files were not measured.
+- **Throughput.** The chunk-rate calculation describes application request admission;
+  real download rates and the per-account limits Telegram applies to files were
+  not measured.
 - **Requests not counted.** The network library connects to the data center that holds
   a file and repeats a request after a `FILE_MIGRATE` answer or a timeout on its own;
   those requests are not paced or counted.

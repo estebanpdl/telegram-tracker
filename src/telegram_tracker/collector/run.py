@@ -19,7 +19,7 @@ from telegram_tracker.collector.channel import collect_channel
 from telegram_tracker.collector.history import HistoryWindow
 from telegram_tracker.collector.outcomes import SESSION_ERRORS, CollectionSummary, \
 	DuplicateTarget, PaginationStalled, SessionRejected, TargetUnavailable, \
-	session_rejected, stop_reason_for
+	_status_fields, run_parameters, session_rejected, stop_reason_for
 from telegram_tracker.collector.rpc import MetadataCache, Requests
 from telegram_tracker.media.collect import METHOD_CLASSES as MEDIA_METHOD_CLASSES, MediaRun
 from telegram_tracker.request_policy import AccountStopped, RequestFailed, RequestPolicy
@@ -33,29 +33,6 @@ from telegram_tracker.utils import create_dirs
 
 
 NOT_FOUND_REASON = 'not found or not accessible'
-
-
-def run_parameters(metadata_only, window, update, controls=None):
-	'''
-	The run's collection parameters for the sidecar (no credentials).
-	'''
-	if metadata_only:
-		mode = 'metadata_only'
-	elif update:
-		mode = 'update'
-	elif window.is_filtered:
-		mode = 'window'
-	else:
-		mode = 'full'
-
-	parameters = {
-		'mode': mode,
-		'metadata_only': metadata_only,
-		'window': window.as_record() if mode == 'window' else None,
-		'window_description': window.describe() if mode == 'window' else None
-	}
-	parameters.update(controls or {})
-	return parameters
 
 
 async def run_collection(
@@ -431,14 +408,6 @@ async def _close_quietly(cache):
 		await cache.close()
 	except BaseException:
 		pass
-
-
-def _status_fields(writer):
-	'''
-	The writer's sidecar keys; none for a writer without status_fields.
-	'''
-	fields = getattr(writer, 'status_fields', None)
-	return fields() if fields is not None else {}
 
 
 def _finish(writer, cache, status, summary, policy, media_run=None, *, failing):
