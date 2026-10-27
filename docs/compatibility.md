@@ -6,6 +6,8 @@
 |---|---|
 | Interpreter | Python 3.14.7 (conda-forge), conda env `telegram-tracker` |
 | Run tests | `conda run -n telegram-tracker python -m unittest discover -s tests -v` (from the repo root) |
+| Run tests in parallel (optional) | `conda run -n telegram-tracker python -m pytest tests -p no:cacheprovider -n 4 --dist=loadfile -ra`, with pytest 9.1.1 and pytest-xdist 3.8.0 installed in the environment (not in `requirements.txt`); same per-test results as the serial command ([Parallel and local test runs](#parallel-and-local-test-runs)) |
+| Skip disk syncs (local only) | `TGTRACKER_TEST_NO_SYNC=1` set before either command; never set in CI |
 | Dependency check | `conda run -n telegram-tracker python -m pip check` |
 | Installed command | 2026-10-20: wheel and sdist built from a clean export with build 1.6.1 and setuptools 84.2.0; the wheel installed with pip 26.2.1 into a fresh Python 3.14.7 virtual environment with only the pinned requirements (`pip check` clean). From an empty directory, `tgtracker` and `python -m telegram_tracker` matched `python main.py` in help, argument errors, exit codes, offline auth and profile commands, storage-mode refusals, and builder outputs; help and imports worked with the service libraries blocked. The synthetic three-mode storage matrix gave the same results (exit codes, states, counts, and checks) through the installed package as from the source tree. |
 
@@ -518,6 +520,16 @@ and loads no database code.
   the canonical temporary folder, so temporary paths match the resolved paths the code
   reports (macOS `/var` is a link to `/private/var`; a Windows `TEMP` can hold 8.3
   short names).
+- `tests/no_sync.py`, installed by the guard, is off unless `TGTRACKER_TEST_NO_SYNC=1`.
+  When on, the test process opens SQLite connections with `PRAGMA synchronous = OFF`
+  and `os.fsync` only checks its descriptor. The pragma reads the database header, so
+  it runs with a zero busy timeout and its errors are ignored. The connection's own
+  timeout is then restored, and the code under test meets a damaged or locked file at
+  its own first statement, as without the switch. The guard removes the variable once
+  read, so child processes that tests start (crash, kill and signal children, the
+  builder and entry-point interpreters) keep real syncs. Tests that patch `fsync`
+  themselves (the ENOSPC case in `test_media_download_faults.py`, the sync-before-link
+  order in `test_media_ledger.py`) keep their own patch for its duration.
 - Platform-specific tests skip with a stated reason where they cannot run:
   `test_posix_permissions.py` (modes, permission errors, symlinked lock files) and the
   external-SIGINT and terminal Ctrl+C cases of `test_signals.py` run on Linux and
@@ -552,6 +564,43 @@ and loads no database code.
   mode, on every platform.
 - `tests/test_environment.py` checks pinned interfaces and prevents reintroduction
   of removed pandas and matplotlib calls.
+
+### Parallel and local test runs
+
+Measured on 2026-10-25 on Windows 11 with 12 logical CPUs and the temporary folder on
+a 2.5-inch hard disk, with nothing else heavy running. The 1168 tests are main at
+`6386a54`. The 1177 tests add the switch's own 9 tests, from the test tree of `e0267c1`
+(the `3f4ed4a` serial run differs from it only in a docstring).
+
+| Command | Syncs | Tests | Result | Runner time |
+|---|---|---|---|---|
+| `unittest`, serial | real | 1168 | OK, 19 skipped | 4463.8 s |
+| `pytest -n 4 --dist=loadfile` | real | 1168 | 1149 passed, 19 skipped | 6897.4 s |
+| `unittest`, serial | real | 1177 | OK, 19 skipped | 3221.9 s |
+| `pytest -n 8 --dist=loadfile` | real | 1177 | 1158 passed, 19 skipped | 3620.3 s |
+| `unittest`, serial | skipped | 1177 | OK, 19 skipped | 1469.5 s |
+| `pytest -n 4 --dist=loadfile` | skipped | 1177 | 1158 passed, 19 skipped | 579.6 s |
+| `pytest -n 8 --dist=loadfile` | skipped | 1177 | 1158 passed, 19 skipped | 553.3 s |
+
+Outcomes were compared per test (module, class, and method), not by totals. Each
+test had the same outcome in every run that includes it, and the 19 skips are the
+same tests in every run, each with its stated platform reason. No test needed changes
+to run in parallel: every temporary path a test creates comes from `tempfile`, each
+worker process has its own guard home, no test uses a port, and the signal tests
+raise SIGINT inside their own child process.
+
+On this disk the time goes into waiting for syncs. In a 12-second sample during the
+real-sync `-n 4` run, the disk was idle under 0.02% of the time, average write times
+were 0.07–1.8 s, and the CPUs were 4–8% busy, so parallel workers with real syncs
+were slower than a serial run. Between the two serial runs of the 1177 tests,
+skipping syncs made modules that do their work in the test process up to 21 times
+faster (`test_storage_modes` 152.4 s → 7.3 s, `test_sqlite_schema` 260.5 s → 19.0 s,
+`test_window_confirm` 263.5 s → 24.3 s). Modules that mostly start child processes,
+which keep real syncs, were no faster: `test_dual_sink`, `test_entry_points`,
+`test_builder_parity` and `test_media_signals` took 1.0–1.5 times their real-sync
+time. Timings on this disk also vary from run to run, and each figure here comes
+from a single run. The 25 slowest tests of the `6386a54` serial run took 0.46–0.91
+times as long in the real-sync `e0267c1` serial run, with the same code under test.
 
 ## Validation limits
 

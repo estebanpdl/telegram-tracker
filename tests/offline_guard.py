@@ -32,6 +32,9 @@ compare equal to the resolved paths the code under test reports.
 
 Every blocked attempt is appended to `VIOLATIONS` even when the code under
 test swallows the exception, so `OfflineTestCase` fails the test anyway.
+
+Installing the guard also installs the opt-in sync switch (`no_sync`),
+which is off unless TGTRACKER_TEST_NO_SYNC=1.
 '''
 
 # import modules
@@ -54,6 +57,7 @@ import unittest
 
 from urllib.parse import unquote
 
+import no_sync
 from virtual_time import VirtualTimeLoop
 
 
@@ -462,6 +466,7 @@ def install():
 	_install_telethon_guards()
 	_install_file_guards()
 	_install_home_guards()
+	no_sync.install()
 	_installed = True
 
 
