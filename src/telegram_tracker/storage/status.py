@@ -7,12 +7,13 @@ per-target outcome while collecting, and the builders' gate that reads it.
 # import modules
 import json
 import os
+import time
 
 from datetime import datetime, timezone
 
 # import local submodules
 from telegram_tracker.storage.files import write_json_pretty
-from telegram_tracker.storage.manifest import ManifestError, recorded_storage
+from telegram_tracker.storage.manifest import SQLITE, ManifestError, recorded_storage
 from telegram_tracker.storage.records import INTERRUPTED, RUNNING, STATUS_FILE, STATUS_FORMAT
 from telegram_tracker.utils import DataInputError
 
@@ -20,9 +21,41 @@ from telegram_tracker.utils import DataInputError
 # names listed in builder notes before "and N more"
 NOTE_LIST_LIMIT = 10
 
+# wait_for_later_start: the clock is read every STEP seconds, for at most
+# LIMIT seconds
+START_WAIT_STEP = 0.05
+START_WAIT_LIMIT = 1.0
+
 
 def utc_now():
 	return datetime.now(timezone.utc).isoformat(timespec='seconds')
+
+
+def wait_for_later_start(output_folder):
+	'''
+	Called with the output folder locked, before a run records its
+	started_at: wait until utc_now() is later than the started_at of the
+	folder's last run, at most START_WAIT_LIMIT seconds.
+
+	The files of a files or both folder name the run that wrote a history
+	by its started_at, to the second, so two runs started in the same
+	second would share a name. A sqlite folder names runs by run_uuid and
+	never waits, nor does a folder without a readable sidecar. A clock set
+	back by more than the limit is not waited for.
+	'''
+	try:
+		status = read_status(output_folder)
+	except DataInputError:
+		return
+	if not status or status.get('storage') == SQLITE:
+		return
+	previous = status.get('started_at')
+	if not isinstance(previous, str):
+		return
+	for _ in range(round(START_WAIT_LIMIT / START_WAIT_STEP)):
+		if utc_now() > previous:
+			return
+		time.sleep(START_WAIT_STEP)
 
 
 class StatusFile:

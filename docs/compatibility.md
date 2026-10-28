@@ -244,7 +244,12 @@ sessions, and Telethon's session-file updates during a check, are unverified.
   unknown; absent in sidecars of earlier versions), and `account_checks`; target
   entries of replaced foreign histories gain `takeover`, `previous_profile_name`,
   and `previous_profile_id`. Each written history gets
-  `<channel>/<channel>_provenance.json` (format 1). `--update` follows the matching
+  `<channel>/<channel>_provenance.json` (format 1), which names the run by its
+  `started_at`, to the second. So that two runs do not share that name, a collection
+  into a `files` or `both` folder that would start in the same second as the
+  folder's previous run waits for the next second (at most one second; a clock set
+  back further is not waited for). A `sqlite` folder names runs by `run_uuid` and
+  does not wait. `--update` follows the matching
   rules in the README (ID, then name, then default-only for histories without a
   record) and refuses before any request for that channel. This provenance does
   not add a private account ID, phone number, API credential, session path, or

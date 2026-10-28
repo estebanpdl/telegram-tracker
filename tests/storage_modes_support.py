@@ -15,6 +15,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import types
 
 from unittest import mock
 
@@ -25,6 +26,7 @@ import virtual_time
 from fakes import FakeTelegramClient, FixtureWorld, load_expected
 
 from telegram_tracker import cli
+from telegram_tracker.storage import status as status_module
 from telegram_tracker.storage.manifest import MANIFEST_FILE
 from telegram_tracker.storage.records import LOCK_FILE, STATUS_FILE
 from telegram_tracker.storage.sqlite.schema import DB_FILENAME
@@ -97,6 +99,33 @@ def file_contents(folder, *, skip=(DB_FILENAME,) + TIMED):
 			data = json.dumps(record, sort_keys=True).encode()
 		contents[name] = data
 	return contents
+
+
+class SameSecondClock:
+	'''
+	The wall clock of the run start guard (status.utc_now and its sleep):
+	FIRST until the guard has slept `steps` times, then NEXT; never NEXT
+	when `steps` is None. Every run inside `patch()` starts in FIRST
+	unless the guard waits. `sleeps` lists the seconds slept.
+	'''
+	FIRST = '2026-01-01T00:00:00+00:00'
+	NEXT = '2026-01-01T00:00:01+00:00'
+
+	def __init__(self, steps=3):
+		self.now = self.FIRST
+		self.steps = steps
+		self.sleeps = []
+
+	def sleep(self, seconds):
+		self.sleeps.append(seconds)
+		if self.steps is not None and len(self.sleeps) >= self.steps:
+			self.now = self.NEXT
+
+	@contextlib.contextmanager
+	def patch(self):
+		with mock.patch.object(status_module, 'utc_now', lambda: self.now), \
+				mock.patch.object(status_module, 'time', types.SimpleNamespace(sleep=self.sleep)):
+			yield self
 
 
 class ModesCase(offline_guard.OfflineTestCase):
