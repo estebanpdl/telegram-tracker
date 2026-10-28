@@ -18,7 +18,7 @@ from unittest import mock
 
 from telethon import errors
 
-from media_collect_support import ALPHA, BETA, KIB, MediaCase, document, standard_world
+from media_collect_support import ALPHA, BETA, KIB, MediaCase, document, standard_world, started_later
 from media_download_support import any_request, content
 from storage_modes_support import file_contents
 
@@ -28,14 +28,11 @@ from telegram_tracker.media.layout import MEDIA_FOLDER, MediaLayout
 from telegram_tracker.media.ledger import open_ledger
 from telegram_tracker.media.selection import MediaSelection
 from telegram_tracker.reader.records import ChannelHistory, HistoryProvenance
-from telegram_tracker.storage import status as status_module
 from telegram_tracker.storage.records import LOCK_FILE
 from telegram_tracker.storage.sqlite.lease import database_lease_path
 
 
 MODES = ('files', 'sqlite', 'both')
-# a started_at after the first collection's
-LATER = '2099-01-01T00:00:00+00:00'
 BATCH = ('alpha_fx', 'beta_fx')
 # the stored channels' access hash (fixture channel defaults)
 ACCESS_HASH = 1000
@@ -425,7 +422,7 @@ class SourceRunTests(FetchCase):
 		(files name runs by their started_at, to the second).
 		'''
 		run = self.media if media else self.collect
-		with mock.patch.object(status_module, 'utc_now', return_value=LATER):
+		with started_later():
 			code, _, err = run(*extra, targets=('alpha_fx',), out=out, client=client)
 		self.assertEqual(code, 0, err)
 		client.timeline.clear()

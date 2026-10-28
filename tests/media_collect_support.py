@@ -39,6 +39,7 @@ from telegram_tracker.cli import media as cli_media
 from telegram_tracker.media.collect import MediaRun
 from telegram_tracker.media.layout import LEDGER_FILE, MEDIA_FOLDER
 from telegram_tracker.media.ledger import Ledger
+from telegram_tracker.storage import status as status_module
 from telegram_tracker.storage.destination import Destination
 from telegram_tracker.storage.records import LOCK_FILE
 
@@ -48,6 +49,17 @@ BETA = 102
 KIB = 1024
 PDF = [types.DocumentAttributeFilename(file_name='report.pdf')]
 AUDIO = [types.DocumentAttributeAudio(duration=3, title='t')]
+# a started_at after any real run's
+LATER = '2099-01-01T00:00:00+00:00'
+
+
+def started_later():
+	'''
+	Runs started inside start at LATER. Files folders name a collection
+	run by its started_at, to the second, so a second run into the same
+	folder needs another one, however fast the first run ended.
+	'''
+	return mock.patch.object(status_module, 'utc_now', return_value=LATER)
 
 
 class MediaWorld(FixtureWorld):

@@ -14,7 +14,7 @@ import unittest
 
 from unittest import mock
 
-from media_collect_support import ALPHA, BETA, MediaCase, document, standard_world
+from media_collect_support import ALPHA, BETA, MediaCase, document, standard_world, started_later
 from storage_modes_support import file_contents, kill_inside_a_write
 
 from telegram_tracker.media.identity import folder_identity
@@ -170,7 +170,8 @@ class HistoryTests(CheckCase):
 				client = self.with_media(storage=storage, out=out)
 				files = client.files
 				files.post(5, document(files, 7555, 4000, 9), ALPHA)
-				code, _, err = self.collect(targets=BATCH, out=out, client=client)
+				with started_later():
+					code, _, err = self.collect(targets=BATCH, out=out, client=client)
 				self.assertEqual(code, 0, err)
 				code, stdout, err = self.check(out=out)
 				self.assertEqual(code, 0, err)
