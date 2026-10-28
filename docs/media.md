@@ -50,10 +50,11 @@ python main.py collect --telegram-channel example_channel --update --include-med
 ```
 
 **After collecting: `download-media`.** It reads the saved histories of a collected
-folder (in any storage mode) and downloads every file of a selected type that is not
-stored yet, including files that failed or were skipped by a size limit before. It
-fetches each channel's messages again, 100 at a time, for fresh file references, and
-downloads each batch's files before fetching the next.
+folder (in any storage mode); it does not collect messages. It downloads every file
+of a selected type that is not stored yet, including files that failed or were
+skipped by a size limit before. It fetches each channel's messages again, 100 at a
+time, for fresh file references, and downloads each batch's files before fetching
+the next.
 
 ```
 # every saved history in the folder
@@ -64,7 +65,9 @@ python main.py download-media -o ./output/data --telegram-channel example_channe
 ```
 
 `--telegram-channel` and `--batch-file` name saved histories, as they were collected;
-by default every saved history is covered. `--source auto|files|sqlite` chooses which
+by default every saved history is covered. They select channels already collected in
+`--output`; they do not collect new ones (use `collect` first, with `--include-media`
+to download while collecting). `--source auto|files|sqlite` chooses which
 copy of the histories to read, as for the builders. When every selected file is
 already stored, `download-media` says so and exits 0 without logging in.
 

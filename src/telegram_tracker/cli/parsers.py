@@ -198,7 +198,8 @@ def add_collect_arguments(parser, prog=SCRIPT_PROG):
 		'Download the files attached to the collected messages. Off by default: '
 		'without --include-media no file is requested. The other options need '
 		'--include-media, and none is allowed with '
-		'--limit-download-to-channel-metadata.'
+		'--limit-download-to-channel-metadata. To download media for messages '
+		'already saved, use download-media.'
 	)
 	media.add_argument(
 		'--include-media',

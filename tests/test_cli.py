@@ -13,6 +13,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -170,6 +171,23 @@ class HelpTests(CliTestCase):
 				'<channel>_messages.json in files', 'the database in sqlite',
 				'both copies in both, which must agree'):
 			self.assertIn(phrase, update)
+
+	def test_collect_and_download_media_help_point_to_each_other(self):
+		def help_text(command):
+			code, out, _ = self.run_cli([command, '--help'], client_factory=None)
+			self.assertEqual(code, 0)
+			# argparse may break a line after a hyphen
+			return re.sub(r'(\w)- (\w)', r'\1-\2', ' '.join(out.split()))
+
+		self.assertIn('To download media for messages already saved, use download-media.', help_text('collect'))
+		text = help_text('download-media')
+		self.assertIn('It reads a collected folder; it does not collect messages.', text)
+		selects = 'Selects channels already collected in --output; it does not collect new ones (use collect first).'
+		self.assertIn(
+			'--telegram-channel TELEGRAM_CHANNEL Only the saved history of this channel (the name it was '
+			f'collected under). Default: every saved history in the folder. {selects}', text)
+		self.assertIn(f'--batch-file BATCH_FILE Only the saved histories named in this file, one per line. {selects}', text)
+		self.assertEqual(self.factory_calls, 0)
 
 
 class HelpWithoutDependenciesTests(offline_guard.OfflineTestCase):
