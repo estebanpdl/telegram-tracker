@@ -56,12 +56,13 @@ from telethon.tl import functions
 
 # import local submodules
 from telegram_tracker.media.classify import MediaRef
-from telegram_tracker.media.layout import SAME, MediaPathError, PathConflict, inspect_final, partial_name
+from telegram_tracker.media.layout import SAME, MediaPathError, PathConflict, inspect_final, is_disk_full, \
+	partial_name
 from telegram_tracker.media.ledger import COMPLETE, FAILED, REQUESTED, SKIPPED, AttemptStats, ItemKey, \
 	LedgerError
 from telegram_tracker.media.limits import OVER_FILE_LIMIT, OVER_RUN_LIMIT, PULL_BYTES, MediaBudget, MediaLimits
 from telegram_tracker.media.location import MediaLocation, location_of, same_media
-from telegram_tracker.media.staging import PartialFile, is_disk_full, publish
+from telegram_tracker.media.staging import PartialFile, publish
 from telegram_tracker.media.stream import ChunkStream
 from telegram_tracker.request_policy import SESSION_ERRORS, AccountStopped, RequestFailed, flood_seconds, \
 	session_rejected
