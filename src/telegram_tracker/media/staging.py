@@ -15,7 +15,6 @@ write); anything else is a PathConflict and is left as it is.
 '''
 
 # import modules
-import errno
 import hashlib
 import os
 import stat
@@ -25,16 +24,6 @@ from telegram_tracker.media.layout import ABSENT, SAME, MediaPathError, PathConf
 	lstat_or_none, sync_folder
 from telegram_tracker.storage.sqlite.connection import link_new
 from telegram_tracker.storage.sqlite.schema import DatabaseRefused
-
-
-# Windows ERROR_HANDLE_DISK_FULL and ERROR_DISK_FULL
-DISK_FULL_WINERRORS = (39, 112)
-
-
-def is_disk_full(exc):
-	return isinstance(exc, OSError) and (
-		exc.errno == errno.ENOSPC or getattr(exc, 'winerror', None) in DISK_FULL_WINERRORS
-	)
 
 
 class PartialFile:

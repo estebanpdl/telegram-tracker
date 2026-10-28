@@ -24,16 +24,20 @@ from telethon import errors, types
 from media_download_support import CHANNEL, DownloadTestCase, any_request, at_offset, content
 from media_support import RUN_A, make_link, remove_link
 from telegram_tracker.collector.outcomes import SessionRejected
-from telegram_tracker.media import staging
+from telegram_tracker.media import layout, staging
 from telegram_tracker.media.download import CDN_REDIRECT, MediaStopped
+from telegram_tracker.media.layout import is_disk_full
 from telegram_tracker.media.ledger import COMPLETE, FAILED, REQUESTED
 from telegram_tracker.media.limits import PULL_BYTES
-from telegram_tracker.media.staging import is_disk_full
 from telegram_tracker.request_policy import AccountStopped
 
 
 def flood(seconds):
 	return errors.FloodWaitError(request=None, capture=seconds)
+
+
+def disk_full():
+	return OSError(errno.ENOSPC, 'No space left on device')
 
 
 class FaultTestCase(DownloadTestCase):
@@ -207,9 +211,40 @@ class DiskTests(FaultTestCase):
 
 	async def test_a_full_disk_when_syncing(self):
 		job = self.job(42)
-		with mock.patch.object(staging.os, 'fsync', side_effect=OSError(errno.ENOSPC, 'No space left on device')):
-			with self.assertRaises(MediaStopped):
+		# the staging folder is there, so no folder sync (POSIX) comes first
+		self.layout.partial_folder(RUN_A)
+		with mock.patch.object(staging.os, 'fsync', side_effect=disk_full()) as fsync:
+			with self.assertRaises(MediaStopped) as caught:
 				await self.downloader.download(job)
+		# the file was received first: the sync that failed is the file's own
+		fsync.assert_called_once()
+		self.assertEqual([r.offset for r in self.fake.get_files()], [0, PULL_BYTES, 2 * PULL_BYTES])
+		self.assertEqual(caught.exception.reason, 'disk_full')
+		self.assertEnded(job, FAILED, 'disk_full')
+
+	async def test_a_full_disk_when_creating_the_staging_folder(self):
+		# mkdir, or the sync of the new name in its parent (POSIX only, run here on every OS)
+		for media_id, owner, name in ((47, layout.os, 'mkdir'), (48, layout, 'sync_folder')):
+			with self.subTest(failing=name):
+				job = self.job(media_id)
+				self.downloader = self.make_downloader()
+				with mock.patch.object(owner, name, side_effect=disk_full()) as failing:
+					with self.assertRaises(MediaStopped) as caught:
+						await self.downloader.download(job)
+				failing.assert_called_once()
+				self.assertEqual(caught.exception.reason, 'disk_full')
+				self.assertIn('the disk is full', str(caught.exception))
+				self.assertEnded(job, FAILED, 'disk_full')
+				self.assertEqual(self.fake.requests, [])
+
+	async def test_a_full_disk_when_creating_the_final_folder(self):
+		job = self.job(49)
+		self.layout.partial_folder(RUN_A)
+		with mock.patch.object(layout.os, 'mkdir', side_effect=disk_full()) as mkdir:
+			with self.assertRaises(MediaStopped) as caught:
+				await self.downloader.download(job)
+		self.assertEqual(mkdir.call_args.args[0], os.path.join(self.layout.root, str(CHANNEL)))
+		self.assertEqual(caught.exception.reason, 'disk_full')
 		self.assertEnded(job, FAILED, 'disk_full')
 
 	async def test_another_write_error_fails_only_the_item(self):

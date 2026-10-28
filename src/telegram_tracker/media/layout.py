@@ -24,6 +24,7 @@ adopted.
 '''
 
 # import modules
+import errno
 import hashlib
 import os
 import re
@@ -55,6 +56,15 @@ RELATIVE_PATH = re.compile(
 )
 PARTIAL_NAME = re.compile(r'^[1-9][0-9]*-[1-9][0-9]*--?[0-9]+\.part$')
 SHA256 = re.compile(r'^[0-9a-f]{64}$')
+
+# Windows ERROR_HANDLE_DISK_FULL and ERROR_DISK_FULL
+DISK_FULL_WINERRORS = (39, 112)
+
+
+def is_disk_full(exc):
+	return isinstance(exc, OSError) and (
+		exc.errno == errno.ENOSPC or getattr(exc, 'winerror', None) in DISK_FULL_WINERRORS
+	)
 
 
 class MediaPathError(StorageError):
@@ -195,7 +205,9 @@ class MediaLayout:
 		`path` (under root) as a real directory: missing is created when
 		`create` is set (returns False when it is missing and not created),
 		and its new name is synced in its parent. A link, reparse point or
-		non-directory raises MediaPathError.
+		non-directory raises MediaPathError, and so does a folder that
+		cannot be created, except on a full disk: that OSError is raised
+		as it is, so that it is reported as a full disk.
 		'''
 		info = lstat_or_none(path)
 		if info is None:
@@ -208,6 +220,8 @@ class MediaLayout:
 			except FileExistsError:
 				pass
 			except OSError as exc:
+				if is_disk_full(exc):
+					raise
 				raise MediaPathError(f'cannot create {path} ({exc.strerror or type(exc).__name__})') from None
 			info = lstat_or_none(path)
 			if info is None:
