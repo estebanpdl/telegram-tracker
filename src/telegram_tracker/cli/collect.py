@@ -15,7 +15,6 @@ application home.
 
 # import modules
 import functools
-import io
 import os
 import sqlite3
 import sys
@@ -27,6 +26,7 @@ from telegram_tracker.cli.auth import confirm
 from telegram_tracker.cli.builders import missing_dependency
 from telegram_tracker.cli.profile_checks import account_check
 from telegram_tracker.cli.parsers import COLLECT, DEFAULT_OUTPUT, invocation
+from telegram_tracker.cli.prompts import interactive
 from telegram_tracker.cli.run_setup import app_client, prepare_session, select_run_session
 from telegram_tracker.cli.targets import read_targets
 from telegram_tracker.credentials import accounts
@@ -100,36 +100,6 @@ def confirm_replaced_histories(existing, output_folder, *, legacy, assume_yes):
 		print('> Nothing collected; the saved histories are unchanged.', file=sys.stderr)
 		return 1
 	return None
-
-
-def interactive():
-	'''
-	True when standard input is a terminal that can answer a question.
-	On Windows the NUL device also reports isatty(), so a standard input
-	with a file descriptor must also be a console there.
-	'''
-	try:
-		if sys.stdin is None or not sys.stdin.isatty():
-			return False
-		fd = sys.stdin.fileno()
-	except io.UnsupportedOperation:
-		# a stream without a descriptor: only its isatty() can tell
-		return True
-	except (OSError, ValueError):
-		return False
-	return os.name != 'nt' or windows_console(fd)
-
-
-def windows_console(fd):
-	import ctypes
-	import msvcrt
-
-	try:
-		handle = msvcrt.get_osfhandle(fd)
-	except OSError:
-		return False
-	mode = ctypes.c_ulong()
-	return bool(ctypes.windll.kernel32.GetConsoleMode(ctypes.c_void_p(handle), ctypes.byref(mode)))
 
 
 def run_collect(args, parser, *, legacy, client_factory=None, authorize=None):
