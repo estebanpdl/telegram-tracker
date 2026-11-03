@@ -188,6 +188,38 @@ class RenameTests(MaintenanceCase):
 		self.assertIn('The session is in use', err)
 		self.assertTrue(os.path.isdir(self.root('old')))
 
+	def test_another_profile_in_use_does_not_stop_maintenance(self):
+		self.make_profile('old')
+		self.make_profile('busy', account=OTHER_ACCOUNT)
+		self.make_profile('gone', account=OTHER_ACCOUNT + 1)
+		busy = profiles.own_session(self.profile('busy'))
+		with Lease(busy, 'The session', 'busy'):
+			self.assertEqual(self.auth('rename-profile', 'old', 'new')[0], 0)
+			self.assertEqual(self.auth('delete-profile', 'gone', '--yes')[0], 0)
+			self.assertTrue(os.path.lexists(lease_path(busy)))
+		self.assertTrue(os.path.isdir(self.root('new')))
+		self.assertFalse(os.path.lexists(self.root('gone')))
+
+	def test_a_linked_profile_folder_is_refused(self):
+		self.make_profile('real')
+		target = os.path.join(self.tmp, 'outside')
+		shutil.move(self.root('real'), target)
+		link = self.root('linked')
+		if os.name == 'nt':
+			import _winapi
+			_winapi.CreateJunction(target, link)
+		else:
+			os.symlink(target, link)
+		self.addCleanup(lambda: os.path.lexists(link) and (os.rmdir(link) if os.name == 'nt' else os.remove(link)))
+		before = sorted(os.listdir(target))
+		for argv in (('rename-profile', 'linked', 'new'), ('rename-profile', 'real', 'linked'),
+				('delete-profile', 'linked', '--yes')):
+			with self.subTest(argv=argv):
+				code, _, err = self.auth(*argv)
+				self.assertEqual(code, 2, err)
+				self.assertIn('is a link', err)
+				self.assertEqual(sorted(os.listdir(target)), before)
+
 	def test_an_invalid_old_record_refuses(self):
 		self.make_profile('old')
 		path = os.path.join(self.root('old'), identity.IDENTITY_NAME)

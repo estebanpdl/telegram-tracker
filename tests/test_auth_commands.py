@@ -196,7 +196,7 @@ class LoginTests(CredentialCase):
 	def test_save_failure_after_login_is_reported_separately(self):
 		self.type_credentials()
 
-		def failing_save(home, values):
+		def failing_save(home, values, create=True):
 			raise store.StoreError('cannot save credentials.json (disk full)')
 
 		self.patch(cli_auth, 'save_store', failing_save)
