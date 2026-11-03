@@ -13,6 +13,8 @@ STATUS = 'status'
 LOGOUT = 'logout'
 CLEAR_CREDENTIALS = 'clear-credentials'
 PROFILES = 'profiles'
+RENAME_PROFILE = 'rename-profile'
+DELETE_PROFILE = 'delete-profile'
 
 
 def add_profile_argument(group):
@@ -135,7 +137,45 @@ def add_auth_parsers(commands):
 			'creates nothing.'
 	)
 
+	rename = actions.add_parser(
+		RENAME_PROFILE,
+		help='Rename a named profile (offline).',
+		description='Rename the named profile OLD to NEW: its folder in the '
+			'application home moves and its profile.json gets the new name. The '
+			'profile ID, account binding, saved credentials, and session stay, so '
+			'histories recorded with the profile ID continue under NEW; collected '
+			'outputs keep the name they recorded. NEW must not exist; a free name '
+			'used before can be reused. Stop every other running collect, '
+			'download-media, and auth command first. '
+			'Running it again finishes an interrupted rename.'
+	)
+	rename.add_argument('old', metavar='OLD', help='The current profile name.')
+	rename.add_argument('new', metavar='NEW', help='The new profile name.')
+	rename.add_argument(
+		'--dry-run', action='store_true',
+		help='Check and report, without taking a lease or changing anything.'
+	)
+
+	delete = actions.add_parser(
+		DELETE_PROFILE,
+		help='Delete a named profile from this computer (offline).',
+		description='Delete the named profile NAME from this computer: its '
+			'credentials.json, session file, profile.json, and folder, nothing '
+			'else. Collected, derived, and media data are kept. The session is not '
+			'logged out on Telegram: run `auth logout --profile NAME` first to '
+			'revoke it. A new profile with the same name later gets a new profile '
+			'ID. Asks first unless --yes. Stop every other running collect, '
+			'download-media, and auth command first. '
+			'Running it again finishes an interrupted deletion.'
+	)
+	delete.add_argument('name', metavar='NAME', help='The profile to delete.')
+	delete.add_argument(
+		'--dry-run', action='store_true',
+		help='Check and report, without taking a lease or removing anything.'
+	)
+	delete.add_argument('--yes', action='store_true', help='Do not ask for confirmation.')
+
 	return auth, {
 		LOGIN: login, STATUS: status, LOGOUT: logout, CLEAR_CREDENTIALS: clear,
-		PROFILES: profiles
+		PROFILES: profiles, RENAME_PROFILE: rename, DELETE_PROFILE: delete
 	}

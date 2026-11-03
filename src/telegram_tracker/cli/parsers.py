@@ -13,8 +13,8 @@ import argparse
 
 # import local submodules
 from telegram_tracker.cli.argument_types import bounded_float, bounded_int, utc_datetime
-from telegram_tracker.cli.auth_parsers import AUTH, CLEAR_CREDENTIALS, LOGIN, LOGOUT, PROFILES, STATUS, \
-	add_auth_parsers, add_profile_argument, add_session_arguments
+from telegram_tracker.cli.auth_parsers import AUTH, CLEAR_CREDENTIALS, DELETE_PROFILE, LOGIN, LOGOUT, \
+	PROFILES, RENAME_PROFILE, STATUS, add_auth_parsers, add_profile_argument, add_session_arguments
 from telegram_tracker.cli.builder_parsers import AUTO, DEFAULT_OUTPUT, SOURCES, \
 	add_builder_arguments, build_builder_parser
 from telegram_tracker.cli.media_parsers import DOWNLOAD_MEDIA, DOWNLOAD_MEDIA_DESCRIPTION, \

@@ -39,7 +39,7 @@ application homes or on different computers.
 import json
 import os
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 # import local submodules
 from telegram_tracker.storage.files import newest_id, write_json_pretty
@@ -62,13 +62,23 @@ class RunProfile:
 	'''
 	The collecting profile as recorded in outputs: its local name and
 	opaque ID, either of which may be None (unknown). Never an account
-	ID, phone number, or credential.
+	ID, phone number, or credential. `labels` maps the profile IDs of the
+	application home to their current names, for messages about histories
+	recorded under a name a profile no longer has; it is not recorded.
 	'''
 	name: str | None = None
 	id: str | None = None
+	labels: dict | None = field(default=None, compare=False, repr=False)
 
 	def record(self):
 		return {'profile_name': self.name, 'profile_id': self.id}
+
+	def current_name(self, profile_id):
+		'''
+		The current name of the profile with `profile_id` in this
+		application home, or None when unknown.
+		'''
+		return (self.labels or {}).get(profile_id) if profile_id else None
 
 	def describe(self):
 		if self.name is None:
@@ -110,9 +120,12 @@ def refusal(previous, run):
 	if previous is not None and previous.get('profile_id'):
 		if run.id == previous['profile_id']:
 			return None
+		recorded = previous.get('profile_name')
+		current = run.current_name(previous['profile_id'])
 		return (
-			f'its saved history belongs to profile {previous.get("profile_name") or "unknown"}'
-			+ ('' if run.name != previous.get('profile_name') else ' with another profile ID')
+			f'its saved history belongs to profile {recorded or "unknown"}'
+			+ (f' (now profile {current})' if current and current != recorded else '')
+			+ ('' if run.name != recorded else ' with another profile ID')
 		)
 	if previous is not None and previous.get('profile_name'):
 		if run.name == previous['profile_name']:

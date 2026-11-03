@@ -110,28 +110,30 @@ def read_store(home):
 		raise StoreError(str(exc)) from None
 
 
-def prepare_home(home):
+def prepare_home(home, *, create=True):
 	'''
 	Create the application home if needed and make it private. Raises
-	StoreError when that is not possible (nothing is written then).
+	StoreError when that is not possible (nothing is written then). With
+	create=False the folder must already exist.
 	'''
 	try:
-		ensure_private_dir(home)
+		ensure_private_dir(home, create=create)
 	except ProtectionError as exc:
 		raise StoreError(str(exc)) from None
 
 
-def save_store(home, values):
+def save_store(home, values, *, create=True):
 	'''
 	Validate and save a complete credential set, replacing any earlier
-	one atomically.
+	one atomically. With create=False the folder `home` must already
+	exist (see prepare_home).
 	'''
 	try:
 		checked = validate_set(values, 'credentials')
 	except ValueError as exc:
 		raise StoreError(str(exc)) from None
 
-	prepare_home(home)
+	prepare_home(home, create=create)
 	path = store_path(home)
 	text = json.dumps({'schema_version': SCHEMA_VERSION, **checked}, indent=1) + '\n'
 	with _store_lease(path):

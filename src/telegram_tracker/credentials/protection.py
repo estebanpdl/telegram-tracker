@@ -44,13 +44,23 @@ def reject_link(path):
 		raise ProtectionError(f'{path} is a link; refusing to use it')
 
 
-def ensure_private_dir(path):
+class FolderMissing(ProtectionError):
+	'''
+	A folder that must already exist does not.
+	'''
+
+
+def ensure_private_dir(path, *, create=True):
 	'''
 	Create `path` (and missing parents) if needed and make it private to
-	the current user. Refuses links.
+	the current user. Refuses links. With create=False a missing folder
+	raises FolderMissing instead of being created; an existing one is
+	still protected.
 	'''
 	reject_link(path)
 	if not os.path.isdir(path):
+		if not create:
+			raise FolderMissing(f'{path} does not exist')
 		try:
 			os.makedirs(path, mode=0o700, exist_ok=True)
 		except OSError as exc:

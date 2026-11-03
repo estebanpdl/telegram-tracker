@@ -24,6 +24,7 @@ lease on the file.
 import contextlib
 import json
 import os
+import re
 import uuid
 
 from dataclasses import dataclass
@@ -38,6 +39,10 @@ from telegram_tracker.local_errors import file_reason
 IDENTITY_NAME = 'profile.json'
 SCHEMA_VERSION = 1
 KEYS = ('schema_version', 'name', 'profile_id', 'account_id')
+
+# a profile name (see profiles.py); `default` names the default profile
+NAME_PATTERN = re.compile(r'[a-z][a-z0-9_-]{0,31}')
+DEFAULT_NAME = 'default'
 
 
 class IdentityError(Exception):
@@ -81,6 +86,33 @@ def read_identity(root, name):
 	Raises IdentityError when it is unreadable, invalid, a link,
 	accessible to other accounts, or names another profile.
 	'''
+	record = read_record(root)
+	if record is not None and record.name != name:
+		raise IdentityError(mismatch_message(root, record.name, name))
+	return record
+
+
+def mismatch_message(root, recorded, name):
+	'''
+	Why <root>/profile.json, which names profile `recorded`, cannot be
+	used as profile `name`. A named folder holding another name's record
+	is what an interrupted rename leaves behind.
+	'''
+	message = f'{identity_path(root)} belongs to profile {recorded}'
+	if name != DEFAULT_NAME and recorded != DEFAULT_NAME:
+		message += (
+			f'; if `auth rename-profile {recorded} {name}` was interrupted, run it '
+			'again to finish'
+		)
+	return message
+
+
+def read_record(root):
+	'''
+	The Identity in <root>/profile.json with the profile name it records,
+	or None when there is none. Raises IdentityError as read_identity
+	does, except for the name check.
+	'''
 	path = identity_path(root)
 	if not os.path.lexists(path):
 		return None
@@ -102,11 +134,27 @@ def read_identity(root, name):
 		raise IdentityError(
 			f'{path} has an unsupported schema version; this version reads {SCHEMA_VERSION}'
 		)
-	if data['name'] != name:
-		raise IdentityError(f'{path} belongs to another profile')
+	if not isinstance(data['name'], str) or not NAME_PATTERN.fullmatch(data['name']):
+		raise IdentityError(f'{path} has an invalid profile name')
 	if not _is_uuid(data['profile_id']) or not _is_account_id(data['account_id']):
 		raise IdentityError(f'{path} has an invalid profile_id or account_id')
-	return Identity(name, data['profile_id'], data['account_id'])
+	return Identity(data['name'], data['profile_id'], data['account_id'])
+
+
+def relabel(root, name, new_name):
+	'''
+	Rewrite <root>/profile.json, recorded as profile `name`, to name
+	`new_name`; the profile ID and account binding stay. The caller holds
+	the file's lease. Returns the new Identity; raises IdentityError when
+	the record is missing, invalid, or names another profile, or cannot
+	be written (the earlier record then stays).
+	'''
+	current = read_identity(root, name)
+	if current is None:
+		raise IdentityError(f'{identity_path(root)} does not exist')
+	updated = Identity(new_name, current.profile_id, current.account_id)
+	_write(identity_path(root), updated)
+	return updated
 
 
 def ensure_identity(root, name, account_id=None):

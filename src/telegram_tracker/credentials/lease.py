@@ -97,3 +97,12 @@ class Lease:
 		except FileNotFoundError:
 			pass
 		return False
+
+	def moved(self, folder):
+		'''
+		The guarded file and its lock file were moved, with the folder
+		holding them, into `folder`: from now on the lease is held there,
+		and leaving it removes the lock file there.
+		'''
+		self.path = os.path.join(folder, os.path.basename(self.path))
+		self.guarded = os.path.join(folder, os.path.basename(self.guarded))
