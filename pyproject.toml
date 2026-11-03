@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=70"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,6 +8,8 @@ version = "1.0.0"
 description = "Collect Telegram channel data and build a messages dataset and a channel network from it."
 readme = "README.md"
 requires-python = ">=3.14"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 dynamic = ["dependencies"]
 
 [project.scripts]

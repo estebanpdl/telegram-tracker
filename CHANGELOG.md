@@ -6,6 +6,8 @@ All notable changes to Telegram Tracker are listed here.
 
 The first release. It turns the earlier collection and builder scripts into one command-line tool with resumable collection, optional SQLite storage, account profiles, media downloads and a URL dataset. Earlier checkouts upgrade in place: the earlier commands, folders, credentials and sessions keep working.
 
+Licensed under Apache-2.0 ([LICENSE](LICENSE)).
+
 ### CLI and entry points
 
 - One entry point with a subcommand per step: `collect`, `build-dataset`, `build-network`, `build-urls`, `download-media` and `auth`. Run it as `python main.py`, or install the project (`python -m pip install .`) to get the `tgtracker` command and `python -m telegram_tracker`. All three take the same arguments and give the same outputs and exit codes.

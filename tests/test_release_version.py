@@ -3,7 +3,8 @@
 The release version. pyproject.toml is its only definition; the program
 reads it back from the installed package metadata and records it in the
 collection database and the media ledger, which never compare it. The
-changelog's newest entry names it.
+changelog's newest entry names it. LICENSE is the Apache License 2.0
+text that the package metadata declares.
 
 A sqlite or both folder, and its media ledger, written by 0.1.0 are
 updated, checked and built by this version without a refusal or a
@@ -12,6 +13,7 @@ synthetic data).
 '''
 
 # import modules
+import hashlib
 import os
 import re
 import tomllib
@@ -31,10 +33,18 @@ from telegram_tracker.storage.sqlite import connection
 OLD = '0.1.0'
 BATCH = ('alpha_fx', 'beta_fx')
 
+# SHA-256 of LICENSE with LF line endings (as git stores it): the
+# Apache License 2.0 text of Esteban's OsintGPT, byte for byte.
+LICENSE_SHA256 = 'bb498baaa8abad499e3e45d3ba6e70f6947ecce508bb59b54f6981eb65933edc'
+
+
+def pyproject():
+	with open(os.path.join(source_path.ROOT, 'pyproject.toml'), 'rb') as fh:
+		return tomllib.load(fh)
+
 
 def project_version():
-	with open(os.path.join(source_path.ROOT, 'pyproject.toml'), 'rb') as fh:
-		return tomllib.load(fh)['project']['version']
+	return pyproject()['project']['version']
 
 
 def read_text(name):
@@ -79,6 +89,36 @@ class VersionTests(unittest.TestCase):
 
 		with mock.patch.object(connection.metadata, 'version', missing):
 			self.assertEqual(connection.app_version(), 'unknown')
+
+
+class LicenseTests(unittest.TestCase):
+
+	def test_the_license_file_is_the_apache_2_0_text(self):
+		with open(os.path.join(source_path.ROOT, 'LICENSE'), 'rb') as fh:
+			text = fh.read().replace(b'\r\n', b'\n')
+		head = [line.strip() for line in text.decode('ascii').splitlines()[:3]]
+		self.assertEqual(head, ['', 'Apache License', 'Version 2.0, January 2004'])
+		self.assertEqual(hashlib.sha256(text).hexdigest(), LICENSE_SHA256)
+
+	def test_the_project_declares_the_license_file(self):
+		config = pyproject()
+		project = config['project']
+		self.assertEqual(project['license'], 'Apache-2.0')
+		self.assertEqual(project['license-files'], ['LICENSE'])
+		# an SPDX expression and a License classifier can't be combined
+		self.assertEqual([c for c in project.get('classifiers', []) if c.startswith('License ::')], [])
+		# the SPDX form needs setuptools 77 (PEP 639)
+		minimums = [
+			int(m.group(1)) for m in map(re.compile(r'setuptools>=(\d+)').fullmatch, config['build-system']['requires'])
+			if m]
+		self.assertEqual(len(minimums), 1, config['build-system']['requires'])
+		self.assertGreaterEqual(minimums[0], 77)
+
+	def test_the_readme_and_changelog_name_the_license(self):
+		readme = read_text('README.md')
+		self.assertIn('\n## License\n\nLicensed under the [Apache License 2.0](LICENSE).', readme)
+		newest = re.split(r'(?m)^## \[', read_text('CHANGELOG.md'))[1]
+		self.assertIn('Licensed under Apache-2.0', newest)
 
 
 class EarlierFolderTests(MediaCase):

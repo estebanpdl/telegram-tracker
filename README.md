@@ -8,6 +8,7 @@
 [![GitHub stars](https://img.shields.io/github/stars/estebanpdl/telegram-tracker?style=social)](https://github.com/estebanpdl/telegram-tracker/stargazers)
 [![Open Source](https://badges.frapsoft.com/os/v1/open-source.svg?v=103)](https://twitter.com/estebanpdl)
 [![Made-with-python](https://img.shields.io/badge/Made%20with-Python-1f425f.svg)](https://www.python.org/)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Twitter estebanpdl](https://badgen.net/badge/icon/twitter?icon=twitter&label)](https://twitter.com/estebanpdl)
 
 ---
@@ -47,6 +48,7 @@ Contents:
 - [Downloading media](#downloading-media)
 - [Known limits](#known-limits)
 - [Running the tests](#running-the-tests)
+- [License](#license)
 
 ## Requirements
 
@@ -765,3 +767,7 @@ TGTRACKER_TEST_NO_SYNC=1 python -m pytest tests -p no:cacheprovider -n 4 --dist=
 ```
 
 In PowerShell, set `$env:TGTRACKER_TEST_NO_SYNC = '1'` first. Written data still reaches the operating system, and SQLite documents this setting as safe when a process crashes or is killed, so only durability across an operating-system crash or a power loss goes untested. Tests that patch `fsync` or `sqlite3.connect` themselves still get their own patches, and the processes that tests start keep real syncs. The default command and CI never set the variable. Any value other than `1`, `0`, or empty is refused: the offline guard fails to load, so every test module errors.
+
+## License
+
+Licensed under the [Apache License 2.0](LICENSE).
