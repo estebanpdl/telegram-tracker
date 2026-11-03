@@ -24,6 +24,8 @@ Telegram Tracker collects public Telegram channels through Telegram's API and tu
 
 The two builders run offline: they read local data only and never connect to Telegram.
 
+The changes in each release are listed in [CHANGELOG.md](CHANGELOG.md).
+
 Contents:
 
 - [Requirements](#requirements)
@@ -100,7 +102,7 @@ Replace each `<...>` value, without the angle brackets. Keep these values privat
 python -m pip install .
 ```
 
-`tgtracker` (and `python -m telegram_tracker`) take the same arguments as `python main.py` and use the same application home, saved credentials, and session. `./config/config.ini` and `./output/data` are relative to the folder you run them from. The installed command is a copy of the code: after updating the repository, run `python -m pip install .` again.
+`tgtracker` (and `python -m telegram_tracker`) take the same arguments as `python main.py` and use the same application home, saved credentials, and session. `./config/config.ini` and `./output/data` are relative to the folder you run them from. The installed command is a copy of the code: after updating the repository, run `python -m pip install .` again. `python -m pip show telegram-tracker` shows the installed version.
 
 ## Logging in and saved credentials
 
@@ -258,7 +260,7 @@ With the project installed (step 5 above), `tgtracker` and `python -m telegram_t
 
 ### Earlier commands
 
-The earlier commands still work and reach the same code. They are supported through the first release, with no removal date.
+The earlier commands still work and reach the same code. They are supported in 1.0.0, with no removal date.
 
 | Earlier command | Canonical command | Notes |
 |---|---|---|
@@ -574,6 +576,8 @@ A dump does not carry the database's identity (its application ID and schema ver
 **Schema version.** A database records its schema version, `1` in this release, and an application ID that marks it as a Telegram Tracker database. `collect` uses only a database of the current version: an older or newer one, another SQLite database, an empty file, or a damaged one is refused before connecting (exit 1) and left untouched. `collect` never upgrades a database.
 
 **No upgrade command yet.** Version 1 is the first schema version, so there is nothing to upgrade, and this release has no `migrate` command. The package contains the upgrade procedure for later versions (a checked backup first, then one transaction per version step, under the database lock), but no upgrade step is defined.
+
+**Application version.** The database and the media ledger record the Telegram Tracker version that created them and that ran each collection or media run (`app_version`), read from the installed package. `python main.py` records the version of an installed copy, or `unknown` when the project is not installed. The version is only a record: a database or ledger made by an earlier version is used as it is, without an upgrade.
 
 **Backups.** Back up while no collection is running, through SQLite's backup API, which copies a consistent state:
 
