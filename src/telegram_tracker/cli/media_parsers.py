@@ -22,13 +22,19 @@ DOWNLOAD_MEDIA_HELP = 'Download the media of a collected folder, or check what i
 
 DOWNLOAD_MEDIA_DESCRIPTION = (
 	'Download the photos, videos, audio and documents attached to the saved messages of a '
-	'collected folder into <output>/downloaded-media/, recorded in its media.sqlite3: every '
+	'collected folder into <output>/downloaded-media/, recorded in its media.sqlite3. It reads '
+	'a collected folder; it does not collect messages. It downloads every '
 	'file of a selected type that is not stored yet, including files that failed or were '
 	'skipped by a size limit before. Works in files, sqlite and both folders. It needs the '
 	'profile that collected each channel, because file references belong to that account. '
 	"Each channel's messages are fetched again for fresh file references (one request per "
 	'100 messages, then one per 512 KiB of a file). No size limit unless --max-media-size or '
 	'--max-media-total is given. Files are saved, never opened.'
+)
+
+SELECTS_COLLECTED = (
+	'Selects channels already collected in --output; it does not collect new ones '
+	'(use collect first).'
 )
 
 DOWNLOAD_MEDIA_EPILOG = (
@@ -77,12 +83,12 @@ def add_download_media_arguments(parser):
 		'--telegram-channel',
 		type=str,
 		help='Only the saved history of this channel (the name it was collected under). '
-			'Default: every saved history in the folder.'
+			'Default: every saved history in the folder. ' + SELECTS_COLLECTED
 	)
 	targets.add_argument(
 		'--batch-file',
 		type=str,
-		help='Only the saved histories named in this file, one per line.'
+		help='Only the saved histories named in this file, one per line. ' + SELECTS_COLLECTED
 	)
 	parser.add_argument(
 		'--output',

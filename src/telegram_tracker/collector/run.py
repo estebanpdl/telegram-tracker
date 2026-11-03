@@ -27,7 +27,7 @@ from telegram_tracker.storage.histories import ReplaceNotConfirmed
 from telegram_tracker.storage.provenance import HistoryRefused
 from telegram_tracker.storage.records import COMPLETE, INTERRUPTED, PARTIAL, \
 	HistoryUnreadable, StorageError
-from telegram_tracker.storage.status import StatusFile
+from telegram_tracker.storage.status import StatusFile, wait_for_later_start
 from telegram_tracker.storage.writer import OutputLock, check_unlocked, open_file_writer
 from telegram_tracker.utils import create_dirs
 
@@ -178,6 +178,8 @@ async def run_collection(
 async def _collect_locked(
 		client, summary, policy, parameters, *, metadata_only, window, update, account_checks,
 		writer_factory, confirmed, media):
+	# a blocking wait (under a second): no worker has started yet
+	wait_for_later_start(summary.output_folder)
 	status = StatusFile(
 		summary.output_folder, summary.requested, parameters, summary.profile, account_checks
 	)

@@ -226,7 +226,7 @@ One row per run that wrote to the ledger. Rows are never deleted (trigger
 |---|---|
 | `run_uuid` | The run's UUID. |
 | `command` | `collect` (collection with media) or `download-media`. |
-| `collection_run` | The collection run, by its `run_uuid` in `sqlite`/`both` folders or its `started_at` in `files` folders: for `collect`, the run itself; for `download-media`, the folder's last collection run when it started. |
+| `collection_run` | The collection run, by its `run_uuid` in `sqlite`/`both` folders or its `started_at` in `files` folders: for `collect`, the run itself; for `download-media`, the folder's last collection run when it started. Two collections into a `files` or `both` folder do not start in the same second: the later one waits for the next second (see [compatibility.md](compatibility.md)). |
 | `profile_name`, `profile_id` | The run's profile; NULL = default/unknown, as in the data database. |
 | `state` | `running`, then `complete`, `partial` or `interrupted`. |
 | `stop_reason` | Why the run stopped early, or how a dead run was found. |

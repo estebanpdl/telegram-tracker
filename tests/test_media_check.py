@@ -15,7 +15,7 @@ import unittest
 from unittest import mock
 
 from media_collect_support import ALPHA, BETA, MediaCase, document, standard_world, started_later
-from storage_modes_support import file_contents, kill_inside_a_write
+from storage_modes_support import SameSecondClock, file_contents, kill_inside_a_write
 
 from telegram_tracker.media.identity import folder_identity
 from telegram_tracker.media.layout import MEDIA_FOLDER, MediaLayout
@@ -179,6 +179,23 @@ class HistoryTests(CheckCase):
 				# the new document has no row: nothing selected it
 				self.assertTable(stdout, {'file': '0 / 0 / 0 / 0 / 0 / 0 / 1'})
 				self.assertIn('> Stored files: 6 checked', stdout)
+
+	def test_a_collect_started_in_the_same_second_as_the_media_run_is_not_blamed(self):
+		# the files name runs by their started_at: the second run waits for the next second
+		for storage in ('files', 'both'):
+			with self.subTest(storage=storage):
+				out = os.path.join(self.tmp, f'same-second-{storage}')
+				with SameSecondClock().patch() as clock:
+					client = self.with_media(storage=storage, out=out)
+					files = client.files
+					files.post(5, document(files, 7555, 4000, 9), ALPHA)
+					code, _, err = self.collect(targets=BATCH, out=out, client=client)
+				self.assertEqual(code, 0, err)
+				self.assertTrue(clock.sleeps)
+				code, stdout, err = self.check(out=out)
+				self.assertEqual(code, 0, err)
+				self.assertIn('> Ledger items: 7; 6 match their saved message, 1 superseded', stdout)
+				self.assertTable(stdout, {'file': '0 / 0 / 0 / 0 / 0 / 0 / 1'})
 
 	def test_items_of_a_replaced_history_are_not_in_history(self):
 		client = self.with_media()
