@@ -8,6 +8,7 @@
 [![GitHub stars](https://img.shields.io/github/stars/estebanpdl/telegram-tracker?style=social)](https://github.com/estebanpdl/telegram-tracker/stargazers)
 [![Open Source](https://badges.frapsoft.com/os/v1/open-source.svg?v=103)](https://twitter.com/estebanpdl)
 [![Made-with-python](https://img.shields.io/badge/Made%20with-Python-1f425f.svg)](https://www.python.org/)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Twitter estebanpdl](https://badgen.net/badge/icon/twitter?icon=twitter&label)](https://twitter.com/estebanpdl)
 
 ---
@@ -23,6 +24,8 @@ Telegram Tracker collects public Telegram channels through Telegram's API and tu
 - `collect --include-media` and `download-media` save the photos, videos, audio and documents attached to the collected messages. This is off by default (see [Downloading media](#downloading-media)).
 
 The two builders run offline: they read local data only and never connect to Telegram.
+
+The changes in each release are listed in [CHANGELOG.md](CHANGELOG.md).
 
 Contents:
 
@@ -45,6 +48,7 @@ Contents:
 - [Downloading media](#downloading-media)
 - [Known limits](#known-limits)
 - [Running the tests](#running-the-tests)
+- [License](#license)
 
 ## Requirements
 
@@ -100,7 +104,7 @@ Replace each `<...>` value, without the angle brackets. Keep these values privat
 python -m pip install .
 ```
 
-`tgtracker` (and `python -m telegram_tracker`) take the same arguments as `python main.py` and use the same application home, saved credentials, and session. `./config/config.ini` and `./output/data` are relative to the folder you run them from. The installed command is a copy of the code: after updating the repository, run `python -m pip install .` again.
+`tgtracker` (and `python -m telegram_tracker`) take the same arguments as `python main.py` and use the same application home, saved credentials, and session. `./config/config.ini` and `./output/data` are relative to the folder you run them from. The installed command is a copy of the code: after updating the repository, run `python -m pip install .` again. `python -m pip show telegram-tracker` shows the installed version.
 
 ## Logging in and saved credentials
 
@@ -258,7 +262,7 @@ With the project installed (step 5 above), `tgtracker` and `python -m telegram_t
 
 ### Earlier commands
 
-The earlier commands still work and reach the same code. They are supported through the first release, with no removal date.
+The earlier commands still work and reach the same code. They are supported in 1.0.0, with no removal date.
 
 | Earlier command | Canonical command | Notes |
 |---|---|---|
@@ -575,6 +579,8 @@ A dump does not carry the database's identity (its application ID and schema ver
 
 **No upgrade command yet.** Version 1 is the first schema version, so there is nothing to upgrade, and this release has no `migrate` command. The package contains the upgrade procedure for later versions (a checked backup first, then one transaction per version step, under the database lock), but no upgrade step is defined.
 
+**Application version.** The database and the media ledger record the Telegram Tracker version that created them and that ran each collection or media run (`app_version`), read from the installed package. `python main.py` records the version of an installed copy, or `unknown` when the project is not installed. The version is only a record: a database or ledger made by an earlier version is used as it is, without an upgrade.
+
 **Backups.** Back up while no collection is running, through SQLite's backup API, which copies a consistent state:
 
 ```python
@@ -761,3 +767,7 @@ TGTRACKER_TEST_NO_SYNC=1 python -m pytest tests -p no:cacheprovider -n 4 --dist=
 ```
 
 In PowerShell, set `$env:TGTRACKER_TEST_NO_SYNC = '1'` first. Written data still reaches the operating system, and SQLite documents this setting as safe when a process crashes or is killed, so only durability across an operating-system crash or a power loss goes untested. Tests that patch `fsync` or `sqlite3.connect` themselves still get their own patches, and the processes that tests start keep real syncs. The default command and CI never set the variable. Any value other than `1`, `0`, or empty is refused: the offline guard fails to load, so every test module errors.
+
+## License
+
+Licensed under the [Apache License 2.0](LICENSE).
