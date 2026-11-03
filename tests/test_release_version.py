@@ -33,9 +33,14 @@ from telegram_tracker.storage.sqlite import connection
 OLD = '0.1.0'
 BATCH = ('alpha_fx', 'beta_fx')
 
-# SHA-256 of LICENSE with LF line endings (as git stores it): the
-# Apache License 2.0 text of Esteban's OsintGPT, byte for byte.
-LICENSE_SHA256 = 'bb498baaa8abad499e3e45d3ba6e70f6947ecce508bb59b54f6981eb65933edc'
+# SHA-256 of LICENSE with LF line endings (as git stores it) and its
+# appendix copyright line put back to the template's placeholder: the
+# Apache License 2.0 text, byte for byte. The year and holder are the
+# owner's to edit, so they are checked for shape only.
+LICENSE_SHA256 = 'cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30'
+YEARS = r'\d{4}(?:-\d{4})?(?:, \d{4}(?:-\d{4})?)*'
+COPYRIGHT_LINE = re.compile(rf'(?m)^   Copyright {YEARS} \S.*$')
+COPYRIGHT_PLACEHOLDER = '   Copyright [yyyy] [name of copyright owner]'
 
 
 def pyproject():
@@ -50,6 +55,11 @@ def project_version():
 def read_text(name):
 	with open(os.path.join(source_path.ROOT, name), encoding='utf-8') as fh:
 		return fh.read()
+
+
+def license_text():
+	with open(os.path.join(source_path.ROOT, 'LICENSE'), 'rb') as fh:
+		return fh.read().replace(b'\r\n', b'\n').decode('ascii')
 
 
 def as_version(version):
@@ -94,11 +104,15 @@ class VersionTests(unittest.TestCase):
 class LicenseTests(unittest.TestCase):
 
 	def test_the_license_file_is_the_apache_2_0_text(self):
-		with open(os.path.join(source_path.ROOT, 'LICENSE'), 'rb') as fh:
-			text = fh.read().replace(b'\r\n', b'\n')
-		head = [line.strip() for line in text.decode('ascii').splitlines()[:3]]
+		text = license_text()
+		head = [line.strip() for line in text.splitlines()[:3]]
 		self.assertEqual(head, ['', 'Apache License', 'Version 2.0, January 2004'])
-		self.assertEqual(hashlib.sha256(text).hexdigest(), LICENSE_SHA256)
+		template = COPYRIGHT_LINE.sub(COPYRIGHT_PLACEHOLDER, text)
+		self.assertEqual(hashlib.sha256(template.encode('ascii')).hexdigest(), LICENSE_SHA256)
+
+	def test_the_license_names_a_copyright_year_and_holder(self):
+		# one line: a year, a range (2022-2026) or a list, then the holder
+		self.assertEqual(len(COPYRIGHT_LINE.findall(license_text())), 1)
 
 	def test_the_project_declares_the_license_file(self):
 		config = pyproject()
