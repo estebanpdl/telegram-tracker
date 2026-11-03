@@ -145,7 +145,8 @@ def add_auth_parsers(commands):
 			'profile ID, account binding, saved credentials, and session stay, so '
 			'histories recorded with the profile ID continue under NEW; collected '
 			'outputs keep the name they recorded. NEW must not exist; a free name '
-			'used before can be reused. Stop every other tgtracker command first. '
+			'used before can be reused. Stop every other running collect, '
+			'download-media, and auth command first. '
 			'Running it again finishes an interrupted rename.'
 	)
 	rename.add_argument('old', metavar='OLD', help='The current profile name.')
@@ -163,7 +164,8 @@ def add_auth_parsers(commands):
 			'else. Collected, derived, and media data are kept. The session is not '
 			'logged out on Telegram: run `auth logout --profile NAME` first to '
 			'revoke it. A new profile with the same name later gets a new profile '
-			'ID. Asks first unless --yes. Stop every other tgtracker command first. '
+			'ID. Asks first unless --yes. Stop every other running collect, '
+			'download-media, and auth command first. '
 			'Running it again finishes an interrupted deletion.'
 	)
 	delete.add_argument('name', metavar='NAME', help='The profile to delete.')

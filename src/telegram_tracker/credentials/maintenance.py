@@ -260,7 +260,7 @@ def _move(plan):
 		elif isinstance(exc, PermissionError) and os.name == 'nt':
 			reason = (
 				f'a file in {source} is open in another program; close that program (for '
-				'example a running tgtracker command) and try again'
+				'example a running collection) and try again'
 			)
 		else:
 			reason = file_reason(exc)
