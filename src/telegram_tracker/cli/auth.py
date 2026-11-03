@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 '''
-`auth login|status|logout|clear-credentials|profiles`.
+`auth login|status|logout|clear-credentials|profiles|rename-profile|delete-profile`.
 
-Except for the inventory action `profiles`, each action works on one
-profile (--profile, TELEGRAM_TRACKER_PROFILE, or the default; see
-credentials/profiles.py). Only login creates a named profile; other
-single-profile actions refuse a profile that does not exist.
+Except for the inventory action `profiles` and the maintenance actions
+`rename-profile` and `delete-profile` (explicit operands; see
+profile_maintenance.py), each action works on one profile (--profile,
+TELEGRAM_TRACKER_PROFILE, or the default; see credentials/profiles.py).
+Only login creates a named profile; other single-profile actions refuse
+a profile that does not exist.
 
 login: resolve the session and app credentials, ask for missing ones,
 log in with the shared code/two-step lifecycle, check the logged-in
@@ -32,7 +34,9 @@ import sys
 # import local submodules
 from telegram_tracker.cli import profile_checks
 from telegram_tracker.cli.builders import missing_dependency
-from telegram_tracker.cli.parsers import AUTH, CLEAR_CREDENTIALS, LOGIN, LOGOUT, PROFILES, STATUS
+from telegram_tracker.cli.parsers import AUTH, CLEAR_CREDENTIALS, DELETE_PROFILE, LOGIN, LOGOUT, \
+	PROFILES, RENAME_PROFILE, STATUS
+from telegram_tracker.cli.profile_maintenance import delete_profile, rename_profile
 from telegram_tracker.cli.prompts import InputUnavailable, confirm, prompt_secret, prompt_text
 from telegram_tracker.credentials import accounts, profiles
 from telegram_tracker.credentials import home as homes
@@ -80,7 +84,9 @@ def run_auth(args, *, client_factory=None, authorize=None):
 		STATUS: status,
 		LOGOUT: logout,
 		CLEAR_CREDENTIALS: clear_credentials,
-		PROFILES: list_profiles
+		PROFILES: list_profiles,
+		RENAME_PROFILE: rename_profile,
+		DELETE_PROFILE: delete_profile
 	}[action]
 	try:
 		return handler(args, client_factory=client_factory, authorize=authorize)
@@ -226,7 +232,7 @@ def login(args, *, client_factory=None, authorize=None):
 		profile_checks.record_login(profile, session, resolution, me, root_ready)
 	except accounts.AccountError as exc:
 		return fail(exc, 1)
-	return finish_save(plan, profile.root, resolution, existing)
+	return finish_save(plan, profile, resolution, existing)
 
 
 def _resolve(profile, args):
@@ -277,7 +283,13 @@ def save_plan(args, resolution, existing):
 	return SAVE if typed and existing is None else ASK
 
 
-def finish_save(plan, home, resolution, existing):
+def finish_save(plan, profile, resolution, existing):
+	'''
+	Save the credentials as `plan` says. A named profile's folder was
+	created before the login and is not created again here: if it is gone,
+	the profile was renamed or deleted meanwhile.
+	'''
+	home = profile.root
 	path = store_path(home)
 	if plan == SKIP:
 		print('> Credentials not saved (--no-save).')
@@ -305,9 +317,12 @@ def finish_save(plan, home, resolution, existing):
 			print(f'> Credentials not saved.{hint}')
 			return 0
 	try:
-		save_store(home, values)
+		save_store(home, values, create=profile.is_default)
 	except StoreError as exc:
-		return fail(f'Logged in, but the credentials were not saved: {exc}', 1)
+		hint = ''
+		if not profile.is_default and not os.path.isdir(home):
+			hint = f'. Profile {profile.name} was renamed or deleted after this command started'
+		return fail(f'Logged in, but the credentials were not saved: {exc}{hint}', 1)
 	print(f'> Credentials saved to {path}.')
 	return 0
 

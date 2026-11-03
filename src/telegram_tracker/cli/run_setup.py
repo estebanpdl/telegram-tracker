@@ -16,7 +16,7 @@ import sys
 from telegram_tracker.credentials import accounts, profiles
 from telegram_tracker.credentials import home as homes
 from telegram_tracker.credentials import sources
-from telegram_tracker.credentials.protection import ProtectionError
+from telegram_tracker.credentials.protection import FolderMissing, ProtectionError
 
 
 def select_run_session(args, parser, output_folder):
@@ -64,15 +64,25 @@ def app_client(args, profile, session):
 
 def prepare_session(session, profile, home):
 	'''
-	Print the session's notice, create the profile's folder for a new
-	session in the home, and prepare the accounts folder. Returns None, or
+	Print the session's notice, prepare the profile's folder for a new
+	session in the home (created for the default profile, protected again
+	for a named one), and prepare the accounts folder. Returns None, or
 	exit code 1 after explaining (stderr).
 	'''
 	if session.notice:
 		print(session.notice, file=sys.stderr)
 	if session.in_home and not os.path.isfile(session.path):
+		# a named profile exists (select_run_session) and has its folder: never
+		# recreate one that was renamed or deleted after the check
 		try:
-			profiles.prepare_root(profile)
+			profiles.prepare_root(profile, create=profile.is_default)
+		except FolderMissing:
+			print(
+				f'> Profile {profile.name} was renamed or deleted after this command '
+				f'started: {profile.root} does not exist.',
+				file=sys.stderr
+			)
+			return 1
 		except ProtectionError as exc:
 			print(
 				f'> Cannot create the session in {profile.root}: {exc}. Set '

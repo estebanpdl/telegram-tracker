@@ -98,13 +98,16 @@ def profile_refusal(provenance, run_profile):
 	if refusal(previous, run) is None:
 		return None
 	name = provenance.profile_name
+	current = run.current_name(provenance.profile_id)
+	suggested = current or name
 	if provenance.profile_id or name:
 		return (
 			f'its saved history was collected by profile {name or "unknown"}'
+			+ (f' (now profile {current})' if current and current != name else '')
 			+ (' with another profile ID' if name == run.name else '')
 			+ '; download-media needs the same profile, because file references and access hashes '
 			'belong to the collecting account'
-			+ (f'. Use --profile {name}' if name and name != run.name else '')
+			+ (f'. Use --profile {suggested}' if suggested and suggested != run.name else '')
 		)
 	return 'its saved history has no profile record; only the default profile can download its media'
 

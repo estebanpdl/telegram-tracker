@@ -73,7 +73,8 @@ def account_check(profile, session, home, run_profile):
 	verify the account with get_me, check it against the profile's
 	binding, and return the account lease, whose value is the run's
 	provenance. `run_profile` is storage.provenance.RunProfile, passed in
-	so this module loads no storage code.
+	so this module loads no storage code; it gets the current names of
+	the home's profile IDs for refusal messages.
 	'''
 	async def identify(client):
 		account_id = await accounts.verified_account_id(client)
@@ -82,7 +83,7 @@ def account_check(profile, session, home, run_profile):
 			print(notice, file=sys.stderr)
 		return _holding(
 			accounts.lease_for(home, account_id, profile.name),
-			run_profile(profile.name, profile_id)
+			run_profile(profile.name, profile_id, labels=profiles.current_labels(home))
 		)
 
 	return identify

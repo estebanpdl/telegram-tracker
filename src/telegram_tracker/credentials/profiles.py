@@ -29,13 +29,13 @@ Nothing here creates files except prepare_root.
 
 # import modules
 import os
-import re
 
 from dataclasses import dataclass
 
 # import local submodules
 from telegram_tracker.credentials import home as homes
-from telegram_tracker.credentials.identity import IDENTITY_NAME
+from telegram_tracker.credentials.identity import IDENTITY_NAME, NAME_PATTERN, IdentityError, \
+	read_record
 from telegram_tracker.credentials.protection import ProtectionError, ensure_private_dir, \
 	reject_link
 from telegram_tracker.credentials.store import STORE_NAME
@@ -45,7 +45,6 @@ PROFILE_ENV = 'TELEGRAM_TRACKER_PROFILE'
 DEFAULT = 'default'
 PROFILES_DIR = 'profiles'
 
-NAME_PATTERN = re.compile(r'[a-z][a-z0-9_-]{0,31}')
 DEVICE_NAMES = frozenset(
 	['con', 'prn', 'aux', 'nul']
 	+ [f'com{i}' for i in range(1, 10)]
@@ -221,18 +220,41 @@ def is_managed(session):
 	return session.source not in (homes.FLAG, homes.SESSION_ENV)
 
 
-def prepare_root(profile):
+def prepare_root(profile, *, create=True):
 	'''
 	Create the profile's folder (and the home and profiles folders above
 	it) if needed, each private to the current user. Raises
-	ProtectionError when that is not possible.
+	ProtectionError when that is not possible. With create=False the
+	folders must exist (protection.FolderMissing otherwise) and are only
+	protected again: `auth login` creates a named profile's folder, and a
+	later step must not recreate one that was renamed or deleted
+	meanwhile.
 	'''
-	ensure_private_dir(profile.home)
+	ensure_private_dir(profile.home, create=create)
 	if profile.is_default:
 		return
 	check_folder(profile)
-	ensure_private_dir(os.path.join(profile.home, PROFILES_DIR))
-	ensure_private_dir(profile.root)
+	ensure_private_dir(os.path.join(profile.home, PROFILES_DIR), create=create)
+	ensure_private_dir(profile.root, create=create)
+
+
+def current_labels(home):
+	'''
+	{profile ID: current profile name} for the default profile and every
+	named profile in `home` whose profile.json is valid. An ID recorded by
+	more than one profile (a copied folder) is left out, as is anything
+	that cannot be read. Reads profile.json files only; account IDs are
+	not returned.
+	'''
+	found = {}
+	for profile in [Profile(DEFAULT, DEFAULT_SOURCE, home)] + _named_folders(home)[0]:
+		try:
+			record = read_record(profile.root)
+		except IdentityError:
+			continue
+		if record is not None and record.name == profile.name:
+			found.setdefault(record.profile_id, []).append(profile.name)
+	return {pid: names[0] for pid, names in found.items() if len(names) == 1}
 
 
 @dataclass(frozen=True)
@@ -256,14 +278,27 @@ def list_profiles(home, isfile=None):
 	isfile = isfile or os.path.isfile
 	default = Profile(DEFAULT, DEFAULT_SOURCE, home)
 	entries = [_listing(default, homes.session_file(os.path.join(home, homes.SESSION_NAME)), isfile)]
+	named, skipped = _named_folders(home)
+	for profile in named:
+		session = os.path.join(profile.root, homes.SESSION_NAME)
+		entries.append(_listing(profile, session, isfile))
+	return entries, skipped
+
+
+def _named_folders(home):
+	'''
+	(profiles, skipped): a Profile for every folder under profiles/ with a
+	usable name that is not a link, in name order, and the number of other
+	entries there. Reads directory entries only.
+	'''
 	parent = os.path.join(home, PROFILES_DIR)
-	skipped = 0
 	try:
 		reject_link(parent)
 	except ProtectionError:
-		return entries, skipped
+		return [], 0
 	if not os.path.isdir(parent):
-		return entries, skipped
+		return [], 0
+	named, skipped = [], 0
 	for name in sorted(os.listdir(parent)):
 		profile = Profile(name, DEFAULT_SOURCE, home)
 		try:
@@ -277,9 +312,8 @@ def list_profiles(home, isfile=None):
 		if not os.path.isdir(profile.root):
 			skipped += 1
 			continue
-		session = os.path.join(profile.root, homes.SESSION_NAME)
-		entries.append(_listing(profile, session, isfile))
-	return entries, skipped
+		named.append(profile)
+	return named, skipped
 
 
 def _listing(profile, session, isfile):
