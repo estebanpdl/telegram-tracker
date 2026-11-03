@@ -255,8 +255,13 @@ sessions, and Telethon's session-file updates during a check, are unverified.
   not add a private account ID, phone number, API credential, session path, or
   lease name. Collected payloads retain user IDs and other users' phone numbers;
   only `User.phone` on objects marked `is_self` is redacted when written.
-- Not implemented: profile rename/delete/copy, session migration, OS keyring,
-  coordination across application homes, multi-profile batches.
+- `auth rename-profile` and `auth delete-profile` (named profiles, offline) do
+  not rewrite collected outputs: recorded profile names stay as historical
+  labels, and matching stays ID first. A deleted or renamed-away name can be
+  taken again; a name-only record then matches the new holder of the name.
+- Not implemented: profile copy, default-profile switching, rename or deletion,
+  session migration, OS keyring, coordination across application homes,
+  multi-profile batches.
 
 Platform limits: see [Platform support](#platform-support); the POSIX 0700/0600 branch
 for profile folders and `profile.json` is supported on the Linux and macOS runners,
