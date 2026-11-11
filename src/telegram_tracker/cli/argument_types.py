@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 # standard library only
 from telegram_tracker.media.classify import TYPES as MEDIA_TYPES
 from telegram_tracker.media.limits import parse_size
+from telegram_tracker.utils.folders import root_folder_refusal
 
 
 def bounded_int(low, high=None):
@@ -88,3 +89,23 @@ def media_size(text):
 		return parse_size(text)
 	except ValueError as exc:
 		raise argparse.ArgumentTypeError(str(exc)) from None
+
+
+def data_folder(role):
+	'''
+	argparse type: a folder path, refused when it is a filesystem root
+	(with any trailing separators). The path is returned as given;
+	handlers normalize it with data_folder_from.
+	'''
+	def parse(text):
+		refusal = root_folder_refusal(text, role)
+		if refusal:
+			raise argparse.ArgumentTypeError(refusal)
+		return text
+
+	return parse
+
+
+# collect and download-media --output; the builders' --data-path
+OUTPUT_FOLDER = data_folder('output folder')
+DATA_FOLDER = data_folder('data folder')

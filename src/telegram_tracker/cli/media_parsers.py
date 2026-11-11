@@ -5,7 +5,8 @@ with `collect`. Parsing reads no credentials and loads no services.
 '''
 
 # import local submodules
-from telegram_tracker.cli.argument_types import bounded_float, bounded_int, media_size, media_types
+from telegram_tracker.cli.argument_types import OUTPUT_FOLDER, bounded_float, bounded_int, media_size, \
+	media_types
 from telegram_tracker.cli.builder_parsers import AUTO, DEFAULT_OUTPUT, SOURCES
 
 
@@ -93,7 +94,7 @@ def add_download_media_arguments(parser):
 	parser.add_argument(
 		'--output',
 		'-o',
-		type=str,
+		type=OUTPUT_FOLDER,
 		required=False,
 		help=f'The collected folder. Default: `{DEFAULT_OUTPUT}`'
 	)

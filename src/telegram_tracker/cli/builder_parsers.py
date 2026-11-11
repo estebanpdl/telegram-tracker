@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
 '''
 Shared data-folder default and builder argument parsers. Parsing loads
-only the standard library; it reads no collection or credential files.
+no third-party library; it reads no collection or credential files.
 '''
 
 import argparse
+
+# import local submodules
+from telegram_tracker.cli.argument_types import DATA_FOLDER
 
 
 DEFAULT_OUTPUT = './output/data'
@@ -18,7 +21,7 @@ def add_builder_arguments(parser):
 	parser.add_argument(
 		'--data-path',
 		'-d',
-		type=str,
+		type=DATA_FOLDER,
 		required=False,
 		help=f'Path where data is located. Will use `{DEFAULT_OUTPUT}` if not given.'
 	)
