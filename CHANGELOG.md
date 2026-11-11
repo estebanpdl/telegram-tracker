@@ -2,6 +2,12 @@
 
 All notable changes to Telegram Tracker are listed here.
 
+## Unreleased
+
+### Fixed
+
+- A root-only output or data path no longer falls back to the current directory. `--output /` collected into the current directory, and `--output D:/` into the current directory of drive D:. `collect --output`, `download-media --output` and the builders' `--data-path` now refuse a filesystem root with exit code `2`, before anything is read or collected; choose a subfolder such as `/data/telegram`. On Windows, a trailing `\` is dropped like a trailing `/`.
+
 ## [1.0.0] - 2026-11-03
 
 The first release. It turns the earlier collection and builder scripts into one command-line tool with resumable collection, optional SQLite storage, account profiles, media downloads and a URL dataset. Earlier checkouts upgrade in place: the earlier commands, folders, credentials and sessions keep working.
