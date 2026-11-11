@@ -25,12 +25,16 @@ class DataInputError(Exception):
 
 def data_folder_from(path, default='./output/data'):
 	'''
-	Data folder without a trailing slash; `default` when not given.
+	Data folder without a trailing slash; `default` when not given. A
+	root-only path stays a root: stripping its only slash would leave an
+	empty folder that later resolves to the working directory.
 	'''
 	if not path:
 		return default
 
-	return path[:-1] if path.endswith('/') else path
+	if path.endswith('/') and len(path) > 1:
+		return path[:-1]
+	return path
 
 
 def temp_path_for(path):
