@@ -2,11 +2,15 @@
 
 All notable changes to Telegram Tracker are listed here.
 
-## Unreleased
+## [1.0.1] - 2026-11-11
+
+A bug-fix release. Data folders, databases, credentials and sessions from 1.0.0 are used as they are, and the commands behave the same except for the refusal below.
+
+Licensed under Apache-2.0 ([LICENSE](LICENSE)).
 
 ### Fixed
 
-- A root-only output or data path no longer falls back to the current directory. `--output /` collected into the current directory, and `--output D:/` into the current directory of drive D:. `collect --output`, `download-media --output` and the builders' `--data-path` now refuse a filesystem root with exit code `2`, before anything is read or collected; choose a subfolder such as `/data/telegram`. On Windows, a trailing `\` is dropped like a trailing `/`.
+- A root-only output or data path no longer falls back to the current directory. `--output /` collected into the current directory, and `--output D:/` into the current directory of drive D:. `collect --output`, `download-media --output` and the builders' `--data-path` now refuse a filesystem root with exit code `2`, before anything is read or collected; choose a subfolder such as `/data/telegram`. On Windows, a trailing `\` is dropped like a trailing `/`. Thanks to the user who reported it.
 
 ## [1.0.0] - 2026-11-03
 
