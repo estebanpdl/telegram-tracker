@@ -15,22 +15,15 @@ import os
 from urllib.parse import urlparse
 from datetime import datetime
 
+# import local submodules
+from telegram_tracker.utils.folders import data_folder_from  # noqa: F401  (re-exported)
+
 
 class DataInputError(Exception):
 	'''
 	A builder's input files are missing or malformed. Raised before any
 	output is written.
 	'''
-
-
-def data_folder_from(path, default='./output/data'):
-	'''
-	Data folder without a trailing slash; `default` when not given.
-	'''
-	if not path:
-		return default
-
-	return path[:-1] if path.endswith('/') else path
 
 
 def temp_path_for(path):

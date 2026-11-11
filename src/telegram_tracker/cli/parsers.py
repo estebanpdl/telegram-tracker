@@ -12,7 +12,7 @@ services.
 import argparse
 
 # import local submodules
-from telegram_tracker.cli.argument_types import bounded_float, bounded_int, utc_datetime
+from telegram_tracker.cli.argument_types import OUTPUT_FOLDER, bounded_float, bounded_int, utc_datetime
 from telegram_tracker.cli.auth_parsers import AUTH, CLEAR_CREDENTIALS, DELETE_PROFILE, LOGIN, LOGOUT, \
 	PROFILES, RENAME_PROFILE, STATUS, add_auth_parsers, add_profile_argument, add_session_arguments
 from telegram_tracker.cli.builder_parsers import AUTO, DEFAULT_OUTPUT, SOURCES, \
@@ -90,7 +90,7 @@ def add_target_arguments(parser):
 	parser.add_argument(
 		'--output',
 		'-o',
-		type=str,
+		type=OUTPUT_FOLDER,
 		required=False,
 		help=f'Folder to save collected data. Default: `{DEFAULT_OUTPUT}`'
 	)
